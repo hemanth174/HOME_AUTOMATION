@@ -4,6 +4,15 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { useState, useEffect, useRef } from 'react';
+import {
+  LayoutGrid,
+  SlidersHorizontal,
+  Cpu,
+  CalendarDays,
+  AlarmClock,
+  TrendingUp,
+  History
+} from 'lucide-react';
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -55,13 +64,13 @@ export default function Navbar() {
   const isLoginPage = pathname === '/login';
 
   const links = [
-    { href: '/', label: 'Devices' },
-    { href: '/presets', label: 'Presets' },
-    { href: '/boards', label: 'Boards' },
-    { href: '/schedules', label: 'Schedules' },
-    { href: '/alarms', label: 'Alarms' },
-    { href: '/analytics', label: 'Analytics' },
-    { href: '/logs', label: 'Logs' },
+    { href: '/', label: 'Devices', icon: LayoutGrid },
+    { href: '/presets', label: 'Presets', icon: SlidersHorizontal },
+    { href: '/boards', label: 'Boards', icon: Cpu },
+    { href: '/schedules', label: 'Schedules', icon: CalendarDays },
+    { href: '/alarms', label: 'Alarms', icon: AlarmClock },
+    { href: '/analytics', label: 'Analytics', icon: TrendingUp },
+    { href: '/logs', label: 'Logs', icon: History },
   ];
 
   // User metadata fallback info
@@ -84,15 +93,17 @@ export default function Navbar() {
         <nav className="flex items-center gap-1.5 overflow-x-auto max-md:hidden">
           {links.map((link) => {
             const active = pathname === link.href;
+            const Icon = link.icon;
             return (
               <Link
                 key={link.href}
                 href={link.href}
-                className={`whitespace-nowrap rounded-xl bg-transparent px-3 py-1.5 text-center text-xs font-extrabold no-underline transition-all duration-200 ease-out hover:-translate-y-px hover:bg-accent-bg hover:text-accent hover:no-underline ${
+                className={`whitespace-nowrap rounded-xl bg-transparent px-3 py-1.5 text-center text-xs font-extrabold no-underline transition-all duration-200 ease-out hover:-translate-y-px hover:bg-accent-bg hover:text-accent hover:no-underline flex items-center gap-1.5 ${
                   active ? 'bg-accent-bg text-accent' : 'text-text-muted'
                 }`}
               >
-                {link.label}
+                <Icon size={14} className="stroke-[2.5px]" />
+                <span>{link.label}</span>
               </Link>
             );
           })}

@@ -49,7 +49,7 @@ export default function BoardsPage() {
         if (data) setBoards(data);
         
         const elapsed = Date.now() - startTime;
-        const remaining = Math.max(0, 2000 - elapsed);
+        const remaining = Math.max(0, 500 - elapsed);
         setTimeout(() => {
           if (!cancelled) setLoading(false);
         }, remaining);

@@ -43,7 +43,7 @@ export default function PresetsPage() {
       if (devicesRes.data) setDevices(devicesRes.data);
 
       const elapsed = Date.now() - startTime;
-      const remaining = Math.max(0, 2000 - elapsed);
+      const remaining = Math.max(0, 500 - elapsed);
       setTimeout(() => {
         if (active) setLoading(false);
       }, remaining);
