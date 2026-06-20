@@ -680,7 +680,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <VoiceControl devices={devices} onToast={showToast} />
+      <VoiceControl devices={devices} boards={boards} onToast={showToast} />
       <Toast message={toast} onClose={() => setToast('')} />
     </>
   );
