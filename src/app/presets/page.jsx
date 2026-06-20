@@ -129,18 +129,56 @@ export default function PresetsPage() {
   };
 
   const allOn = async () => {
-    for (const device of devices) {
-      await supabase.from('devices').update({ is_on: true, last_changed: new Date().toISOString() }).eq('id', device.id);
+    const devicesToTurnOn = devices.filter(d => !d.is_on);
+    if (devicesToTurnOn.length === 0) {
+      setToast('All devices are already ON');
+      return;
     }
+    
+    // Update local state immediately
     setDevices(prev => prev.map(d => ({ ...d, is_on: true })));
+    
+    await Promise.all(devicesToTurnOn.map(async (device) => {
+      await supabase.from('devices').update({ is_on: true, last_changed: new Date().toISOString() }).eq('id', device.id);
+      try {
+        await supabase.from('activity_logs').insert({
+          user_id: user.id,
+          device_id: device.id,
+          device_name: device.name,
+          action: 'turned ON',
+          triggered_by: 'Preset: All ON'
+        });
+      } catch (e) {
+        console.warn(e);
+      }
+    }));
     setToast('All devices turned ON');
   };
 
   const allOff = async () => {
-    for (const device of devices) {
-      await supabase.from('devices').update({ is_on: false, last_changed: new Date().toISOString() }).eq('id', device.id);
+    const devicesToTurnOff = devices.filter(d => d.is_on);
+    if (devicesToTurnOff.length === 0) {
+      setToast('All devices are already OFF');
+      return;
     }
+    
+    // Update local state immediately
     setDevices(prev => prev.map(d => ({ ...d, is_on: false })));
+    
+    await Promise.all(devicesToTurnOff.map(async (device) => {
+      await supabase.from('devices').update({ is_on: false, last_changed: new Date().toISOString() }).eq('id', device.id);
+      try {
+        await supabase.from('activity_logs').insert({
+          user_id: user.id,
+          device_id: device.id,
+          device_name: device.name,
+          action: 'turned OFF',
+          triggered_by: 'Preset: All OFF'
+        });
+      } catch (e) {
+        console.warn(e);
+      }
+    }));
     setToast('All devices turned OFF');
   };
 

@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import VoiceControl from '@/components/VoiceControl';
 import Toast from '@/components/Toast';
 import Loader from '@/components/Loader';
+import { ChevronUp } from 'lucide-react';
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
@@ -17,6 +18,9 @@ export default function Dashboard() {
   const [editingBoard, setEditingBoard] = useState(null);
   const [editingDevice, setEditingDevice] = useState(null);
   const [editName, setEditName] = useState('');
+  const [showAddBoardModal, setShowAddBoardModal] = useState(false);
+  const [boardIdentifier, setBoardIdentifier] = useState('');
+  const [boardName, setBoardName] = useState('');
 
   const showToast = useCallback((msg) => {
     setToast(msg);
@@ -247,16 +251,167 @@ export default function Dashboard() {
     setEditingDevice(null);
   };
 
+  const turnAllDevicesOn = async () => {
+    const devicesToTurnOn = devices.filter(d => !d.is_on);
+    if (devicesToTurnOn.length === 0) {
+      showToast('All devices are already ON');
+      return;
+    }
+    
+    // Update local state immediately
+    setDevices(prev => prev.map(d => ({ ...d, is_on: true })));
+    
+    await Promise.all(devicesToTurnOn.map(async (device) => {
+      await supabase.from('devices').update({ is_on: true, last_changed: new Date().toISOString() }).eq('id', device.id);
+      try {
+        await supabase.from('activity_logs').insert({
+          user_id: user.id,
+          device_id: device.id,
+          device_name: device.name,
+          action: 'turned ON',
+          triggered_by: 'Global All ON'
+        });
+      } catch (e) {
+        console.warn(e);
+      }
+    }));
+    showToast('All devices turned ON');
+  };
+
+  const turnAllDevicesOff = async () => {
+    const devicesToTurnOff = devices.filter(d => d.is_on);
+    if (devicesToTurnOff.length === 0) {
+      showToast('All devices are already OFF');
+      return;
+    }
+    
+    // Update local state immediately
+    setDevices(prev => prev.map(d => ({ ...d, is_on: false })));
+    
+    await Promise.all(devicesToTurnOff.map(async (device) => {
+      await supabase.from('devices').update({ is_on: false, last_changed: new Date().toISOString() }).eq('id', device.id);
+      try {
+        await supabase.from('activity_logs').insert({
+          user_id: user.id,
+          device_id: device.id,
+          device_name: device.name,
+          action: 'turned OFF',
+          triggered_by: 'Global All OFF'
+        });
+      } catch (e) {
+        console.warn(e);
+      }
+    }));
+    showToast('All devices turned OFF');
+  };
+
+  const turnBoardDevicesOn = async (boardId, boardName) => {
+    const boardDevices = getDevicesForBoard(boardId);
+    const devicesToTurnOn = boardDevices.filter(d => !d.is_on);
+    if (devicesToTurnOn.length === 0) {
+      showToast(`All devices on ${boardName} are already ON`);
+      return;
+    }
+    
+    // Update local state immediately
+    setDevices(prev => prev.map(d => d.board_id === boardId ? { ...d, is_on: true } : d));
+    
+    await Promise.all(devicesToTurnOn.map(async (device) => {
+      await supabase.from('devices').update({ is_on: true, last_changed: new Date().toISOString() }).eq('id', device.id);
+      try {
+        await supabase.from('activity_logs').insert({
+          user_id: user.id,
+          device_id: device.id,
+          device_name: device.name,
+          action: 'turned ON',
+          triggered_by: `Board All ON: ${boardName}`
+        });
+      } catch (e) {
+        console.warn(e);
+      }
+    }));
+    showToast(`All devices on ${boardName} turned ON`);
+  };
+
+  const turnBoardDevicesOff = async (boardId, boardName) => {
+    const boardDevices = getDevicesForBoard(boardId);
+    const devicesToTurnOff = boardDevices.filter(d => d.is_on);
+    if (devicesToTurnOff.length === 0) {
+      showToast(`All devices on ${boardName} are already OFF`);
+      return;
+    }
+    
+    // Update local state immediately
+    setDevices(prev => prev.map(d => d.board_id === boardId ? { ...d, is_on: false } : d));
+    
+    await Promise.all(devicesToTurnOff.map(async (device) => {
+      await supabase.from('devices').update({ is_on: false, last_changed: new Date().toISOString() }).eq('id', device.id);
+      try {
+        await supabase.from('activity_logs').insert({
+          user_id: user.id,
+          device_id: device.id,
+          device_name: device.name,
+          action: 'turned OFF',
+          triggered_by: `Board All OFF: ${boardName}`
+        });
+      } catch (e) {
+        console.warn(e);
+      }
+    }));
+    showToast(`All devices on ${boardName} turned OFF`);
+  };
+
+  const addBoard = async (e) => {
+    e.preventDefault();
+    if (!boardIdentifier.trim()) { showToast('Board identifier is required'); return; }
+
+    // Insert board
+    const { data: board, error: boardError } = await supabase.from('boards').insert({
+      user_id: user.id,
+      board_identifier: boardIdentifier.trim(),
+      name: boardName.trim() || 'New Board',
+    }).select('id').single();
+
+    if (boardError) { showToast(boardError.message); return; }
+
+    // Auto-create 4 devices for the board
+    const deviceInserts = [];
+    for (let i = 0; i < 4; i++) {
+      deviceInserts.push({
+        user_id: user.id,
+        board_id: board.id,
+        relay_index: i,
+        name: `Device ${i + 1}`,
+        is_on: false,
+      });
+    }
+    const { error: devicesError } = await supabase.from('devices').insert(deviceInserts);
+    if (devicesError) { showToast(devicesError.message); return; }
+
+    setShowAddBoardModal(false);
+    setBoardIdentifier('');
+    setBoardName('');
+    showToast('Board added with 4 devices');
+  };
+
 
 
   const getFeedbackStatus = (device) => {
+    // feedback_on === null/undefined → no feedback sensor wired, just reflect relay state
     if (device.feedback_on === null || device.feedback_on === undefined) {
-      return { text: device.is_on ? 'ON' : 'OFF', className: device.is_on ? 'match' : '' };
+      return { text: device.is_on ? 'ON' : 'OFF', className: device.is_on ? 'match' : '', manualOn: false };
     }
-    if (device.is_on === device.feedback_on) {
-      return { text: device.is_on ? 'ON' : 'OFF', className: 'match' };
+
+    // Active-low traveller config:
+    //   feedback pin pulled LOW (0) → feedback_on stored as TRUE in DB → light is physically ON via manual switch
+    //   feedback pin HIGH (1)        → feedback_on stored as FALSE in DB → manual switch is off
+    if (device.feedback_on === true) {
+      // Physical light is ON via manual wall switch — alert the user with red background
+      return { text: 'Manual ON', className: 'manual', manualOn: true };
     }
-    return { text: 'Mismatch', className: 'mismatch' };
+
+    // feedback_on === false → manual switch is off; show normal relay state
+    return { text: device.is_on ? 'ON' : 'OFF', className: device.is_on ? 'match' : '', manualOn: false };
   };
 
   const getDevicesForBoard = (boardId) => {
@@ -312,9 +467,33 @@ export default function Dashboard() {
           </section>
         )}
 
+        <div className="flex justify-between items-center mb-5 ml-1 select-none">
+          <h2 className="text-lg font-extrabold text-text tracking-tight">Boards & Devices</h2>
+          <div className="flex gap-2">
+            <button
+              onClick={turnAllDevicesOn}
+              className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-1 text-xs font-extrabold text-text transition-all duration-250 cursor-pointer hover:bg-card-alt hover:border-accent/40"
+            >
+              All On
+            </button>
+            <button
+              onClick={turnAllDevicesOff}
+              className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-1 text-xs font-extrabold text-text transition-all duration-250 cursor-pointer hover:bg-card-alt hover:border-accent/40"
+            >
+              All Off
+            </button>
+            <button
+              onClick={() => setShowAddBoardModal(true)}
+              className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-1 text-xs font-extrabold text-[#0a0800] transition-all duration-250 cursor-pointer hover:bg-accent-hover shadow-gold-glow"
+            >
+              Add Board
+            </button>
+          </div>
+        </div>
+
         {boards.length === 0 ? (
           <div className="grid min-h-[220px] place-items-center rounded-[18px] border border-dashed border-border bg-white/[0.03] px-5 py-10 text-center text-sm font-semibold text-text-muted animate-scale-in">
-            No boards yet. Go to Boards to add your first ESP32 board.
+            No boards yet. Tap Add Board to add your first ESP32 board.
           </div>
         ) : (
           <div className="flex flex-col gap-3">
@@ -359,9 +538,26 @@ export default function Dashboard() {
                         {boardDevices.length} devices
                       </span>
                     </div>
-                    <span className={`grid h-7 w-7 place-items-center rounded-full border border-border text-[10px] text-accent transition-all duration-300 font-bold ${isExpanded ? 'rotate-180 bg-accent-bg' : ''}`}>
-                      V
-                    </span>
+                    <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        className="inline-flex h-[26px] items-center justify-center rounded bg-card border border-border px-2.5 py-0.5 text-[10px] font-extrabold text-text transition-all duration-200 hover:bg-card-alt hover:border-accent/40 cursor-pointer"
+                        onClick={() => turnBoardDevicesOn(board.id, board.name)}
+                      >
+                        All On
+                      </button>
+                      <button
+                        className="inline-flex h-[26px] items-center justify-center rounded bg-card border border-border px-2.5 py-0.5 text-[10px] font-extrabold text-text transition-all duration-200 hover:bg-card-alt hover:border-accent/40 cursor-pointer"
+                        onClick={() => turnBoardDevicesOff(board.id, board.name)}
+                      >
+                        All Off
+                      </button>
+                      <button
+                        className={`grid h-7 w-7 place-items-center rounded-full border border-border text-[10px] text-accent transition-all duration-300 font-bold cursor-pointer ${isExpanded ? 'rotate-180 bg-accent-bg' : ''}`}
+                        onClick={() => toggleBoard(board.id)}
+                      >
+                        <ChevronUp />
+                      </button>
+                    </div>
                   </div>
 
                   <div className={`grid gap-3 overflow-hidden px-4 opacity-0 transition-all duration-300 ease-out max-md:grid-cols-2 max-md:gap-2.5 max-md:px-3 ${isExpanded ? 'grid-cols-4 max-h-[1200px] p-4 opacity-100 max-md:p-3' : 'max-h-0'}`}>
@@ -369,10 +565,16 @@ export default function Dashboard() {
                       const feedback = getFeedbackStatus(device);
                       return (
                         <div
-                          className={`flex min-h-[122px] flex-col items-center justify-center gap-[13px] rounded-2xl border px-3 py-4 text-center transition-all duration-250 ease-out hover:-translate-y-0.5 hover:border-accent/45 hover:bg-accent-bg max-[430px]:min-h-[108px] max-[430px]:px-2.5 max-[430px]:py-[13px] ${device.is_on
-                              ? 'border-accent/50 bg-accent-bg shadow-gold-glow animate-glow-pulse'
-                              : 'border-border bg-white/[0.025]'
-                            }`}
+                          className={`flex min-h-[122px] flex-col items-center justify-center gap-[13px] rounded-2xl border px-3 py-4 text-center transition-all duration-250 ease-out hover:-translate-y-0.5 max-[430px]:min-h-[108px] max-[430px]:px-2.5 max-[430px]:py-[13px] ${
+                            feedback.manualOn
+                              // Manual wall switch ON — red alert card
+                              ? 'border-red-500/60 bg-red-500/10 shadow-[0_0_16px_rgba(239,68,68,0.25)] animate-pulse-dot-red'
+                              : device.is_on
+                                // Relay ON — gold glow card
+                                ? 'border-accent/50 bg-accent-bg shadow-gold-glow animate-glow-pulse hover:border-accent/45 hover:bg-accent-bg'
+                                // Both OFF — neutral card
+                                : 'border-border bg-white/[0.025] hover:border-accent/45 hover:bg-accent-bg'
+                          }`}
                           key={device.id}
                         >
                           <div className="flex min-w-0 flex-col items-center gap-1 w-full">
@@ -395,12 +597,13 @@ export default function Dashboard() {
                               </span>
                             )}
                             <span
-                              className={`text-[10px] font-extrabold uppercase tracking-[0.05em] ${feedback.className === 'match'
-                                  ? 'text-[#73C983]'
-                                  : feedback.className === 'mismatch'
-                                    ? 'text-red-500'
+                              className={`text-[10px] font-extrabold uppercase tracking-[0.05em] ${
+                                feedback.className === 'manual'
+                                  ? 'text-red-400'
+                                  : feedback.className === 'match'
+                                    ? 'text-[#73C983]'
                                     : 'text-text-muted'
-                                }`}
+                              }`}
                             >
                               {feedback.text}
                             </span>
@@ -430,6 +633,52 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {showAddBoardModal && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md animate-scale-in" onClick={() => setShowAddBoardModal(false)}>
+          <div className="max-h-[82vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl backdrop-blur-xl animate-fade-up" onClick={(e) => e.stopPropagation()}>
+            <h2 className="mb-[18px] text-lg font-extrabold text-text">Add Board</h2>
+            <form onSubmit={addBoard} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-extrabold tracking-wide text-text-muted">Board Identifier (ESP32 ID)</label>
+                <input
+                  className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
+                  type="text"
+                  value={boardIdentifier}
+                  onChange={(e) => setBoardIdentifier(e.target.value)}
+                  placeholder="e.g., ESP32_001"
+                  required
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-extrabold tracking-wide text-text-muted">Display Name</label>
+                <input
+                  className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
+                  type="text"
+                  value={boardName}
+                  onChange={(e) => setBoardName(e.target.value)}
+                  placeholder="e.g., Living Room"
+                />
+              </div>
+              <div className="mt-5 flex justify-end gap-2.5">
+                <button
+                  type="button"
+                  className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-xs font-semibold text-text transition-all hover:bg-card-alt cursor-pointer"
+                  onClick={() => setShowAddBoardModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2 text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow"
+                >
+                  Add Board
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <VoiceControl devices={devices} onToast={showToast} />
       <Toast message={toast} onClose={() => setToast('')} />
