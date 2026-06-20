@@ -1,49 +1,196 @@
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@import "tailwindcss";
+
+/* -------- Theme Configuration for Tailwind v4 -------- */
+@theme {
+  --color-bg: var(--bg);
+  --color-card: var(--bg-card);
+  --color-card-alt: var(--bg-card-alt);
+  --color-input: var(--bg-input);
+  --color-header: var(--bg-header);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-bg: var(--accent-bg);
+  --color-accent-glow: var(--accent-glow);
+  --color-border: var(--border);
+  --color-toggle-track: var(--toggle-track);
+  --color-toggle-on: var(--toggle-on);
+  --color-divider: var(--divider);
+  --color-auth-bg: var(--auth-bg);
+  --color-auth-card: var(--auth-card);
+  
+  --shadow-gold-glow: var(--gold-glow);
+  
+  --animate-fade-up: fade-up 0.35s ease forwards;
+  --animate-fade-in: fade-in 0.5s ease forwards;
+  --animate-scale-in: scale-in 0.4s ease forwards;
+  --animate-slide-down: slide-down 0.3s ease forwards;
+  --animate-glow-pulse: glow-pulse 3s ease infinite;
+  --animate-pulse-ring: pulse-ring 1.4s ease infinite;
+  --animate-pulse-dot-red: pulse-dot-red 1.5s ease infinite;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* -------- CSS Variables (Theme Tokens) matching esp.css -------- */
+:root,
+[data-theme="dark"] {
+    --bg: #060606;
+    --bg-card: #0e0e0e;
+    --bg-card-alt: #141414;
+    --bg-input: #141414;
+    --bg-header: rgba(8, 8, 8, 0.88);
+    --text: #f0ece4;
+    --text-muted: #6b6456;
+    --accent: #c9a84c;
+    --accent-hover: #b8943a;
+    --accent-bg: rgba(201, 168, 76, 0.08);
+    --accent-glow: rgba(201, 168, 76, 0.35);
+    --border: #1e1b14;
+    --toggle-track: #262218;
+    --toggle-on: #c9a84c;
+    --shadow: rgba(0, 0, 0, 0.50);
+    --on-bg: rgba(201, 168, 76, 0.07);
+    --on-border: rgba(201, 168, 76, 0.40);
+    --divider: #1e1b14;
+    --auth-bg: #060606;
+    --auth-card: #0e0e0e;
+    --card-shadow: 0 2px 16px rgba(0, 0, 0, 0.40);
+    --header-blur: blur(18px);
+    --gold-glow: 0 0 12px rgba(201, 168, 76, 0.20);
+    --btn-text: #0a0800;
 }
 
-html {
-  height: 100%;
+[data-theme="light"] {
+    --bg: #f7f5f0;
+    --bg-card: #ffffff;
+    --bg-card-alt: #faf8f4;
+    --bg-input: #ffffff;
+    --bg-header: rgba(255, 255, 255, 0.85);
+    --text: #1a1710;
+    --text-muted: #8c8272;
+    --accent: #a07c2a;
+    --accent-hover: #8b6b1f;
+    --accent-bg: rgba(160, 124, 42, 0.06);
+    --accent-glow: rgba(160, 124, 42, 0.18);
+    --border: #e6e0d4;
+    --toggle-track: #d4cfc4;
+    --toggle-on: #a07c2a;
+    --shadow: rgba(0, 0, 0, 0.06);
+    --on-bg: rgba(160, 124, 42, 0.06);
+    --on-border: rgba(160, 124, 42, 0.30);
+    --divider: #e6e0d4;
+    --auth-bg: #f7f5f0;
+    --auth-card: #ffffff;
+    --card-shadow: 0 2px 14px rgba(0, 0, 0, 0.05);
+    --header-blur: blur(18px);
+    --gold-glow: none;
+    --btn-text: #ffffff;
 }
 
-html,
+/* Keyframe definitions */
+@keyframes fade-up {
+    from {
+        opacity: 0;
+        transform: translateY(14px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fade-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes scale-in {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes slide-down {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes glow-pulse {
+    0%,
+    100% {
+        box-shadow: 0 0 8px rgba(201, 168, 76, 0.15);
+    }
+    50% {
+        box-shadow: 0 0 20px rgba(201, 168, 76, 0.30);
+    }
+}
+
+@keyframes pulse-ring {
+    0% {
+        box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.35);
+    }
+    70% {
+        box-shadow: 0 0 0 18px rgba(201, 168, 76, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(201, 168, 76, 0);
+    }
+}
+
+@keyframes pulse-dot-red {
+    0%,
+    100% {
+        box-shadow: 0 0 8px rgba(255, 42, 42, 0.5);
+    }
+    50% {
+        box-shadow: 0 0 20px rgba(255, 42, 42, 1);
+    }
+}
+
+/* Base resets & standard classes from esp.css */
 body {
-  max-width: 100vw;
-  overflow-x: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
 }
 
-body {
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* Smooth transitions */
+body,
+.board-card,
+.device-card,
+.preset-card,
+#app-header,
+.tab-btn {
+    transition: background-color 0.35s ease, color 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease;
 }
 
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
+/* Scrollbar styles matching esp.css */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 5px;
 }
-
-a {
-  color: inherit;
-  text-decoration: none;
+::-webkit-scrollbar-track {
+    background: transparent;
 }
-
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
-  }
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 6px;
 }

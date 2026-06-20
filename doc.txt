@@ -1,0 +1,52 @@
+hi, now that the hardware is done , lets proceeed with the software side of things.
+
+now lets first create a detailed documentaion and plan of approach.
+thing to keep note is for the live feed back circuit in my pcb
+0 = on and 1 = off and simillarly to turn on a relay as the the pin on the esp32 should be pulled low. so just keep that in mind also im using 74hc165 shift registers for the live device feedback and 74hc595 to send signals to the relay module to turn on/off relays. the transistor is bc547
+
+
+so that is for the hardware side now software side we have 2 things
+1) website to data base connection
+2) db to esp32 connection.
+
+first we will focus on website to db connection later db to esp connection.
+
+now first lets do the nextjs for ui, i dont want any backend server it is just next js and the data base and a websocket b.w them.
+for db i am using supabase so all the data will be stored.
+i have attaced the db planned structure as well.
+using next js add pwa feature(progressive web app)
+
+some features i want implemented are:
+1) alarms
+2) schedules
+3) voice control using googles in built text to sppech which is in chrome in built
+4) using web sockets to talk to data base
+5) setting up the db 
+6) ensuring each user gets to view only their home status instead of others home.
+first we will do this then later i will tell what needs to be done.
+
+first for now make a detailed plan, later we will do the coding part.
+
+think really carefully & step by step.
+
+i have attached all the related files as well.
+
+for now think of a plan ,next we will write the code.
+each board has 4 relay modules and 4 input modules, i do not have any supabase project so it will be completely new.for authentication keep keep it simple and ask for user name/password and if they dont want that we will provide sign in with google as well.
+and yes there will be multiple esp32 in a home like every ~4 devices will have one esp32 so if anyone has ~6 devices that means 2 esp32 for that.
+
+the users will have the option to rename their devices as well, but as they have wires the esp32 module to the switches on their home the physical esp32 will not change, just maybe the name for it will change.
+
+
+
+think really carefully & step by step and implement nextjs code and give me the sql commands to use in supabase to connect both together, also add a option to reset the password as well.
+
+
+also add a presets feature so that we can turn all devices on/off or any custom preset like part mode to turn on light 1,2 of study and light 4,5 of hall or any custom setup of the user which they want, also add a dark/light mode toggle button as well, and also remove the purple background and make the theme red/black for dark theme and for light mode it should be a simple ui with no purple and also remove the icons anywhere and just keep the text only and the ui should be professional & clean and easy to understand, 
+
+
+and if a user has multiple boards the board should be collapsible so that the scroll distance will decrease.
+
+the ui should be kind of simillar to a smart watch types for phones.
+
+think really carefully & step by step and implement all the requirments

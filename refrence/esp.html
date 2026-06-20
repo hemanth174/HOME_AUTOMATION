@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#060606">
+    <meta name="description" content="Smart Home Control Panel — Control your ESP32 devices, set schedules, alarms, and presets.">
+    <title>Smart Home</title>
+    <!-- Supabase SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="esp.css">
+</head>
+
+<body>
+
+    <div id="toast-container"></div>
+
+    <!-- ===== AUTH ===== -->
+    <div id="auth-container">
+        <div class="auth-box">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                <h1 id="auth-title" style="margin-bottom: 0;">Smart Home</h1>
+                <button id="auth-theme-toggle-btn" class="quick-btn" title="Toggle theme">Light</button>
+            </div>
+
+            <!-- LOGIN FORM -->
+            <form id="login-form" style="display:none">
+                <h2>Sign In</h2>
+                <input type="email" id="login-email" placeholder="Email" required autocomplete="email" maxlength="100">
+                <input type="password" id="login-password" placeholder="Password" required autocomplete="current-password" maxlength="100">
+                <button type="submit">Sign In</button>
+                <p><a href="#" id="show-reset">Forgot password?</a></p>
+                <div class="divider"><span>OR</span></div>
+                <p>Don't have an account? <a href="#" id="show-signup">Sign Up</a></p>
+            </form>
+
+            <!-- SIGNUP FORM -->
+            <form id="signup-form">
+                <h2>Create Account</h2>
+                <input type="email" id="signup-email" placeholder="Email" required autocomplete="email" maxlength="100">
+                <input type="password" id="signup-password" placeholder="Password (min 6 chars)" required minlength="6" autocomplete="new-password" maxlength="100">
+                <input type="password" id="signup-confirm" placeholder="Confirm Password" required minlength="6" autocomplete="new-password" maxlength="100">
+
+                <div class="divider"><span>SECURITY QUESTIONS</span></div>
+                <p class="form-hint" style="text-align: center !important;">Required for password reset</p>
+                <select id="signup-q1" required>
+                    <option value="" disabled selected>Question 1...</option>
+                    <option value="pet">What was the name of your first pet?</option>
+                    <option value="school">What elementary school did you attend?</option>
+                    <option value="city">In what city were you born?</option>
+                </select>
+                <input type="text" id="signup-a1" placeholder="Answer 1" required maxlength="50">
+
+                <select id="signup-q2" required>
+                    <option value="" disabled selected>Question 2...</option>
+                    <option value="mother_maiden">What is your mother's maiden name?</option>
+                    <option value="car">What was the make of your first car?</option>
+                    <option value="friend">What is the name of your best childhood friend?</option>
+                </select>
+                <input type="text" id="signup-a2" placeholder="Answer 2" required maxlength="50">
+
+                <button type="submit" style="margin-top: 8px;">Sign Up</button>
+                <p>Already have an account? <a href="#" id="show-login">Sign In</a></p>
+            </form>
+
+            <!-- RESET FORM -->
+            <form id="reset-form" style="display:none">
+                <h2>Reset Password</h2>
+
+                <div id="reset-step-1">
+                    <p class="form-hint">Step 1: Enter your email to fetch security questions.</p>
+                    <input type="email" id="reset-email" placeholder="Email" required autocomplete="email" maxlength="100">
+                    <button type="button" id="fetch-questions-btn" style="margin-top: 8px;">Fetch Questions</button>
+                </div>
+
+                <div id="reset-step-2" style="display: none; margin-top: 12px; gap: 12px; flex-direction: column;">
+                    <div class="divider"><span>QUESTIONS</span></div>
+                    <p class="form-hint">Step 2: Answer to receive a reset link.</p>
+
+                    <div>
+                        <label id="reset-q1-label" class="form-label" style="display:block; margin-bottom: 4px; font-size: 13px; color: var(--text);"></label>
+                        <input type="password" id="reset-a1" placeholder="Answer 1" maxlength="50" style="width: 100%;">
+                    </div>
+
+                    <div>
+                        <label id="reset-q2-label" class="form-label" style="display:block; margin-bottom: 4px; font-size: 13px; color: var(--text);"></label>
+                        <input type="password" id="reset-a2" placeholder="Answer 2" maxlength="50" style="width: 100%;">
+                    </div>
+
+                    <button type="submit" id="reset-submit-btn" style="margin-top: 8px;">Send Reset Link</button>
+                </div>
+
+                <p><a href="#" id="show-login-from-reset">Back to Sign In</a></p>
+            </form>
+
+            <!-- UPDATE PASSWORD FORM -->
+            <form id="update-password-form" style="display:none">
+                <h2>Set New Password</h2>
+                <input type="password" id="new-password" placeholder="New Password" required minlength="6" autocomplete="new-password" maxlength="100">
+                <input type="password" id="new-password-confirm" placeholder="Confirm New Password" required minlength="6" autocomplete="new-password" maxlength="100">
+                <button type="submit">Update Password</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ===== APP ===== -->
+    <div id="app-container" style="display:none">
+
+        <header id="app-header">
+            <div class="header-left">
+                <h1>Smart Home</h1>
+            </div>
+            <div class="header-right">
+                <select id="voice-lang" class="header-select" title="Voice Command Language">
+                    <option value="en-IN">English</option>
+                    <option value="hi-IN">Hindi</option>
+                    <option value="te-IN">Telugu</option>
+                </select>
+                <span id="user-email"></span>
+                <button id="theme-toggle-btn" title="Toggle theme">Light</button>
+                <button id="logout-btn">Logout</button>
+            </div>
+        </header>
+
+        <nav id="tab-nav">
+            <button class="tab-btn active" data-tab="devices">Devices</button>
+            <button class="tab-btn" data-tab="presets">Presets</button>
+            <button class="tab-btn" data-tab="schedules">Schedules</button>
+            <button class="tab-btn" data-tab="alarms">Alarms</button>
+        </nav>
+
+        <!-- DEVICES TAB -->
+        <div id="devices-tab" class="tab-content active">
+
+            <div id="dashboard-presets-container" style="display:none; margin-bottom: 20px;">
+                <h3 style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px;">Quick Presets</h3>
+                <div id="dashboard-presets" class="presets-carousel"></div>
+            </div>
+
+            <div class="section-header">
+                <h2>Boards &amp; Devices</h2>
+                <div class="section-actions">
+                    <button id="all-on-btn" class="quick-btn">All On</button>
+                    <button id="all-off-btn" class="quick-btn quick-off">All Off</button>
+                    <button id="add-board-btn" class="action-btn">Add Board</button>
+                </div>
+            </div>
+
+            <div id="add-board-form" class="form-card" style="display:none">
+                <h3>Add New Board</h3>
+                <input type="text" id="board-id-input" placeholder="Board ID (e.g. board_1 or MAC)" required maxlength="50">
+                <input type="text" id="board-name-input" placeholder="Name (e.g. Living Room)" maxlength="50">
+                <p class="form-hint">Creates 4 device slots (relay 0-3) automatically.</p>
+                <div class="form-actions">
+                    <button id="save-board-btn" class="btn-primary">Save</button>
+                    <button id="cancel-board-btn" class="btn-secondary">Cancel</button>
+                </div>
+            </div>
+
+            <div id="boards-container"></div>
+        </div>
+
+        <!-- PRESETS TAB -->
+        <div id="presets-tab" class="tab-content">
+            <div class="section-header">
+                <h2>Presets</h2>
+                <button id="add-preset-btn" class="action-btn">Create Preset</button>
+            </div>
+
+            <div id="add-preset-form" class="form-card" style="display:none">
+                <h3>New Preset</h3>
+                <input type="text" id="preset-name-input" placeholder="Preset Name (e.g. Party Mode)" required maxlength="50">
+                <p class="form-hint">Select the target state for devices in this preset:</p>
+                <div id="preset-devices-list"></div>
+                <div class="form-actions">
+                    <button id="save-preset-btn" class="btn-primary">Save Preset</button>
+                    <button id="cancel-preset-btn" class="btn-secondary">Cancel</button>
+                </div>
+            </div>
+
+            <div id="presets-container"></div>
+        </div>
+
+        <!-- SCHEDULES TAB -->
+        <div id="schedules-tab" class="tab-content">
+            <div class="section-header">
+                <h2>Schedules</h2>
+                <button id="add-schedule-btn" class="action-btn">Add Schedule</button>
+            </div>
+
+            <div id="add-schedule-form" class="form-card" style="display:none">
+                <h3>New Schedule</h3>
+                <div class="form-row">
+                    <select id="schedule-device-select" required></select>
+                </div>
+                <div class="form-row">
+                    <label class="radio-label"><input type="radio" name="schedule-action" value="true" checked> Turn ON</label>
+                    <label class="radio-label"><input type="radio" name="schedule-action" value="false"> Turn OFF</label>
+                </div>
+                <div class="form-row">
+                    <input type="time" id="schedule-time-input" required>
+                    <span class="form-label" style="margin-bottom:0">IST</span>
+                </div>
+                <div class="form-row days-checkboxes" id="schedule-days">
+                    <label class="day-chip"><input type="checkbox" value="0"> S</label>
+                    <label class="day-chip"><input type="checkbox" value="1"> M</label>
+                    <label class="day-chip"><input type="checkbox" value="2"> T</label>
+                    <label class="day-chip"><input type="checkbox" value="3"> W</label>
+                    <label class="day-chip"><input type="checkbox" value="4"> T</label>
+                    <label class="day-chip"><input type="checkbox" value="5"> F</label>
+                    <label class="day-chip"><input type="checkbox" value="6"> S</label>
+                </div>
+                <div class="form-actions">
+                    <button id="save-schedule-btn" class="btn-primary">Save</button>
+                    <button id="cancel-schedule-btn" class="btn-secondary">Cancel</button>
+                </div>
+            </div>
+
+            <div id="schedules-container"></div>
+        </div>
+
+        <!-- ALARMS TAB -->
+        <div id="alarms-tab" class="tab-content">
+            <div class="section-header">
+                <h2>Alarms (One-time)</h2>
+                <button id="add-alarm-btn" class="action-btn">Add Alarm</button>
+            </div>
+
+            <div id="add-alarm-form" class="form-card" style="display:none">
+                <h3>New Alarm</h3>
+                <div class="form-row">
+                    <select id="alarm-device-select" required></select>
+                </div>
+                <div class="form-row">
+                    <label class="radio-label"><input type="radio" name="alarm-action" value="true" checked> Turn ON</label>
+                    <label class="radio-label"><input type="radio" name="alarm-action" value="false"> Turn OFF</label>
+                </div>
+                <div class="form-row">
+                    <input type="datetime-local" id="alarm-datetime-input" required>
+                </div>
+                <p class="form-hint">Time will be stored and executed in IST.</p>
+                <div class="form-actions">
+                    <button id="save-alarm-btn" class="btn-primary">Save</button>
+                    <button id="cancel-alarm-btn" class="btn-secondary">Cancel</button>
+                </div>
+            </div>
+
+            <div id="alarms-container"></div>
+        </div>
+
+    </div>
+
+    <!-- Floating Voice Button -->
+    <button id="voice-btn" title="Hold to speak">VOICE</button>
+    <div id="voice-status" style="display:none">
+        <div id="voice-text">Listening...</div>
+        <div id="voice-hint">Say: "Turn on bedroom light" · "Activate party mode" · "सब चालू" · "అన్ని ఆఫ్"</div>
+    </div>
+
+    <script src="esp.js"></script>
+</body>
+
+</html>
