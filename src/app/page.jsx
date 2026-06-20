@@ -22,9 +22,37 @@ export default function Dashboard() {
   const [boardIdentifier, setBoardIdentifier] = useState('');
   const [boardName, setBoardName] = useState('');
 
+  // Modal drag-to-close gesture state for mobile
+  const [modalDragY, setModalDragY] = useState(0);
+  const [modalDragging, setModalDragging] = useState(false);
+  const [modalStartY, setModalStartY] = useState(0);
+  const modalRef = typeof window !== 'undefined' ? {} : null; // We can use useRef or just a direct DOM ref
+
   const showToast = useCallback((msg) => {
     setToast(msg);
   }, []);
+
+  const handleModalTouchStart = (e) => {
+    setModalStartY(e.touches[0].clientY);
+    setModalDragging(true);
+  };
+
+  const handleModalTouchMove = (e) => {
+    if (!modalDragging) return;
+    if (e.currentTarget.scrollTop > 0) return;
+    const deltaY = e.touches[0].clientY - modalStartY;
+    if (deltaY > 0) {
+      setModalDragY(deltaY);
+    }
+  };
+
+  const handleModalTouchEnd = () => {
+    setModalDragging(false);
+    if (modalDragY > 80) {
+      setShowAddBoardModal(false);
+    }
+    setModalDragY(0);
+  };
 
   // Auth check
   useEffect(() => {
@@ -467,24 +495,26 @@ export default function Dashboard() {
           </section>
         )}
 
-        <div className="flex justify-between items-center mb-5 ml-1 select-none">
-          <h2 className="text-lg font-extrabold text-text tracking-tight">Boards & Devices</h2>
-          <div className="flex gap-2">
-            <button
+        <div className="flex flex-col min-[480px]:flex-row justify-between min-[480px]:items-center gap-3 mb-5 ml-1 select-none">
+          <h2 className="text-lg font-extrabold text-text tracking-tight whitespace-nowrap">Boards & Devices</h2>
+          <div className="flex items-center gap-2 max-[480px]:w-full max-[480px]:justify-between">
+          <div className='flex gap-3'>
+              <button
               onClick={turnAllDevicesOn}
-              className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-1 text-xs font-extrabold text-text transition-all duration-250 cursor-pointer hover:bg-card-alt hover:border-accent/40"
+              className="inline-flex min-h-[32px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-3.5 py-1 text-xs font-extrabold text-text transition-all duration-250 cursor-pointer hover:bg-card-alt hover:border-accent/40 whitespace-nowrap"
             >
               All On
             </button>
             <button
               onClick={turnAllDevicesOff}
-              className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-1 text-xs font-extrabold text-text transition-all duration-250 cursor-pointer hover:bg-card-alt hover:border-accent/40"
+              className="inline-flex min-h-[32px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-3.5 py-1 text-xs font-extrabold text-text transition-all duration-250 cursor-pointer hover:bg-card-alt hover:border-accent/40 whitespace-nowrap"
             >
               All Off
             </button>
+          </div>
             <button
               onClick={() => setShowAddBoardModal(true)}
-              className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-1 text-xs font-extrabold text-[#0a0800] transition-all duration-250 cursor-pointer hover:bg-accent-hover shadow-gold-glow"
+              className="inline-flex min-h-[32px] items-center justify-center gap-2 rounded-lg bg-accent px-3.5 py-1 text-xs font-extrabold text-[#0a0800] transition-all duration-250 cursor-pointer hover:bg-accent-hover shadow-gold-glow whitespace-nowrap"
             >
               Add Board
             </button>
@@ -635,8 +665,20 @@ export default function Dashboard() {
       </div>
 
       {showAddBoardModal && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md animate-scale-in" onClick={() => setShowAddBoardModal(false)}>
-          <div className="max-h-[82vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl backdrop-blur-xl animate-fade-up" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md animate-scale-in max-md:items-end max-md:p-0" onClick={() => setShowAddBoardModal(false)}>
+          <div 
+            onTouchStart={handleModalTouchStart}
+            onTouchMove={handleModalTouchMove}
+            onTouchEnd={handleModalTouchEnd}
+            style={{
+              transform: `translateY(${modalDragY}px)`,
+              transition: modalDragging ? 'none' : 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
+            }}
+            className="max-h-[82vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl backdrop-blur-xl animate-fade-up max-md:w-full max-md:max-h-[85vh] max-md:rounded-t-[24px] max-md:rounded-b-none max-md:border-t max-md:border-x-0 max-md:border-b-0 max-md:pb-10 max-md:animate-slide-up max-md:shadow-none flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Drag Handle for Mobile */}
+            <div className="hidden max-md:block w-12 h-1 bg-border rounded-full mx-auto mb-5 shrink-0" />
             <h2 className="mb-[18px] text-lg font-extrabold text-text">Add Board</h2>
             <form onSubmit={addBoard} className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">

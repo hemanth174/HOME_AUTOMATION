@@ -1,5 +1,6 @@
 import './globals.css';
 import Navbar from '@/components/Navbar';
+import MainLayoutWrapper from '@/components/MainLayoutWrapper';
 
 export const metadata = {
   title: 'Smart Home',
@@ -27,7 +28,7 @@ export default function RootLayout({ children }) {
       <body>
         <ThemeInit />
         <Navbar />
-        {children}
+        <MainLayoutWrapper>{children}</MainLayoutWrapper>
       </body>
     </html>
   );

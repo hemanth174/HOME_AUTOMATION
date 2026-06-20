@@ -11,24 +11,21 @@
 //  PINS & DISPLAY SETUP
 // ============================================================
 
-// --- Rotary Encoder & PIR (unchanged) ---
+// --- Rotary Encoder & PIR ---
 #define CLK_PIN   25
 #define DT_PIN    26
 #define SW_PIN    27
 #define PIR_PIN   13
 
+// --- SHARED CLOCK PIN ---
+#define SHARED_CLK 33   // Clock shared by both 595 (SHCP) and 165 (CLK)
+
 // --- 74HC595 – Serial-In Parallel-Out (relay OUTPUT shift register) ---
-// Q0 = relay 0  (active-LOW: write 0 to turn relay ON)
-// SH_OE should be tied to GND (output always enabled)
 #define SH_DS    32   // Serial data in   (SER / DS)
-#define SH_SHCP  33   // Shift clock      (SRCLK / SHCP)
 #define SH_STCP  18   // Storage/latch    (RCLK  / STCP)
 
 // --- 74HC165 – Parallel-In Serial-Out (feedback INPUT shift register) ---
-// QH = bit 0 feedback (active-LOW: read 0 means light is ON via manual switch)
-// CE (clock enable) should be tied to GND (always enabled)
 #define LD_PIN   19   // Parallel load   (PL / SH-LD, active-LOW)
-#define CLK_165  21   // Shift clock     (CLK)
 #define QH_PIN   22   // Serial data out (Q7 / QH)
 
 #define SCREEN_WIDTH 128
@@ -42,7 +39,7 @@ const char* ssid     = "NxtWave_Te@m";
 const char* password = "Nxtwave@KKH2026";
 const char* BOARD_IDENTIFIER = "board_1";
 const char* SUPABASE_BASE = "https://ojuvphlkzbxwjhqzexbt.supabase.co";
-const char* SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qdXZwaGxremJ4d2pocXpleGJ0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTg2Nzk2MiwiZXhwIjoyMDk3NDQzOTYyfQ.SN6g_bR4bpVEIGdIW-GLPTHRlqZBHF5YBUKjHDMWjLU"; // <--- PASTE KEY HERE
+const char* SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qdXZwaGxremJ4d2pocXpleGJ0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTg2Nzk2MiwiZXhwIjoyMDk3NDQzOTYyfQ.SN6g_bR4bpVEIGdIW-GLPTHRlqZBHF5YBUKjHDMWjLU"; 
 
 // ============================================================
 //  VARIABLES & STATE
@@ -60,7 +57,7 @@ WiFiMulti wifiMulti;
 int lastAcState = -1;
 unsigned long lastAcCheck = 0;
 bool acDetectedThisWindow = false;
-unsigned long acStateChangeTime = 0; // Mutes the PIR sensor during switch arcing
+unsigned long acStateChangeTime = 0; 
 
 // HTTP Polling
 unsigned long lastPollTime = 0;
@@ -76,7 +73,7 @@ const unsigned long ALARM_POLL_INTERVAL = 30000;
 // Offline Local Timers & Motion
 bool motionEnabled = false;
 unsigned long lastMotionTrigger = 0;
-const unsigned long MOTION_COOLDOWN = 4000; // 4 second cooldown
+const unsigned long MOTION_COOLDOWN = 4000; 
 
 bool localTimerActive = false;
 bool localTimerAction = false;
@@ -105,8 +102,7 @@ int motionItems = 3;
 // ============================================================
 void IRAM_ATTR encoderISR() {
   unsigned long now = millis();
-  if (now - lastEncoderISRTime > 80) { // 80ms debounce
-    // Secondary check: ensure it's a real physical turn, not an EMP spike
+  if (now - lastEncoderISRTime > 80) { 
     if (digitalRead(CLK_PIN) == LOW) { 
       if (digitalRead(DT_PIN) == HIGH) encoderDir = 1;
       else encoderDir = -1;
@@ -119,7 +115,6 @@ void IRAM_ATTR encoderISR() {
 void IRAM_ATTR buttonISR() {
   unsigned long now = millis();
   if (now - lastButtonISRTime > 300) { 
-    // Secondary check: ensure button is actually held down
     if (digitalRead(SW_PIN) == LOW) {
       buttonPressed = true;
       lastButtonISRTime = now;
@@ -128,9 +123,9 @@ void IRAM_ATTR buttonISR() {
 }
 
 // Function Prototypes
-void writeShiftOut(byte value);  // Drive 74HC595
-byte readShiftIn();              // Read 74HC165
-void setRelay(bool on);          // Set relay 0 via 595
+void writeShiftOut(byte value);
+byte readShiftIn(); 
+void setRelay(bool on);
 void updateDeviceInDB(bool state);
 void updateFeedbackInDB(bool feedback);
 void markAlarmFiredInDB(String alarmId);
@@ -143,27 +138,24 @@ void executeAction();
 void showOLED(String msg);
 
 // ============================================================
-//  74HC595 – SHIFT OUT (relay control)
-//  Writes a full byte to the 595. Bit 0 controls relay 0.
-//  Active-LOW: bit=0 → relay coil energised (device ON)
-//              bit=1 → relay coil de-energised (device OFF)
+//  74HC595 – SHIFT OUT (relay control using SHARED_CLK)
 // ============================================================
 void writeShiftOut(byte value) {
   shiftOutState = value;
-  digitalWrite(SH_STCP, LOW);        // Hold latch low while shifting
-  shiftOut(SH_DS, SH_SHCP, MSBFIRST, value);
+  digitalWrite(SH_STCP, LOW);        // Ensure latch is low while shifting
+  
+  // Shift out data using the shared clock
+  shiftOut(SH_DS, SHARED_CLK, MSBFIRST, value);
+  
   digitalWrite(SH_STCP, HIGH);       // Latch: push data to outputs
   digitalWrite(SH_STCP, LOW);        // Return latch low (ready for next)
 }
 
 // ============================================================
-//  74HC165 – SHIFT IN (feedback read)
-//  Returns a byte where bit 0 = feedback pin 0.
-//  Active-LOW config: bit=0 → feedback HIGH (light physically ON)
-//                     bit=1 → feedback LOW  (light physically OFF)
+//  74HC165 – SHIFT IN (feedback read using SHARED_CLK)
 // ============================================================
 byte readShiftIn() {
-  // Pulse PL LOW to latch all parallel inputs
+  // Pulse PL LOW to latch all physical parallel inputs into the register
   digitalWrite(LD_PIN, LOW);
   delayMicroseconds(5);
   digitalWrite(LD_PIN, HIGH);
@@ -171,9 +163,11 @@ byte readShiftIn() {
   byte result = 0;
   for (int i = 7; i >= 0; i--) {
     result |= (digitalRead(QH_PIN) << i);
-    digitalWrite(CLK_165, HIGH);
+    
+    // Toggle the shared clock to shift to the next bit
+    digitalWrite(SHARED_CLK, HIGH);
     delayMicroseconds(2);
-    digitalWrite(CLK_165, LOW);
+    digitalWrite(SHARED_CLK, LOW);
     delayMicroseconds(2);
   }
   return result;
@@ -181,8 +175,6 @@ byte readShiftIn() {
 
 // ============================================================
 //  setRelay – convenient wrapper for relay 0
-//  on=true  → set bit 0 LOW  (active-LOW → relay ON)
-//  on=false → set bit 0 HIGH (relay OFF)
 // ============================================================
 void setRelay(bool on) {
   byte val = shiftOutState;
@@ -209,21 +201,21 @@ String getIsoTime() {
 void setup() {
   Serial.begin(115200);
 
-  // --- 74HC595 output shift register pins ---
-  pinMode(SH_DS,   OUTPUT);
-  pinMode(SH_SHCP, OUTPUT);
-  pinMode(SH_STCP, OUTPUT);
-  digitalWrite(SH_STCP, LOW);
+  // --- Shift Register Pins ---
+  pinMode(SHARED_CLK, OUTPUT); // Shared by both 595 and 165
+  pinMode(SH_DS,      OUTPUT);
+  pinMode(SH_STCP,    OUTPUT);
+  pinMode(LD_PIN,     OUTPUT);
+  pinMode(QH_PIN,     INPUT);
+
+  // Initial Shift Register States
+  digitalWrite(SHARED_CLK, LOW);
+  digitalWrite(SH_STCP,    LOW);
+  digitalWrite(LD_PIN,     HIGH);  // Hold HIGH; pulse LOW to latch 165 inputs
+
   writeShiftOut(0xFF);  // All outputs HIGH → all relays OFF (active-LOW)
 
-  // --- 74HC165 input shift register pins ---
-  pinMode(LD_PIN,  OUTPUT);
-  pinMode(CLK_165, OUTPUT);
-  pinMode(QH_PIN,  INPUT);
-  digitalWrite(LD_PIN,  HIGH);  // Hold HIGH; pulse LOW to latch inputs
-  digitalWrite(CLK_165, LOW);
-
-  // --- Encoder, button, PIR (unchanged) ---
+  // --- Encoder, button, PIR ---
   pinMode(CLK_PIN, INPUT_PULLUP);
   pinMode(DT_PIN,  INPUT_PULLUP);
   pinMode(SW_PIN,  INPUT_PULLUP);
@@ -262,7 +254,6 @@ void loop() {
     int maxItems = (page == 0) ? mainItems : ((page == 1) ? lightsItems : motionItems);
     cursor += encoderDir;
     
-    // Hard constraint instead of wraparound for better precision feeling
     if (cursor < 0) cursor = 0;
     if (cursor >= maxItems) cursor = maxItems - 1;
     
@@ -276,14 +267,11 @@ void loop() {
 
   // ----------------------------------------------------------
   // 2. FEEDBACK READ via 74HC165 (250ms Anti-Spam Window)
-  //    Bit 0 of the shift register = feedback circuit 0.
-  //    Active-LOW:  bit=0 → light is physically ON via manual switch
-  //                 bit=1 → manual switch is off
   // ----------------------------------------------------------
   {
     byte inputs = readShiftIn();
-    bool feedbackBitLow = !(inputs & 0x01);  // true when bit0=0 (light ON via manual switch)
-    if (feedbackBitLow) acDetectedThisWindow = true;  // Catches any detection in the window
+    bool feedbackBitLow = !(inputs & 0x01); 
+    if (feedbackBitLow) acDetectedThisWindow = true; 
   }
 
   if (millis() - lastAcCheck >= 250) {
@@ -293,7 +281,7 @@ void loop() {
 
     if (lastAcState == -1 || currentAcPresent != (lastAcState == 1)) {
       lastAcState = currentAcPresent ? 1 : 0;
-      acStateChangeTime = millis();  // Mark the time of the wall switch arc
+      acStateChangeTime = millis(); 
       updateFeedbackInDB(currentAcPresent);
     }
   }
@@ -302,15 +290,14 @@ void loop() {
   // 3. MOTION SENSOR AUTOMATION (Filtered)
   // ----------------------------------------------------------
   if (motionEnabled && digitalRead(PIR_PIN) == HIGH) {
-    // Ignore PIR if a physical wall switch was flipped in the last 2.5 seconds (EMI filtering)
     if (millis() - acStateChangeTime > 2500) {
       if (millis() - lastMotionTrigger > MOTION_COOLDOWN) {
-        delay(50); // Software debounce
+        delay(50); 
         if (digitalRead(PIR_PIN) == HIGH) {
           lastMotionTrigger = millis();
           if (!isRelayOn) {
             isRelayOn = true;
-            setRelay(true);          // Drive relay via 74HC595
+            setRelay(true);          
             updateDeviceInDB(true);
             showOLED("Motion Triggered!");
             delay(1000);
@@ -327,7 +314,7 @@ void loop() {
   if (localTimerActive && (millis() - localTimerStart >= localTimerDuration)) {
     localTimerActive = false;
     isRelayOn = localTimerAction;
-    setRelay(isRelayOn);             // Drive relay via 74HC595
+    setRelay(isRelayOn);             
     updateDeviceInDB(isRelayOn);
   }
 
@@ -349,7 +336,7 @@ void loop() {
     if (alarms[i].active && nowIso >= alarms[i].triggerAt) {
       alarms[i].active = false;
       isRelayOn = alarms[i].action;
-      setRelay(isRelayOn);           // Drive relay via 74HC595
+      setRelay(isRelayOn);           
       updateDeviceInDB(isRelayOn);
       markAlarmFiredInDB(alarms[i].id);
     }
@@ -388,7 +375,7 @@ void executeAction() {
   else if (page == 1) {
     if (cursor == 0) {
       isRelayOn = !isRelayOn;
-      setRelay(isRelayOn);           // Drive relay via 74HC595
+      setRelay(isRelayOn);           
       updateDeviceInDB(isRelayOn);
       showOLED(isRelayOn ? "Light ON" : "Light OFF");
       delay(800);
@@ -412,7 +399,7 @@ void executeAction() {
 }
 
 // ============================================================
-//  SUPABASE HTTP FUNCTIONS (UNTOUCHED)
+//  SUPABASE HTTP FUNCTIONS
 // ============================================================
 void pollDatabase() {
   if(deviceUUID == "") return;
@@ -428,7 +415,7 @@ void pollDatabase() {
       bool dbState = doc[0]["is_on"];
       if (dbState != isRelayOn) {
         isRelayOn = dbState;
-        setRelay(isRelayOn);         // Drive relay via 74HC595
+        setRelay(isRelayOn);         
       }
     }
   }
@@ -488,7 +475,7 @@ void fetchInitialState() {
     DynamicJsonDocument doc(512); deserializeJson(doc, http.getString());
     if (doc.size() > 0) {
       isRelayOn = doc[0]["is_on"];
-      setRelay(isRelayOn);           // Drive relay via 74HC595
+      setRelay(isRelayOn);           
     }
   }
   http.end();

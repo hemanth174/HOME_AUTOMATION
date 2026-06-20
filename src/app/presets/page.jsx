@@ -13,6 +13,33 @@ export default function PresetsPage() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState('');
 
+  // Modal drag-to-close gesture state for mobile
+  const [modalDragY, setModalDragY] = useState(0);
+  const [modalDragging, setModalDragging] = useState(false);
+  const [modalStartY, setModalStartY] = useState(0);
+
+  const handleModalTouchStart = (e) => {
+    setModalStartY(e.touches[0].clientY);
+    setModalDragging(true);
+  };
+
+  const handleModalTouchMove = (e) => {
+    if (!modalDragging) return;
+    if (e.currentTarget.scrollTop > 0) return;
+    const deltaY = e.touches[0].clientY - modalStartY;
+    if (deltaY > 0) {
+      setModalDragY(deltaY);
+    }
+  };
+
+  const handleModalTouchEnd = () => {
+    setModalDragging(false);
+    if (modalDragY > 80) {
+      setShowModal(false);
+    }
+    setModalDragY(0);
+  };
+
   // Form
   const [presetName, setPresetName] = useState('');
   const [presetActions, setPresetActions] = useState({});
@@ -262,8 +289,20 @@ export default function PresetsPage() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md animate-scale-in" onClick={() => setShowModal(false)}>
-          <div className="max-h-[82vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl backdrop-blur-xl animate-fade-up" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md animate-scale-in max-md:items-end max-md:p-0" onClick={() => setShowModal(false)}>
+          <div 
+            onTouchStart={handleModalTouchStart}
+            onTouchMove={handleModalTouchMove}
+            onTouchEnd={handleModalTouchEnd}
+            style={{
+              transform: `translateY(${modalDragY}px)`,
+              transition: modalDragging ? 'none' : 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
+            }}
+            className="max-h-[82vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl backdrop-blur-xl animate-fade-up max-md:w-full max-md:max-h-[85vh] max-md:rounded-t-[24px] max-md:rounded-b-none max-md:border-t max-md:border-x-0 max-md:border-b-0 max-md:pb-10 max-md:animate-slide-up max-md:shadow-none flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Drag Handle for Mobile */}
+            <div className="hidden max-md:block w-12 h-1 bg-border rounded-full mx-auto mb-5 shrink-0" />
             <h2 className="mb-[18px] text-lg font-extrabold text-text">New Preset</h2>
             <form onSubmit={createPreset} className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">

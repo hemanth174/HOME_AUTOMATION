@@ -1,7 +1,8 @@
-﻿'use client';
+'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+import { Mic } from 'lucide-react';
 
 // Number-word to digit map
 const WORD_TO_NUM = {
@@ -235,21 +236,34 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
   return (
     <>
       {listening && (
-        <div className="fixed bottom-24 right-5 bg-card px-5 py-3.5 rounded-xl border border-border shadow-[0_8px_32px_rgba(0,0,0,0.5)] shadow-gold-glow z-[200] max-w-[300px] animate-scale-in backdrop-blur-md flex flex-col gap-1.5 select-none">
-          <strong className="text-sm text-text font-bold">Listening...</strong>
+        <div className="fixed bottom-36 max-md:bottom-36 right-7 bg-card/90 backdrop-blur-md px-5 py-3.5 rounded-xl border border-border shadow-[0_8px_32px_rgba(0,0,0,0.5)] shadow-gold-glow z-[200] max-w-[300px] animate-scale-in flex flex-col gap-1.5 select-none">
+          <strong className="text-sm text-text font-bold flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            Listening...
+          </strong>
           <span className="text-[11px] leading-snug text-text-muted">
             Try: "turn on fan 2" · "turn off living room" · "activate party mode" · "all off"
           </span>
         </div>
       )}
       <button
-        className={`fixed bottom-7 right-7 w-14 h-14 rounded-full border-none bg-accent text-[#0a0800] text-[10px] font-extrabold tracking-wider cursor-pointer z-[200] shadow-[0_6px_24px_var(--accent-glow)] shadow-gold-glow hover:scale-[1.08] active:scale-100 hover:shadow-[0_8px_32px_var(--accent-glow)] transition-all duration-300 flex items-center justify-center uppercase select-none ${
-          listening ? 'animate-pulse-ring scale-105 bg-accent-hover' : ''
-        }`}
         onClick={startListening}
+        className={`fixed bottom-7 right-7 max-md:bottom-20 max-md:right-6 w-14 h-14 rounded-full border-none bg-gradient-to-tr from-accent to-[#e2cc89] text-[#0a0800] cursor-pointer z-[200] shadow-[0_6px_24px_var(--accent-glow)] shadow-gold-glow hover:scale-[1.08] active:scale-100 transition-all duration-300 flex items-center justify-center select-none group`}
         title="Voice Control"
       >
-        VOICE
+        {listening ? (
+          <div className="relative w-full h-full flex items-center justify-center">
+            {/* Listening Ripple Waves */}
+            <span className="absolute inset-0 rounded-full bg-accent/40 animate-ping [animation-duration:1.2s]" />
+            <span className="absolute inset-[-6px] rounded-full bg-accent/25 animate-ping [animation-duration:1.6s]" />
+            <span className="absolute inset-[-12px] rounded-full bg-accent/10 animate-ping [animation-duration:2s]" />
+            
+            {/* Mic Icon */}
+            <Mic size={20} className="stroke-[2.5px] relative z-10 animate-pulse text-[#0a0800]" />
+          </div>
+        ) : (
+          <Mic size={20} className="stroke-[2.5px] group-hover:scale-110 transition-transform text-[#0a0800]" />
+        )}
       </button>
     </>
   );
