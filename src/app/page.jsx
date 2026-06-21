@@ -7,6 +7,7 @@ import Toast from '@/components/Toast';
 import Loader from '@/components/Loader';
 import BoardCard from '@/components/BoardCard';
 import AddBoardModal from '@/components/AddBoardModal';
+import EditBoardModal from '@/components/EditBoardModal';
 import QuickPresets from '@/components/QuickPresets';
 import useDashboardData from '@/hooks/useDashboardData';
 
@@ -33,6 +34,10 @@ export default function Dashboard() {
   const [showAddBoardModal, setShowAddBoardModal] = useState(false);
   const [boardIdentifier, setBoardIdentifier] = useState('');
   const [boardName, setBoardName] = useState('');
+
+  // Edit Board Modal State
+  const [showEditBoardModal, setShowEditBoardModal] = useState(false);
+  const [editingBoardObj, setEditingBoardObj] = useState(null);
 
   // Modal drag-to-close gesture state for mobile
   const [modalDragY, setModalDragY] = useState(0);
@@ -303,6 +308,37 @@ export default function Dashboard() {
     showToast('Board added with 4 devices');
   }, [user, boardIdentifier, boardName, showToast]);
 
+  const openFullEditBoard = useCallback((board) => {
+    setEditingBoardObj(board);
+    setShowEditBoardModal(true);
+  }, []);
+
+  const saveFullBoardEdit = useCallback(async (boardId, newName, newIdentifier, newDeviceNames) => {
+    if (!user) return;
+    
+    // Update board
+    const { error: boardError } = await supabase.from('boards')
+      .update({ name: newName, board_identifier: newIdentifier })
+      .eq('id', boardId);
+    if (boardError) { showToast(boardError.message); return; }
+    
+    // Update devices
+    const devicesToUpdate = getDevicesForBoard(boardId);
+    for (const d of devicesToUpdate) {
+      if (d.relay_index >= 0 && d.relay_index <= 3) {
+        const newDevName = newDeviceNames[d.relay_index];
+        if (newDevName !== d.name) {
+          await supabase.from('devices')
+            .update({ name: newDevName })
+            .eq('id', d.id);
+        }
+      }
+    }
+    
+    showToast('Board updated successfully');
+    setShowEditBoardModal(false);
+  }, [user, getDevicesForBoard, showToast]);
+
   const getFeedbackStatus = useCallback((device) => {
     if (device.feedback_on === null || device.feedback_on === undefined) {
       return { text: device.is_on ? 'ON' : 'OFF', className: device.is_on ? 'match' : '', manualOn: false };
@@ -383,6 +419,7 @@ export default function Dashboard() {
                 saveEditDevice={saveEditDevice}
                 getFeedbackStatus={getFeedbackStatus}
                 toggleDevice={toggleDevice}
+                openFullEditBoard={openFullEditBoard}
               />
             ))}
           </div>
@@ -397,6 +434,19 @@ export default function Dashboard() {
         boardName={boardName}
         setBoardName={setBoardName}
         addBoard={addBoard}
+        modalDragY={modalDragY}
+        modalDragging={modalDragging}
+        handleModalTouchStart={handleModalTouchStart}
+        handleModalTouchMove={handleModalTouchMove}
+        handleModalTouchEnd={handleModalTouchEnd}
+      />
+
+      <EditBoardModal
+        showEditBoardModal={showEditBoardModal}
+        setShowEditBoardModal={setShowEditBoardModal}
+        editingBoardObj={editingBoardObj}
+        editingBoardDevices={editingBoardObj ? getDevicesForBoard(editingBoardObj.id) : []}
+        saveFullBoardEdit={saveFullBoardEdit}
         modalDragY={modalDragY}
         modalDragging={modalDragging}
         handleModalTouchStart={handleModalTouchStart}

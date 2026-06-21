@@ -27,6 +27,7 @@ export default function Navbar() {
   const pathname = usePathname();
   const [user, setUser] = useState(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   // Touch gesture state for drag-to-close bottom sheet
   const [startY, setStartY] = useState(0);
@@ -262,7 +263,7 @@ export default function Navbar() {
           </button>
 
           <button
-            onClick={handleLogout}
+            onClick={() => setShowLogoutModal(true)}
             className="px-4 py-1.5 rounded-xl text-xs font-extrabold border border-red-500/40 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all duration-200 cursor-pointer"
           >
             Log Out
@@ -281,7 +282,7 @@ export default function Navbar() {
           
           {/* Logout button directly in mobile header */}
           <button
-            onClick={handleLogout}
+            onClick={() => setShowLogoutModal(true)}
             className="px-3 py-1.5 rounded-xl text-[10px] font-extrabold border border-red-500/40 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all duration-150 cursor-pointer"
           >
             Log out
@@ -423,6 +424,39 @@ export default function Navbar() {
           </div>
         </div>
       </div>
+      {/* Logout Confirmation Modal */}
+      {showLogoutModal && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in"
+          onClick={() => setShowLogoutModal(false)}
+        >
+          <div
+            className="bg-card border border-border rounded-[18px] p-6 w-[min(100%-40px,360px)] shadow-2xl flex flex-col gap-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex flex-col gap-1">
+              <h3 className="text-base font-extrabold text-text">Log out?</h3>
+              <p className="text-xs text-text-muted font-semibold leading-relaxed">
+                Are you sure you want to log out of your Smart Home account?
+              </p>
+            </div>
+            <div className="flex gap-2.5 justify-end">
+              <button
+                onClick={() => setShowLogoutModal(false)}
+                className="inline-flex min-h-[34px] items-center justify-center rounded-lg border border-border bg-card px-4 text-xs font-semibold text-text hover:bg-card-alt cursor-pointer transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleLogout}
+                className="inline-flex min-h-[34px] items-center justify-center rounded-lg bg-red-500 px-4 text-xs font-extrabold text-white hover:bg-red-600 cursor-pointer transition-all"
+              >
+                Log Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

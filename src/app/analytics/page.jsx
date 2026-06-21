@@ -184,6 +184,7 @@ export default function AnalyticsPage() {
   const pieData = devices.map(d => {
     const load = d.is_on ? getDeviceWattage(d.name) : 5;
     return {
+      id: d.id,
       name: d.name,
       value: load
     };
@@ -314,7 +315,7 @@ export default function AnalyticsPage() {
                 {pieData.map((item, index) => {
                   const percent = ((item.value / pieData.reduce((a, b) => a + b.value, 0)) * 100).toFixed(0);
                   return (
-                    <div key={item.name} className="flex items-center gap-2 min-w-0">
+                    <div key={item.id} className="flex items-center gap-2 min-w-0">
                       <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
                       <span className="text-[11px] font-bold text-text truncate max-w-[120px]">{item.name}</span>
                       <span className="text-[10px] font-extrabold text-text-muted">{percent}%</span>

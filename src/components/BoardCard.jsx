@@ -1,7 +1,7 @@
 'use client';
 
 import React, { memo } from 'react';
-import { ChevronUp } from 'lucide-react';
+import { ChevronUp, Pencil } from 'lucide-react';
 
 const BoardCard = memo(function BoardCard({
   board,
@@ -17,9 +17,9 @@ const BoardCard = memo(function BoardCard({
   turnBoardDevicesOff,
   editingDevice,
   startEditDevice,
-  saveEditDevice,
   getFeedbackStatus,
-  toggleDevice
+  toggleDevice,
+  openFullEditBoard
 }) {
   const isExpanded = expandedBoards[board.id];
   const isOnline = board.last_seen 
@@ -79,8 +79,16 @@ const BoardCard = memo(function BoardCard({
           <button
             className={`grid h-7 w-7 place-items-center rounded-full border border-border text-[10px] text-accent transition-all duration-300 font-bold cursor-pointer ${isExpanded ? 'rotate-180 bg-accent-bg' : ''}`}
             onClick={() => toggleBoard(board.id)}
+            title="Expand / Collapse"
           >
             <ChevronUp size={14} />
+          </button>
+          <button
+            className="grid h-7 w-7 place-items-center rounded-full border border-border text-text-muted transition-all duration-200 hover:text-accent hover:border-accent hover:bg-accent-bg cursor-pointer"
+            onClick={() => openFullEditBoard(board)}
+            title="Edit Board & Devices"
+          >
+            <Pencil size={12} />
           </button>
         </div>
       </div>
@@ -111,7 +119,7 @@ const BoardCard = memo(function BoardCard({
                   />
                 ) : (
                   <span
-                    className="break-words text-[12px] font-bold leading-tight text-text hover:border-border hover:bg-input border border-transparent rounded px-1.5 cursor-pointer max-w-full"
+                    className="break-words text-[14px] font-bold leading-tight text-text hover:border-border hover:bg-input border border-transparent rounded px-1.5 cursor-pointer max-w-full"
                     onClick={() => startEditDevice(device)}
                     title="Click to rename"
                   >
@@ -119,7 +127,7 @@ const BoardCard = memo(function BoardCard({
                   </span>
                 )}
                 <span
-                  className={`text-[10px] font-extrabold uppercase tracking-[0.05em] ${
+                  className={`text-[12px] font-extrabold uppercase tracking-[0.05em] ${
                     feedback.className === 'manual'
                       ? 'text-red-400'
                       : feedback.className === 'match'

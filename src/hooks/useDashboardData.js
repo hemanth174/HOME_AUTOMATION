@@ -73,76 +73,46 @@ export default function useDashboardData() {
   useEffect(() => {
     if (!user) return;
 
-    const devicesChannel = supabase
-      .channel('devices-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'devices',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          if (payload.eventType === 'UPDATE') {
-            setDevices(prev => prev.map(d => d.id === payload.new.id ? payload.new : d));
-          } else if (payload.eventType === 'INSERT') {
-            setDevices(prev => [...prev, payload.new]);
-          } else if (payload.eventType === 'DELETE') {
-            setDevices(prev => prev.filter(d => d.id !== payload.old.id));
-          }
-        }
-      )
-      .subscribe();
+    let isFirstConnect = true;
 
-    const presetsChannel = supabase
-      .channel('dashboard-presets-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'presets',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          if (payload.eventType === 'UPDATE') {
-            setPresets(prev => prev.map(p => p.id === payload.new.id ? payload.new : p));
-          } else if (payload.eventType === 'INSERT') {
-            setPresets(prev => [...prev, payload.new]);
-          } else if (payload.eventType === 'DELETE') {
-            setPresets(prev => prev.filter(p => p.id !== payload.old.id));
+    const channel = supabase
+      .channel('dashboard-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'devices', filter: `user_id=eq.${user.id}` }, (payload) => {
+        if (payload.eventType === 'UPDATE') setDevices(prev => prev.map(d => d.id === payload.new.id ? payload.new : d));
+        else if (payload.eventType === 'INSERT') setDevices(prev => [...prev, payload.new]);
+        else if (payload.eventType === 'DELETE') setDevices(prev => prev.filter(d => d.id !== payload.old.id));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'presets', filter: `user_id=eq.${user.id}` }, (payload) => {
+        if (payload.eventType === 'UPDATE') setPresets(prev => prev.map(p => p.id === payload.new.id ? payload.new : p));
+        else if (payload.eventType === 'INSERT') setPresets(prev => [...prev, payload.new]);
+        else if (payload.eventType === 'DELETE') setPresets(prev => prev.filter(p => p.id !== payload.old.id));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'boards', filter: `user_id=eq.${user.id}` }, (payload) => {
+        if (payload.eventType === 'UPDATE') setBoards(prev => prev.map(b => b.id === payload.new.id ? payload.new : b));
+        else if (payload.eventType === 'INSERT') setBoards(prev => [...prev, payload.new]);
+        else if (payload.eventType === 'DELETE') setBoards(prev => prev.filter(b => b.id !== payload.old.id));
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          if (isFirstConnect) {
+            isFirstConnect = false;
+          } else {
+            console.log('Reconnected to Supabase Realtime. Resyncing state...');
+            // Background silent refetch on reconnect
+            const [boardsRes, devicesRes, presetsRes] = await Promise.all([
+              supabase.from('boards').select('id, name, board_identifier, last_seen').eq('user_id', user.id).order('created_at'),
+              supabase.from('devices').select('id, name, is_on, feedback_on, relay_index, board_id').eq('user_id', user.id).order('relay_index'),
+              supabase.from('presets').select('id, name, actions').eq('user_id', user.id).order('created_at'),
+            ]);
+            if (boardsRes.data) setBoards(boardsRes.data);
+            if (devicesRes.data) setDevices(devicesRes.data);
+            if (presetsRes.data) setPresets(presetsRes.data);
           }
         }
-      )
-      .subscribe();
-
-    const boardsChannel = supabase
-      .channel('dashboard-boards-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'boards',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          if (payload.eventType === 'UPDATE') {
-            setBoards(prev => prev.map(b => b.id === payload.new.id ? payload.new : b));
-          } else if (payload.eventType === 'INSERT') {
-            setBoards(prev => [...prev, payload.new]);
-          } else if (payload.eventType === 'DELETE') {
-            setBoards(prev => prev.filter(b => b.id !== payload.old.id));
-          }
-        }
-      )
-      .subscribe();
+      });
 
     return () => {
-      supabase.removeChannel(devicesChannel);
-      supabase.removeChannel(presetsChannel);
-      supabase.removeChannel(boardsChannel);
+      supabase.removeChannel(channel);
     };
   }, [user]);
 
