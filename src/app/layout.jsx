@@ -1,6 +1,7 @@
 import './globals.css';
 import Navbar from '@/components/Navbar';
 import MainLayoutWrapper from '@/components/MainLayoutWrapper';
+import Script from 'next/script';
 
 export const metadata = {
   title: 'Smart Home',
@@ -23,9 +24,9 @@ export default function RootLayout({ children }) {
         <link rel="manifest" href="/manifest.json" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <script src="https://unpkg.com/@dotlottie/player-component@2.7.12/dist/dotlottie-player.mjs" type="module"></script>
       </head>
       <body>
+        <Script src="https://unpkg.com/@dotlottie/player-component@2.7.12/dist/dotlottie-player.mjs" type="module" strategy="afterInteractive" />
         <ThemeInit />
         <Navbar />
         <MainLayoutWrapper>{children}</MainLayoutWrapper>
@@ -36,22 +37,20 @@ export default function RootLayout({ children }) {
 
 function ThemeInit() {
   return (
-    <script
-      dangerouslySetInnerHTML={{
-        __html: `
-          (function() {
-            try {
-              var theme = localStorage.getItem('theme') || 'dark';
-              document.documentElement.setAttribute('data-theme', theme);
-            } catch(e) {}
-          })();
-          if ('serviceWorker' in navigator) {
-            window.addEventListener('load', function() {
-              navigator.serviceWorker.register('/sw.js');
-            });
-          }
-        `,
-      }}
-    />
+    <Script id="theme-init" strategy="beforeInteractive">
+      {`
+        (function() {
+          try {
+            var theme = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', theme);
+          } catch(e) {}
+        })();
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/sw.js');
+          });
+        }
+      `}
+    </Script>
   );
 }

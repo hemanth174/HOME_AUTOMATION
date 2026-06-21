@@ -12,6 +12,16 @@ export default function Loader({ message = 'Loading...' }) {
 
   useEffect(() => {
     if (!mounted) return;
+    // Lock body scrolling to prevent background rendering overhead on scroll
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
     
     const player = playerRef.current;
     if (!player) return;

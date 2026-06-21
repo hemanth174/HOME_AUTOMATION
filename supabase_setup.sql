@@ -154,6 +154,8 @@ ALTER PUBLICATION supabase_realtime ADD TABLE devices;
 ALTER PUBLICATION supabase_realtime ADD TABLE alarms;
 ALTER PUBLICATION supabase_realtime ADD TABLE schedules;
 ALTER PUBLICATION supabase_realtime ADD TABLE activity_logs;
+ALTER PUBLICATION supabase_realtime ADD TABLE boards;
+ALTER PUBLICATION supabase_realtime ADD TABLE presets;
 
 
 -- ============================================================

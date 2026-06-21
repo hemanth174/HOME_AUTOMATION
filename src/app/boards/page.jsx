@@ -87,6 +87,40 @@ export default function BoardsPage() {
     };
   }, [user]);
 
+  // Realtime subscription
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel('boards-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'boards',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setBoards(prev => {
+              if (prev.some(b => b.id === payload.new.id)) return prev;
+              return [...prev, payload.new];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setBoards(prev => prev.map(b => b.id === payload.new.id ? payload.new : b));
+          } else if (payload.eventType === 'DELETE') {
+            setBoards(prev => prev.filter(b => b.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
   const addBoard = async (e) => {
     e.preventDefault();
     if (!boardIdentifier.trim()) { setToast('Board identifier is required'); return; }

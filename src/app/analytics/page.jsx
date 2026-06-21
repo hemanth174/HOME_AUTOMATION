@@ -71,6 +71,66 @@ export default function AnalyticsPage() {
     };
   }, [user]);
 
+  // Realtime subscription
+  useEffect(() => {
+    if (!user) return;
+
+    const devicesChannel = supabase
+      .channel('analytics-devices-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'devices',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setDevices(prev => {
+              if (prev.some(d => d.id === payload.new.id)) return prev;
+              return [...prev, payload.new];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setDevices(prev => prev.map(d => d.id === payload.new.id ? payload.new : d));
+          } else if (payload.eventType === 'DELETE') {
+            setDevices(prev => prev.filter(d => d.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    const boardsChannel = supabase
+      .channel('analytics-boards-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'boards',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setBoards(prev => {
+              if (prev.some(b => b.id === payload.new.id)) return prev;
+              return [...prev, payload.new];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setBoards(prev => prev.map(b => b.id === payload.new.id ? payload.new : b));
+          } else if (payload.eventType === 'DELETE') {
+            setBoards(prev => prev.filter(b => b.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(devicesChannel);
+      supabase.removeChannel(boardsChannel);
+    };
+  }, [user]);
+
   if (loading) {
     return <Loader message="Analyzing power consumption..." />;
   }

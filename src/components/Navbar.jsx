@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { useState, useEffect, useRef } from 'react';
+import ThemeToggle from './ThemeToggle';
 import {
   LayoutGrid,
   SlidersHorizontal,
@@ -18,20 +19,24 @@ import {
   Moon,
   Sun,
   Bell,
-  Crown
+  Crown,
+  Download
 } from 'lucide-react';
 
 export default function Navbar() {
   const pathname = usePathname();
   const [user, setUser] = useState(null);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [theme, setTheme] = useState('dark');
 
   // Touch gesture state for drag-to-close bottom sheet
   const [startY, setStartY] = useState(0);
   const [currentY, setCurrentY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const sheetContentRef = useRef(null);
+
+  // PWA Install States
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [showInstallBtn, setShowInstallBtn] = useState(false);
 
   // Load user
   useEffect(() => {
@@ -42,23 +47,44 @@ export default function Navbar() {
     fetchUser();
   }, []);
 
-  // Theme Sync
+  // Listen to beforeinstallprompt event for PWA installation
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const currentTheme = localStorage.getItem('theme') || 'dark';
-      setTheme(currentTheme);
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallBtn(true);
+    };
+
+    const handleAppInstalled = () => {
+      setDeferredPrompt(null);
+      setShowInstallBtn(false);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      setShowInstallBtn(false);
     }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
   }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`PWA installation outcome: ${outcome}`);
+    setDeferredPrompt(null);
+    setShowInstallBtn(false);
+  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     window.location.href = '/login';
-  };
-
-  const changeTheme = (newTheme) => {
-    setTheme(newTheme);
-    localStorage.setItem('theme', newTheme);
-    document.documentElement.setAttribute('data-theme', newTheme);
   };
 
   const isLoginPage = pathname === '/login';
@@ -167,6 +193,17 @@ export default function Navbar() {
 
       {/* Bottom: User & Info */}
       <div className="flex flex-col gap-4 border-t border-border pt-4">
+        {/* Install Web App */}
+        {showInstallBtn && (
+          <button
+            onClick={handleInstallClick}
+            className="mx-2 px-3 py-2.5 rounded-xl text-xs font-extrabold bg-accent text-[#0a0800] hover:bg-accent-hover cursor-pointer flex items-center justify-center gap-2"
+          >
+            <Download size={14} />
+            <span>Install Web App</span>
+          </button>
+        )}
+
         {/* Timezone */}
         <div className="flex flex-col gap-0.5 px-2">
           <span className="text-[9px] font-extrabold uppercase tracking-wider text-text-muted block">Timezone</span>
@@ -215,13 +252,7 @@ export default function Navbar() {
 
         {/* Right: Theme Toggle, Notifications, Logout */}
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => changeTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="p-2 rounded-xl border border-border bg-accent-bg/5 hover:bg-accent-bg hover:text-accent hover:border-accent text-text-muted transition-all cursor-pointer flex items-center justify-center"
-            title="Toggle theme"
-          >
-            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-          </button>
+          <ThemeToggle size={15} />
 
           <button
             className="p-2 rounded-xl border border-border bg-accent-bg/5 hover:bg-accent-bg hover:text-accent hover:border-accent text-text-muted transition-all cursor-pointer flex items-center justify-center"
@@ -246,13 +277,7 @@ export default function Navbar() {
         </Link>
         <div className="flex items-center gap-2">
           {/* Theme switcher directly in mobile header */}
-          <button
-            onClick={() => changeTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="p-2 rounded-xl border border-border bg-accent-bg/5 hover:bg-accent-bg hover:text-accent hover:border-accent text-text-muted transition-all cursor-pointer flex items-center justify-center"
-            title="Toggle theme"
-          >
-            {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-          </button>
+          <ThemeToggle size={14} />
           
           {/* Logout button directly in mobile header */}
           <button
@@ -375,6 +400,19 @@ export default function Navbar() {
               </div>
             </Link>
           </div>
+
+          {/* Mobile Install App Button */}
+          {showInstallBtn && (
+            <div className="px-2">
+              <button
+                onClick={handleInstallClick}
+                className="w-full py-3 rounded-xl text-xs font-extrabold bg-accent text-[#0a0800] hover:bg-accent-hover  cursor-pointer flex items-center justify-center gap-2 "
+              >
+                <Download size={15} className="stroke-[2.5px]" />
+                <span>Install Web App</span>
+              </button>
+            </div>
+          )}
 
           {/* Timezone */}
           <div className="flex flex-col gap-0.5 px-2">

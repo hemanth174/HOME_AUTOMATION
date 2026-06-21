@@ -83,6 +83,62 @@ export default function PresetsPage() {
     };
   }, [user]);
 
+  // Realtime subscription
+  useEffect(() => {
+    if (!user) return;
+
+    const presetsChannel = supabase
+      .channel('presets-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'presets',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setPresets(prev => {
+              if (prev.some(p => p.id === payload.new.id)) return prev;
+              return [...prev, payload.new];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setPresets(prev => prev.map(p => p.id === payload.new.id ? payload.new : p));
+          } else if (payload.eventType === 'DELETE') {
+            setPresets(prev => prev.filter(p => p.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    const devicesChannel = supabase
+      .channel('presets-devices-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'devices',
+          filter: `user_id=eq.${user.id}`,
+        },
+        async (payload) => {
+          if (payload.eventType === 'UPDATE') {
+            setDevices(prev => prev.map(d => d.id === payload.new.id ? { ...d, ...payload.new } : d));
+          } else if (payload.eventType === 'INSERT' || payload.eventType === 'DELETE') {
+            const { data } = await supabase.from('devices').select('id, name, is_on, boards(name)').eq('user_id', user.id).order('relay_index');
+            if (data) setDevices(data);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(presetsChannel);
+      supabase.removeChannel(devicesChannel);
+    };
+  }, [user]);
+
   const openCreateModal = () => {
     const actions = {};
     devices.forEach(d => { actions[d.id] = { included: false, is_on: true }; });

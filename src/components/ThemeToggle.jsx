@@ -1,32 +1,49 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { Sun, Moon } from 'lucide-react';
 
-export default function ThemeToggle() {
-  const [theme, setTheme] = useState(() => {
-    if (typeof window === 'undefined') return 'dark';
-    return localStorage.getItem('theme') || 'dark';
-  });
+export default function ThemeToggle({ className, size = 15 }) {
+  const [theme, setTheme] = useState('dark');
+  const [mounted, setMounted] = useState(false);
 
+  // Initialize theme from localStorage on client-mount to avoid SSR hydration mismatch
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-  }, [theme]);
+    const currentTheme = localStorage.getItem('theme') || 'dark';
+    setTheme(currentTheme);
+    setMounted(true);
+  }, []);
+
+  // Update root attribute when theme state updates
+  useEffect(() => {
+    if (mounted) {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
+  }, [theme, mounted]);
 
   const toggle = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
     localStorage.setItem('theme', next);
-    document.documentElement.setAttribute('data-theme', next);
   };
+
+  // Render a placeholder matching the dimension until client mounts to prevent mismatch
+  if (!mounted) {
+    return (
+      <div 
+        className={className || "p-2 w-[34px] h-[34px] rounded-xl border border-border bg-accent-bg/5 text-text-muted/40 flex items-center justify-center"}
+        style={{ width: `${size + 19}px`, height: `${size + 19}px` }}
+      />
+    );
+  }
 
   return (
     <button
-      id="theme-toggle-btn"
-      className="px-3.5 py-1.5 rounded-lg text-xs font-bold border-[1.5px] border-border bg-card text-text transition-all duration-250 cursor-pointer hover:border-accent hover:text-accent hover:shadow-gold-glow"
       onClick={toggle}
+      className={className || "p-2 rounded-xl border border-border bg-accent-bg/5 hover:bg-accent-bg hover:text-accent hover:border-accent text-text-muted transition-all cursor-pointer flex items-center justify-center"}
       title="Toggle theme"
     >
-      {theme === 'dark' ? 'Light' : 'Dark'}
+      {theme === 'dark' ? <Sun size={size} /> : <Moon size={size} />}
     </button>
   );
 }

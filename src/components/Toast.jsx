@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect } from 'react';
+import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 
 export default function Toast({ message, onClose }) {
   useEffect(() => {
     if (message) {
-      const timer = setTimeout(onClose, 3000);
+      const timer = setTimeout(onClose, 4000);
       return () => clearTimeout(timer);
     }
   }, [message, onClose]);
@@ -15,18 +16,36 @@ export default function Toast({ message, onClose }) {
   const isError = message.toLowerCase().includes('error') || message.toLowerCase().includes('fail') || message.toLowerCase().includes('invalid');
   const isSuccess = message.toLowerCase().includes('success') || message.toLowerCase().includes('created') || message.toLowerCase().includes('saved') || message.toLowerCase().includes('activated');
 
-  let bgClass = 'bg-accent/90 border-accent/20';
+  let borderClass = 'border-accent/40 shadow-gold-glow/10';
+  let Icon = Info;
+  let iconColor = 'text-accent';
+
   if (isError) {
-    bgClass = 'bg-[rgba(160,50,50,0.92)] border-red-500/20';
+    borderClass = 'border-red-500/40 shadow-red-500/5';
+    Icon = AlertCircle;
+    iconColor = 'text-red-500';
   } else if (isSuccess) {
-    bgClass = 'bg-[rgba(34,120,41,0.92)] border-green-500/20';
+    borderClass = 'border-green-500/40 shadow-green-500/5';
+    Icon = CheckCircle2;
+    iconColor = 'text-green-500';
   }
 
   return (
     <div
-      className={`fixed top-4 right-4 z-[9999] max-w-[360px] rounded-xl border px-5 py-3 text-xs font-semibold text-white shadow-2xl backdrop-blur-md animate-slide-down ${bgClass}`}
+      role="alert"
+      className={`fixed top-5 right-5 z-[9999] max-w-[380px] w-[calc(100%-40px)] rounded-2xl border bg-card/92 p-4 text-xs font-bold text-text shadow-2xl backdrop-blur-xl animate-slide-down flex items-center justify-between gap-3 select-none ${borderClass}`}
     >
-      {message}
+      <div className="flex items-center gap-3 min-w-0">
+        <Icon size={16} className={`${iconColor} shrink-0`} />
+        <span className="truncate pr-1 text-text leading-tight">{message}</span>
+      </div>
+      <button
+        onClick={onClose}
+        className="p-1 rounded-lg text-text-muted hover:text-text hover:bg-accent-bg/10 transition-all cursor-pointer shrink-0 border-none bg-transparent"
+        title="Dismiss"
+      >
+        <X size={14} className="stroke-[2.5px]" />
+      </button>
     </div>
   );
 }

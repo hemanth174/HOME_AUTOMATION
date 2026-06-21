@@ -2,6 +2,12 @@
 
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import ThemeToggle from '@/components/ThemeToggle';
+import Toast from '@/components/Toast';
+import GoogleImage from '../../../public/GoogleImage.png';
+import { Eye, EyeClosed } from 'lucide-react';
+import SignupForm from '@/components/SignupForm';
+import ForgotQuestionsForm from '@/components/ForgotQuestionsForm';
 
 const SECURITY_QUESTIONS = [
   "What is your pet's name?",
@@ -28,7 +34,12 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPass, setShowPass] = useState(false);
 
+  // Security questions lock & recovery override states
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [recoveryInput, setRecoveryInput] = useState('');
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
@@ -77,6 +88,31 @@ export default function LoginPage() {
           p_a2: a2,
         });
       }
+      
+      // Send welcome email via Nodemailer API
+      try {
+        await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: email,
+            subject: 'Welcome to Smart Home!',
+            text: `Welcome to Smart Home Automation Panel! Your account has been registered successfully.\n\nSecure your home control panel from anywhere, set presets, schedule alarms, and track live physical status.`,
+            html: `
+              <div style="font-family: sans-serif; padding: 20px; color: #111;">
+                <h2 style="color: #c9a84c;">Welcome to Smart Home!</h2>
+                <p>Your account has been registered successfully.</p>
+                <p>Control devices, configure automation schedules, track analytics, and secure your home dashboard seamlessly.</p>
+                <hr style="border: 0; border-top: 1px solid #eee;" />
+                <p style="font-size: 11px; color: #666;">This is an automated notification from your Smart Home panel.</p>
+              </div>
+            `,
+          }),
+        });
+      } catch (e) {
+        console.warn('Welcome email failed:', e);
+      }
+
       setSuccess('Account created successfully! You can now log in.');
       setView('login');
       setPassword('');
@@ -130,17 +166,53 @@ export default function LoginPage() {
         p_a2: forgotA2,
       });
       if (error) throw error;
+      
       if (!data) {
-        throw new Error('Security answers are incorrect');
+        const newAttempts = failedAttempts + 1;
+        setFailedAttempts(newAttempts);
+        
+        if (newAttempts >= 3) {
+          const code = Math.floor(100000 + Math.random() * 900000).toString();
+          setRecoveryCode(code);
+          
+          try {
+            await fetch('/api/send-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: forgotEmail,
+                subject: 'Smart Home Security - Account Recovery Code',
+                text: `Your security recovery verification code is: ${code}\n\nUse this code to bypass security questions and reset your password.`,
+                html: `
+                  <div style="font-family: sans-serif; padding: 20px; color: #111; max-width: 500px; border: 1px solid #eee; border-radius: 12px;">
+                    <h2 style="color: #c9a84c; margin-top: 0;">Account Recovery Verification</h2>
+                    <p>Your security questions have been locked after 3 failed attempts.</p>
+                    <p>Use the following 6-digit verification code to bypass security questions and reset your password:</p>
+                    <div style="background: #f7f7f7; padding: 16px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 4px; border-radius: 8px; color: #c9a84c; margin: 20px 0; border: 1px dashed #c9a84c;">
+                      ${code}
+                    </div>
+                    <p style="font-size: 12px; color: #666;">This code is valid for this session only. If you did not initiate this request, please contact security.</p>
+                    <hr style="border: 0; border-top: 1px solid #eee;" />
+                    <p style="font-size: 11px; color: #666;">This is an automated notification from your Smart Home panel.</p>
+                  </div>
+                `
+              })
+            });
+            throw new Error('Security questions locked. A recovery code has been sent to your email.');
+          } catch (mailErr) {
+            throw new Error(`Security questions locked. ${mailErr.message}`);
+          }
+        } else {
+          throw new Error(`Security answers are incorrect. ${3 - newAttempts} attempt(s) remaining.`);
+        }
       }
+      
       await supabase.auth.resetPasswordForEmail(forgotEmail, {
         redirectTo: window.location.origin,
       });
       setSuccess('Security questions verified! A password reset link has been sent to your email.');
       setView('login');
-      setForgotEmail('');
-      setForgotA1('');
-      setForgotA2('');
+      resetForgotState();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -148,33 +220,65 @@ export default function LoginPage() {
     }
   };
 
+  const handleVerifyRecoveryOTP = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (recoveryInput.length !== 6) {
+      setError('Please enter a valid 6-digit recovery code');
+      return;
+    }
+    if (recoveryInput !== recoveryCode) {
+      setError('Incorrect recovery code. Please try again.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+        redirectTo: window.location.origin,
+      });
+      if (error) throw error;
+      setSuccess('Recovery code verified! A password reset link has been sent to your email.');
+      setView('login');
+      resetForgotState();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetForgotState = () => {
+    setForgotEmail('');
+    setForgotA1('');
+    setForgotA2('');
+    setRecoveryInput('');
+    setRecoveryCode('');
+    setFailedAttempts(0);
+  };
+
   const switchView = (newView) => {
     setView(newView);
     setError('');
     setSuccess('');
+    if (newView === 'login' || newView === 'forgot') {
+      resetForgotState();
+    }
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen p-6 bg-auth-bg animate-fade-in select-none">
-      <div className="bg-auth-card px-8 py-9 rounded-[22px] shadow-2xl shadow-gold-glow w-full max-w-[420px] animate-scale-in border border-border">
-        <h1 className="text-center text-3xl font-extrabold mb-2 text-accent tracking-tight shadow-gold-glow">Smart Home</h1>
+    <div className="relative min-h-screen w-full flex items-center justify-center p-6">
+      <div className="absolute top-5 right-5 z-50">
+        <ThemeToggle />
+      </div>
+    
+      <div className="bg-auth-card px-8 py-9 rounded-[22px] shadow-2xl shadow-gold-glow w-full max-w-[420px]  border border-border">
+        <h1 className="text-center text-5xl font-extrabold mb-2 text-accent ">Smart Home</h1>
         <p className="text-center text-xs text-text-muted mb-6 font-bold uppercase tracking-wider">
           {view === 'login' && 'Sign in to your account'}
           {view === 'signup' && 'Create a new account'}
           {view === 'forgot' && 'Reset your password'}
           {view === 'forgot-questions' && 'Answer security questions'}
         </p>
-
-        {error && (
-          <div className="mb-4 rounded-lg border border-red-500/35 bg-red-500/10 px-3.5 py-2.5 text-xs font-bold text-red-500">
-            {error}
-          </div>
-        )}
-        {success && (
-          <div className="mb-4 rounded-lg border border-green-500/35 bg-green-500/10 px-3.5 py-2.5 text-xs font-bold text-green-500">
-            {success}
-          </div>
-        )}
 
         {view === 'login' && (
           <form className="flex flex-col gap-4" onSubmit={handleLogin}>
@@ -191,14 +295,17 @@ export default function LoginPage() {
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-xs font-extrabold tracking-wide text-text-muted">Password</label>
-              <input
-                className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                type="password"
+             <div className='flex rounded-lg border-[1.5px] border-border'>
+               <input
+                className="w-full px-4 py-2.5  bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
+                type={showPass ? "password" : "text"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Your password"
                 required
               />
+              <button className='border-[1.5px] border-border p-2' onClick={()=>setShowPass(!showPass)} type="button">{showPass ? <EyeClosed />:<Eye/>}</button>
+             </div>
             </div>
             <button
               className="w-full py-3 rounded-lg text-sm font-bold bg-accent text-[#0a0800] transition-all hover:bg-accent-hover active:translate-y-0 cursor-pointer shadow-gold-glow mt-2"
@@ -211,11 +318,19 @@ export default function LoginPage() {
               <span>or</span>
             </div>
             <button
-              className="w-full py-2.5 rounded-lg text-sm font-semibold border-[1.5px] border-border bg-card text-text transition-all hover:bg-card-alt cursor-pointer"
               type="button"
               onClick={handleGoogleSignIn}
+              disabled={loading}
+              className="flex items-center justify-center gap-3 w-full py-2.5 rounded-lg text-sm font-semibold border-[1.5px] border-border bg-card text-text transition-all hover:bg-card-alt hover:border-accent/40 active:scale-[0.99] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Sign in with Google
+              {loading ? (
+                <span>Signing in...</span>
+              ) : (
+                <>
+                  <img className="h-5 w-5 object-contain" src={GoogleImage.src} alt="Google logo" />
+                  <span>Continue with Google</span>
+                </>
+              )}
             </button>
             <div className="text-center mt-2 flex flex-col gap-2">
               <button
@@ -240,105 +355,26 @@ export default function LoginPage() {
         )}
 
         {view === 'signup' && (
-          <form className="flex flex-col gap-3.5 max-h-[70vh] overflow-y-auto pr-1" onSubmit={handleSignup}>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-extrabold tracking-wide text-text-muted">Email</label>
-              <input
-                className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                required
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-extrabold tracking-wide text-text-muted">Password</label>
-              <input
-                className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Min 6 characters"
-                required
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-extrabold tracking-wide text-text-muted">Confirm Password</label>
-              <input
-                className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Confirm password"
-                required
-              />
-            </div>
-            <div className="relative my-2 text-center text-[10px] font-extrabold uppercase tracking-widest text-text-muted before:absolute before:top-1/2 before:left-0 before:h-px before:w-[22%] before:bg-border after:absolute after:top-1/2 after:right-0 after:h-px after:w-[22%] after:bg-border">
-              <span>Security Questions</span>
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-extrabold tracking-wide text-text-muted">Security Question 1</label>
-              <select
-                className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                value={q1}
-                onChange={(e) => setQ1(e.target.value)}
-              >
-                {SECURITY_QUESTIONS.map((q) => <option key={q} value={q}>{q}</option>)}
-              </select>
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-extrabold tracking-wide text-text-muted">Answer 1</label>
-              <input
-                className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                type="text"
-                value={a1}
-                onChange={(e) => setA1(e.target.value)}
-                placeholder="Your answer"
-                required
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-extrabold tracking-wide text-text-muted">Security Question 2</label>
-              <select
-                className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                value={q2}
-                onChange={(e) => setQ2(e.target.value)}
-              >
-                {SECURITY_QUESTIONS.map((q) => <option key={q} value={q}>{q}</option>)}
-              </select>
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-extrabold tracking-wide text-text-muted">Answer 2</label>
-              <input
-                className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                type="text"
-                value={a2}
-                onChange={(e) => setA2(e.target.value)}
-                placeholder="Your answer"
-                required
-              />
-            </div>
-            <button
-              className="w-full py-3 rounded-lg text-sm font-bold bg-accent text-[#0a0800] transition-all hover:bg-accent-hover active:translate-y-0 cursor-pointer shadow-gold-glow mt-2 shrink-0"
-              type="submit"
-              disabled={loading}
-            >
-              {loading ? 'Creating account...' : 'Create Account'}
-            </button>
-            <div className="text-center mt-1 shrink-0">
-              <span className="text-xs text-text-muted">
-                Already have an account?{' '}
-                <button
-                  className="bg-transparent font-bold text-accent hover:underline cursor-pointer"
-                  type="button"
-                  onClick={() => switchView('login')}
-                >
-                  Sign in
-                </button>
-              </span>
-            </div>
-          </form>
+          <SignupForm
+            email={email}
+            setEmail={setEmail}
+            password={password}
+            setPassword={setPassword}
+            confirmPassword={confirmPassword}
+            setConfirmPassword={setConfirmPassword}
+            q1={q1}
+            setQ1={setQ1}
+            a1={a1}
+            setA1={setA1}
+            q2={q2}
+            setQ2={setQ2}
+            a2={a2}
+            setA2={setA2}
+            loading={loading}
+            handleSignup={handleSignup}
+            switchView={switchView}
+            securityQuestions={SECURITY_QUESTIONS}
+          />
         )}
 
         {view === 'forgot' && (
@@ -374,48 +410,25 @@ export default function LoginPage() {
         )}
 
         {view === 'forgot-questions' && (
-          <form className="flex flex-col gap-4" onSubmit={handleForgotVerify}>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-bold text-text-muted block leading-snug">{forgotQ1}</label>
-              <input
-                className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                type="text"
-                value={forgotA1}
-                onChange={(e) => setForgotA1(e.target.value)}
-                placeholder="Your answer"
-                required
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-bold text-text-muted block leading-snug">{forgotQ2}</label>
-              <input
-                className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                type="text"
-                value={forgotA2}
-                onChange={(e) => setForgotA2(e.target.value)}
-                placeholder="Your answer"
-                required
-              />
-            </div>
-            <button
-              className="w-full py-3 rounded-lg text-sm font-bold bg-accent text-[#0a0800] transition-all hover:bg-accent-hover active:translate-y-0 cursor-pointer shadow-gold-glow mt-2"
-              type="submit"
-              disabled={loading}
-            >
-              {loading ? 'Verifying...' : 'Verify & Send Reset Link'}
-            </button>
-            <div className="text-center mt-2">
-              <button
-                className="bg-transparent text-xs font-bold text-accent hover:underline cursor-pointer"
-                type="button"
-                onClick={() => switchView('forgot')}
-              >
-                Back
-              </button>
-            </div>
-          </form>
+          <ForgotQuestionsForm
+            failedAttempts={failedAttempts}
+            forgotQ1={forgotQ1}
+            forgotQ2={forgotQ2}
+            forgotA1={forgotA1}
+            setForgotA1={setForgotA1}
+            forgotA2={forgotA2}
+            setForgotA2={setForgotA2}
+            recoveryInput={recoveryInput}
+            setRecoveryInput={setRecoveryInput}
+            loading={loading}
+            handleVerifyRecoveryOTP={handleVerifyRecoveryOTP}
+            handleForgotVerify={handleForgotVerify}
+            switchView={switchView}
+          />
         )}
       </div>
+      {error && <Toast message={error} onClose={() => setError('')} />}
+      {success && <Toast message={success} onClose={() => setSuccess('')} />}
     </div>
   );
 }
