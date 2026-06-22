@@ -204,14 +204,3 @@ body,
     background: var(--border);
     border-radius: 6px;
 }
-
-/* Automated Lucide Icon Hover Animations */
-svg.lucide {
-  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275), stroke-width 0.2s ease;
-}
-a:hover svg.lucide,
-button:hover svg.lucide,
-.hover-icon-trigger:hover svg.lucide,
-svg.lucide:hover {
-  transform: scale(1.18) rotate(5deg);
-}

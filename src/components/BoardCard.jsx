@@ -1,63 +1,35 @@
 'use client';
 
 import React, { memo } from 'react';
-import { ChevronUp, Pencil } from 'lucide-react';
+import { ChevronUp, Pencil, LucidePower, LucidePowerOff } from 'lucide-react';
 
 const BoardCard = memo(function BoardCard({
   board,
   boardDevices,
   expandedBoards,
   toggleBoard,
-  editingBoard,
-  editName,
-  setEditName,
-  startEditBoard,
-  saveEditBoard,
   turnBoardDevicesOn,
   turnBoardDevicesOff,
-  editingDevice,
-  startEditDevice,
   getFeedbackStatus,
   toggleDevice,
   openFullEditBoard
 }) {
   const isExpanded = expandedBoards[board.id];
-  const isOnline = board.last_seen 
-    ? (Date.now() - new Date(board.last_seen).getTime() < 5 * 60 * 1000) 
-    : false;
+  const anyOn = boardDevices.some(d => d.is_on);
 
   return (
     <div className="relative overflow-hidden rounded-[18px] border border-border bg-card shadow-lg backdrop-blur-md transition-all duration-250 ease-out hover:border-accent/40 animate-fade-up">
       <div
-        className="flex min-h-[58px] cursor-pointer select-none items-center justify-between gap-3 bg-card-alt border-b border-border px-[18px] py-[15px] max-[430px]:px-3.5 max-[430px]:py-[13px] hover:bg-card/40 transition-all"
+        className="flex flex-wrap min-h-[58px] cursor-pointer select-none items-center justify-between gap-3 bg-card-alt border-b border-border px-[18px] py-[15px] max-[430px]:px-3.5 max-[430px]:py-[13px] hover:bg-card/40 transition-all"
         onClick={() => toggleBoard(board.id)}
       >
         <div className="flex items-center gap-2.5 min-w-0" onClick={(e) => e.stopPropagation()}>
-          {editingBoard === board.id ? (
-            <input
-              className="min-w-[120px] border-0 border-b border-dashed border-accent bg-transparent text-[inherit] font-[inherit] text-text outline-0 focus:shadow-[0_6px_0_-5px_var(--accent)]"
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              onBlur={() => saveEditBoard(board.id)}
-              onKeyDown={(e) => { if (e.key === 'Enter') saveEditBoard(board.id); }}
-              autoFocus
-            />
-          ) : (
-            <span
-              className="max-w-full truncate text-[14px] font-extrabold text-text hover:border-border hover:bg-input border border-transparent rounded px-1 cursor-text"
-              onDoubleClick={() => startEditBoard(board)}
-              title="Double-click to rename"
-            >
-              {board.name}
-            </span>
-          )}
-          
-          {/* Connection Indicator Badge */}
-          <span className={`flex items-center gap-1 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded ${isOnline ? 'text-emerald-500 bg-emerald-500/10' : 'text-red-500 bg-red-500/10'}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
-            {isOnline ? 'Online' : 'Offline'}
+          <span
+            className="max-w-full truncate text-[14px] font-extrabold text-text px-1"
+            title={board.name}
+          >
+            {board.name}
           </span>
-
           <span className="text-[11px] text-text-muted font-bold whitespace-nowrap bg-bg px-2 py-0.5 rounded-md">
             {boardDevices.length} devices
           </span>
@@ -65,16 +37,18 @@ const BoardCard = memo(function BoardCard({
         
         <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
           <button
-            className="inline-flex h-[26px] items-center justify-center rounded bg-card border border-border px-2.5 py-0.5 text-[10px] font-extrabold text-text transition-all duration-200 hover:bg-card-alt hover:border-accent/40 cursor-pointer"
-            onClick={() => turnBoardDevicesOn(board.id, board.name)}
+            className={`inline-flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-full border transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 ${
+              anyOn 
+                ? 'border-accent bg-accent text-[#0a0800] shadow-gold-glow'
+                : 'border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]'
+            }`}
+            onClick={() => {
+              if (anyOn) turnBoardDevicesOff(board.id, board.name);
+              else turnBoardDevicesOn(board.id, board.name);
+            }}
+            title={anyOn ? "Turn All Off" : "Turn All On"}
           >
-            All On
-          </button>
-          <button
-            className="inline-flex h-[26px] items-center justify-center rounded bg-card border border-border px-2.5 py-0.5 text-[10px] font-extrabold text-text transition-all duration-200 hover:bg-card-alt hover:border-accent/40 cursor-pointer"
-            onClick={() => turnBoardDevicesOff(board.id, board.name)}
-          >
-            All Off
+            {anyOn ? <LucidePowerOff size={14} strokeWidth={2.5} /> : <LucidePower size={14} strokeWidth={2.5} />}
           </button>
           <button
             className={`grid h-7 w-7 place-items-center rounded-full border border-border text-[10px] text-accent transition-all duration-300 font-bold cursor-pointer ${isExpanded ? 'rotate-180 bg-accent-bg' : ''}`}
@@ -98,7 +72,7 @@ const BoardCard = memo(function BoardCard({
           const feedback = getFeedbackStatus(device);
           return (
             <div
-              className={`flex min-h-[122px] flex-col items-center justify-center gap-[13px] rounded-2xl border px-3 py-4 text-center transition-all duration-250 ease-out hover:-translate-y-0.5 max-[430px]:min-h-[108px] max-[430px]:px-2.5 max-[430px]:py-[13px] ${
+              className={`flex min-h-[96px] flex-col items-center justify-center gap-2 rounded-2xl border px-3 py-3 text-center transition-all duration-250 ease-out hover:-translate-y-0.5 max-[430px]:min-h-[84px] max-[430px]:px-2.5 max-[430px]:py-2 max-[430px]:gap-1.5 ${
                 feedback.manualOn
                   ? 'border-red-500/60 bg-red-500/10 shadow-[0_0_16px_rgba(239,68,68,0.25)] animate-pulse-dot-red'
                   : device.is_on
@@ -107,27 +81,15 @@ const BoardCard = memo(function BoardCard({
               }`}
               key={device.id}
             >
-              <div className="flex min-w-0 flex-col items-center gap-1 w-full">
-                {editingDevice === device.id ? (
-                  <input
-                    className="w-full text-center border-0 border-b border-dashed border-accent bg-transparent text-[inherit] font-[inherit] text-text outline-0 focus:shadow-[0_6px_0_-5px_var(--accent)]"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    onBlur={() => saveEditDevice(device.id)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') saveEditDevice(device.id); }}
-                    autoFocus
-                  />
-                ) : (
-                  <span
-                    className="break-words text-[14px] font-bold leading-tight text-text hover:border-border hover:bg-input border border-transparent rounded px-1.5 cursor-pointer max-w-full"
-                    onClick={() => startEditDevice(device)}
-                    title="Click to rename"
-                  >
-                    {device.name}
-                  </span>
-                )}
+              <div className="flex min-w-0 flex-col items-center w-full">
                 <span
-                  className={`text-[12px] font-extrabold uppercase tracking-[0.05em] ${
+                  className="break-words text-[14px] font-bold leading-tight text-text px-1 max-w-full"
+                  title={device.name}
+                >
+                  {device.name}
+                </span>
+                <span
+                  className={`text-[11px] font-extrabold uppercase tracking-[0.05em] mt-0.5 ${
                     feedback.className === 'manual'
                       ? 'text-red-400'
                       : feedback.className === 'match'
@@ -138,14 +100,17 @@ const BoardCard = memo(function BoardCard({
                   {feedback.text}
                 </span>
               </div>
-              <div
-                className="relative h-[24px] w-11 shrink-0 rounded-full border border-border bg-toggle-track transition-all duration-250 cursor-pointer"
+              <button
+                className={`inline-flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-full border transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 mt-1 ${
+                  device.is_on 
+                    ? 'border-accent bg-accent text-[#0a0800] shadow-gold-glow'
+                    : 'border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]'
+                }`}
                 onClick={() => toggleDevice(device)}
+                title={device.is_on ? 'Turn Off' : 'Turn On'}
               >
-                <div
-                  className={`absolute top-[2px] left-[2px] h-[18px] w-[18px] rounded-full bg-white shadow-[0_2px_6px_rgba(0,0,0,0.25)] transition-transform duration-250 ease-out ${device.is_on ? 'translate-x-[20px]' : ''}`}
-                />
-              </div>
+                {device.is_on ? <LucidePowerOff size={15} strokeWidth={2.5} /> : <LucidePower size={15} strokeWidth={2.5} />}
+              </button>
             </div>
           );
         })}

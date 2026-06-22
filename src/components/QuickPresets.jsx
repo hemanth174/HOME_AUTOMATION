@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-
+import { LucidePower, LucidePowerOff, Trash2 } from 'lucide-react';
 export default function QuickPresets({
   presets,
   isPresetActive,
@@ -31,18 +31,24 @@ export default function QuickPresets({
                   {preset.actions?.length || 0} device{preset.actions?.length === 1 ? '' : 's'}
                 </span>
               </div>
-              <div className="flex shrink-0 gap-2">
+              <div className="flex shrink-0 gap-2 items-center">
                 <button
-                  className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg bg-accent px-3 py-1 text-xs font-extrabold text-[#0a0800] transition-all duration-250 cursor-pointer hover:bg-accent-hover active:translate-y-0 shadow-gold-glow"
+                  className={`inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 ${
+                    active 
+                      ? 'border-accent bg-accent text-[#0a0800] shadow-gold-glow'
+                      : 'border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]'
+                  }`}
                   onClick={() => applyPreset(preset, active)}
+                  title={active ? 'Deactivate' : 'Activate'}
                 >
-                  {active ? 'Deactivate' : 'Activate'}
+                  {active ? <LucidePowerOff size={16} strokeWidth={2.5} /> : <LucidePower size={16} strokeWidth={2.5} />}
                 </button>
                 <button
-                  className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1 text-xs font-extrabold text-red-500 transition-all duration-250 cursor-pointer hover:bg-red-500 hover:text-white active:translate-y-0"
+                  className="inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-red-500/40 bg-red-500/10 text-red-500 transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 hover:bg-red-500 hover:text-white hover:shadow-[0_0_12px_rgba(239,68,68,0.5)]"
                   onClick={() => deletePreset(preset.id)}
+                  title="Delete Preset"
                 >
-                  Delete
+                  <Trash2 size={16} strokeWidth={2.5} />
                 </button>
               </div>
             </article>

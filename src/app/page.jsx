@@ -28,9 +28,6 @@ export default function Dashboard() {
   } = useDashboardData();
 
   const [toast, setToast] = useState('');
-  const [editingBoard, setEditingBoard] = useState(null);
-  const [editingDevice, setEditingDevice] = useState(null);
-  const [editName, setEditName] = useState('');
   const [showAddBoardModal, setShowAddBoardModal] = useState(false);
   const [boardIdentifier, setBoardIdentifier] = useState('');
   const [boardName, setBoardName] = useState('');
@@ -96,8 +93,12 @@ export default function Dashboard() {
   }, [user]);
 
   const isPresetActive = useCallback((preset) => {
-    if (!preset.actions?.length) return false;
-    return preset.actions.every((action) => {
+    let actions = preset.actions;
+    if (typeof actions === 'string') {
+      try { actions = JSON.parse(actions); } catch(e) { actions = []; }
+    }
+    if (!actions?.length) return false;
+    return actions.every((action) => {
       const device = devices.find(d => d.id === action.device_id);
       return device && device.is_on === action.is_on;
     });
@@ -105,7 +106,11 @@ export default function Dashboard() {
 
   const applyPreset = useCallback(async (preset, deactivate = false) => {
     if (!user) return;
-    for (const action of preset.actions || []) {
+    let actions = preset.actions;
+    if (typeof actions === 'string') {
+      try { actions = JSON.parse(actions); } catch(e) { actions = []; }
+    }
+    for (const action of actions || []) {
       const targetState = deactivate ? !action.is_on : action.is_on;
       await supabase
         .from('devices')
@@ -136,31 +141,6 @@ export default function Dashboard() {
     showToast('Preset deleted');
   }, [showToast]);
 
-  const startEditBoard = useCallback((board) => {
-    setEditingBoard(board.id);
-    setEditName(board.name);
-  }, []);
-
-  const saveEditBoard = useCallback(async (boardId) => {
-    if (editName.trim()) {
-      await supabase.from('boards').update({ name: editName.trim() }).eq('id', boardId);
-      setBoards(prev => prev.map(b => b.id === boardId ? { ...b, name: editName.trim() } : b));
-    }
-    setEditingBoard(null);
-  }, [editName]);
-
-  const startEditDevice = useCallback((device) => {
-    setEditingDevice(device.id);
-    setEditName(device.name);
-  }, []);
-
-  const saveEditDevice = useCallback(async (deviceId) => {
-    if (editName.trim()) {
-      await supabase.from('devices').update({ name: editName.trim() }).eq('id', deviceId);
-      setDevices(prev => prev.map(d => d.id === deviceId ? { ...d, name: editName.trim() } : d));
-    }
-    setEditingDevice(null);
-  }, [editName]);
 
   const turnAllDevicesOn = useCallback(async () => {
     if (!user) return;
@@ -407,16 +387,8 @@ export default function Dashboard() {
                 boardDevices={getDevicesForBoard(board.id)}
                 expandedBoards={expandedBoards}
                 toggleBoard={toggleBoard}
-                editingBoard={editingBoard}
-                editName={editName}
-                setEditName={setEditName}
-                startEditBoard={startEditBoard}
-                saveEditBoard={saveEditBoard}
                 turnBoardDevicesOn={turnBoardDevicesOn}
                 turnBoardDevicesOff={turnBoardDevicesOff}
-                editingDevice={editingDevice}
-                startEditDevice={startEditDevice}
-                saveEditDevice={saveEditDevice}
                 getFeedbackStatus={getFeedbackStatus}
                 toggleDevice={toggleDevice}
                 openFullEditBoard={openFullEditBoard}

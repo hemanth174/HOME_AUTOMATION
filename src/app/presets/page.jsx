@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import Toast from '@/components/Toast';
 import Loader from '@/components/Loader';
+import { Edit, LucideEdit2, LucidePower, LucidePowerOff, PowerOffIcon, Trash } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -50,7 +51,7 @@ function PresetDeviceList({ devices, presetActions, onToggleDevice, onToggleActi
           Object.entries(groups).map(([boardName, devs]) => (
             <div key={boardName}>
               {/* Board header */}
-              <div className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-accent bg-accent-bg/40 border-b border-border sticky top-0 z-10">
+              <div className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-accent bg-black border-b border-border sticky top-0 z-10">
                 📋 {boardName}
               </div>
               {/* Devices under this board */}
@@ -147,7 +148,15 @@ export default function PresetsPage() {
         supabase.from('devices').select('id, name, is_on, boards(name)').eq('user_id', user.id).order('relay_index'),
       ]);
       if (!active) return;
-      if (presetsRes.data) setPresets(presetsRes.data);
+      if (presetsRes.data) {
+        setPresets(presetsRes.data.map(p => {
+          let actions = p.actions;
+          if (typeof actions === 'string') {
+            try { actions = JSON.parse(actions); } catch(e) { actions = []; }
+          }
+          return { ...p, actions };
+        }));
+      }
       if (devicesRes.data) setDevices(devicesRes.data);
       const elapsed = Date.now() - startTime;
       setTimeout(() => { if (active) setLoading(false); }, Math.max(0, 500 - elapsed));
@@ -163,10 +172,14 @@ export default function PresetsPage() {
       .channel('presets-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'presets', filter: `user_id=eq.${user.id}` },
         (payload) => {
+          let newPreset = payload.new;
+          if (newPreset && typeof newPreset.actions === 'string') {
+            try { newPreset.actions = JSON.parse(newPreset.actions); } catch(e) { newPreset.actions = []; }
+          }
           if (payload.eventType === 'INSERT') {
-            setPresets(prev => prev.some(p => p.id === payload.new.id) ? prev : [...prev, payload.new]);
+            setPresets(prev => prev.some(p => p.id === newPreset.id) ? prev : [...prev, newPreset]);
           } else if (payload.eventType === 'UPDATE') {
-            setPresets(prev => prev.map(p => p.id === payload.new.id ? payload.new : p));
+            setPresets(prev => prev.map(p => p.id === newPreset.id ? newPreset : p));
           } else if (payload.eventType === 'DELETE') {
             setPresets(prev => prev.filter(p => p.id !== payload.old.id));
           }
@@ -222,9 +235,13 @@ export default function PresetsPage() {
   };
 
   const openEditModal = (preset) => {
+    let actions = preset.actions;
+    if (typeof actions === 'string') {
+      try { actions = JSON.parse(actions); } catch(e) { actions = []; }
+    }
     setEditingPreset(preset);
     setPresetName(preset.name);
-    setPresetActions(buildPresetActions(devices, preset.actions || []));
+    setPresetActions(buildPresetActions(devices, actions || []));
     setShowModal(true);
   };
 
@@ -277,15 +294,23 @@ export default function PresetsPage() {
   };
 
   const isPresetActive = (preset) => {
-    if (!preset.actions?.length) return false;
-    return preset.actions.every(action => {
+    let actions = preset.actions;
+    if (typeof actions === 'string') {
+      try { actions = JSON.parse(actions); } catch(e) { actions = []; }
+    }
+    if (!actions?.length) return false;
+    return actions.every(action => {
       const device = devices.find(d => d.id === action.device_id);
       return device && device.is_on === action.is_on;
     });
   };
 
   const applyPreset = async (preset, deactivate = false) => {
-    const actions = preset.actions || [];
+    let actions = preset.actions;
+    if (typeof actions === 'string') {
+      try { actions = JSON.parse(actions); } catch(e) { actions = []; }
+    }
+    actions = actions || [];
     for (const action of actions) {
       const nextState = deactivate ? !action.is_on : action.is_on;
       await supabase.from('devices').update({ is_on: nextState, last_changed: new Date().toISOString() }).eq('id', action.device_id);
@@ -387,22 +412,29 @@ export default function PresetsPage() {
                     </div>
                     <div className="flex gap-2 flex-wrap justify-end">
                       <button
-                        className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-1 text-xs font-extrabold text-[#0a0800] transition-all duration-250 cursor-pointer hover:bg-accent-hover shadow-gold-glow"
+                        className={`inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 ${
+                          active 
+                            ? 'border-accent bg-accent text-[#0a0800] shadow-gold-glow'
+                            : 'border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]'
+                        }`}
                         onClick={() => applyPreset(preset, active)}
+                        title={active ? 'Deactivate' : 'Activate'}
                       >
-                        {active ? 'Deactivate' : 'Activate'}
+                        {active ? <LucidePowerOff size={16} strokeWidth={2.5} /> : <LucidePower size={16} strokeWidth={2.5} />}
                       </button>
                       <button
-                        className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-1 text-xs font-extrabold text-text transition-all duration-250 cursor-pointer hover:bg-card-alt"
+                        className="inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-1 bg-card transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]"
                         onClick={() => openEditModal(preset)}
+                        title="Edit Preset"
                       >
-                        Edit
+                        <Edit size={16} strokeWidth={2.5} />
                       </button>
                       <button
-                        className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-1 text-xs font-extrabold text-red-500 transition-all duration-250 cursor-pointer hover:bg-red-500 hover:text-white"
+                        className="inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-red-500/40 bg-red-500/10 text-red-500 transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 hover:bg-red-500 hover:text-white hover:shadow-[0_0_12px_rgba(239,68,68,0.5)]"
                         onClick={() => deletePreset(preset.id)}
+                        title="Delete Preset"
                       >
-                        Delete
+                        <Trash size={16} strokeWidth={2.5} />
                       </button>
                     </div>
                   </div>

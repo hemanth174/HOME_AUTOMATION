@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import Toast from '@/components/Toast';
 import Loader from '@/components/Loader';
+import { Edit, Trash2, LucidePower, LucidePowerOff } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -130,7 +131,7 @@ function TimePicker12h({ value, onChange }) {
 
 // ─── Grouped device picker ────────────────────────────────────────────────────
 
-function DevicePicker({ devices, selectedDevice, onSelect }) {
+function DevicePicker({ devices, selectedDevices, onSelect }) {
   const [search, setSearch] = useState('');
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -154,30 +155,41 @@ function DevicePicker({ devices, selectedDevice, onSelect }) {
         {Object.keys(groups).length === 0 ? (
           <p className="px-4 py-3 text-xs text-text-muted font-semibold">No devices found.</p>
         ) : (
-          Object.entries(groups).map(([boardName, devs]) => (
+          Object.entries(groups).map(([boardName, devs]) => {
+            const allSelected = devs.every(d => selectedDevices.includes(d.id));
+            return (
             <div key={boardName}>
-              <div className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-accent bg-black border-b border-border sticky top-0">
-                📋 {boardName}
+              <div 
+                className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-accent bg-black border-b border-border sticky top-0 cursor-pointer hover:bg-black/80 flex justify-between items-center transition-all select-none"
+                onClick={() => onSelect(devs.map(d => d.id), !allSelected)}
+                title={allSelected ? "Deselect All in Board" : "Select All in Board"}
+              >
+                <span>📋 {boardName}</span>
+                <span className="text-[9px] opacity-70 hover:opacity-100">{allSelected ? 'Deselect All' : 'Select All'}</span>
               </div>
-              {devs.map(d => (
+              {devs.map(d => {
+                const isSelected = selectedDevices.includes(d.id);
+                return (
                 <button
                   key={d.id}
                   type="button"
                   onClick={() => onSelect(d.id)}
                   className={`w-full text-left px-4 py-2.5 text-xs font-bold border-b border-border last:border-b-0 transition-all cursor-pointer ${
-                    selectedDevice === d.id ? 'bg-accent text-[#0a0800]' : 'text-text hover:bg-accent-bg/50'
+                    isSelected ? 'bg-accent text-[#0a0800]' : 'text-text hover:bg-accent-bg/50'
                   }`}
                 >
-                  {selectedDevice === d.id ? '✓ ' : '  '}{d.name}
+                  {isSelected ? '✓ ' : '  '}{d.name}
                 </button>
-              ))}
+                );
+              })}
             </div>
-          ))
+            );
+          })
         )}
       </div>
-      {selectedDevice && (
+      {selectedDevices.length > 0 && (
         <p className="text-[10px] font-bold text-accent/80">
-          Selected: {devices.find(d => d.id === selectedDevice)?.boards?.name} → {devices.find(d => d.id === selectedDevice)?.name}
+          Selected: {selectedDevices.length} device{selectedDevices.length !== 1 ? 's' : ''}
         </p>
       )}
     </div>
@@ -212,7 +224,7 @@ export default function SchedulesPage() {
   };
 
   // Form state — scheduleTime stored as "HH:MM" (24h) internally
-  const [selectedDevice, setSelectedDevice] = useState('');
+  const [selectedDevices, setSelectedDevices] = useState([]);
   const [scheduleTime, setScheduleTime] = useState('08:00');
   const [scheduleDays, setScheduleDays] = useState([]);
   const [scheduleAction, setScheduleAction] = useState(true);
@@ -244,7 +256,6 @@ export default function SchedulesPage() {
       if (schedulesRes.data) setSchedules(schedulesRes.data);
       if (devicesRes.data) {
         setDevices(devicesRes.data);
-        if (devicesRes.data.length > 0) setSelectedDevice(devicesRes.data[0].id);
       }
       setTimeout(() => { if (active) setLoading(false); }, Math.max(0, 500 - (Date.now() - startTime)));
     };
@@ -289,12 +300,12 @@ export default function SchedulesPage() {
     setTimeConfirmed(false);
     setTimeError('');
     setEditingSchedule(null);
-    if (devices.length > 0) setSelectedDevice(devices[0].id);
+    setSelectedDevices([]);
   };
 
   const openEditModal = (schedule) => {
     setEditingSchedule(schedule);
-    setSelectedDevice(schedule.device_id);
+    setSelectedDevices([schedule.device_id]);
     setScheduleTime(schedule.time.substring(0, 5)); // "HH:MM:SS" -> "HH:MM"
     setScheduleDays(schedule.days);
     setScheduleAction(schedule.action);
@@ -320,9 +331,21 @@ export default function SchedulesPage() {
     setScheduleDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
   };
 
+  const toggleDeviceSelection = (idOrIds, forceState) => {
+    if (Array.isArray(idOrIds)) {
+      if (forceState) {
+        setSelectedDevices(prev => [...new Set([...prev, ...idOrIds])]);
+      } else {
+        setSelectedDevices(prev => prev.filter(d => !idOrIds.includes(d)));
+      }
+    } else {
+      setSelectedDevices(prev => prev.includes(idOrIds) ? prev.filter(d => d !== idOrIds) : [...prev, idOrIds]);
+    }
+  };
+
   const addSchedule = async (e) => {
     e.preventDefault();
-    if (!selectedDevice) { setToast('Please select a device'); return; }
+    if (selectedDevices.length === 0) { setToast('Please select at least one device'); return; }
     if (scheduleDays.length === 0) { setToast('Please select at least one day'); return; }
     if (!timeConfirmed) { setToast('Please press "Confirm" to confirm the time'); return; }
     const { valid, error } = validateTime(scheduleTime);
@@ -331,54 +354,70 @@ export default function SchedulesPage() {
     const [newH, newM] = scheduleTime.split(':').map(Number);
     const sortedDays = [...scheduleDays].sort();
 
-    // Duplicate / conflict: schedule vs schedule
-    const sameDayConflicts = schedules.filter(sc => {
-      if (sc.device_id !== selectedDevice) return false;
-      const [scH, scM] = sc.time.split(':').map(Number);
-      if (scH !== newH || scM !== newM) return false;
-      return sortedDays.some(d => sc.days.includes(d));
-    });
-    if (sameDayConflicts.length > 0) {
-      const dup = sameDayConflicts.find(sc => sc.action === scheduleAction);
-      const contra = sameDayConflicts.find(sc => sc.action !== scheduleAction);
-      if (dup) {
-        const overlap = sortedDays.filter(d => dup.days.includes(d)).map(d => DAY_NAMES[d]).join(', ');
-        setToast(`Duplicate: a schedule already sets this device to Turn ${dup.action ? 'ON' : 'OFF'} at ${formatTime(scheduleTime)} on ${overlap}.`); return;
-      }
-      if (contra) {
-        const overlap = sortedDays.filter(d => contra.days.includes(d)).map(d => DAY_NAMES[d]).join(', ');
-        setToast(`Conflict: a schedule already sets this device to Turn ${contra.action ? 'ON' : 'OFF'} at ${formatTime(scheduleTime)} on ${overlap}. Delete it first.`); return;
+    // Check conflicts for each selected device
+    for (const deviceId of selectedDevices) {
+      const sameDayConflicts = schedules.filter(sc => {
+        if (sc.device_id !== deviceId) return false;
+        if (editingSchedule && sc.id === editingSchedule.id) return false; // ignore self
+        const [scH, scM] = sc.time.split(':').map(Number);
+        if (scH !== newH || scM !== newM) return false;
+        return sortedDays.some(d => sc.days.includes(d));
+      });
+      if (sameDayConflicts.length > 0) {
+        const dup = sameDayConflicts.find(sc => sc.action === scheduleAction);
+        const contra = sameDayConflicts.find(sc => sc.action !== scheduleAction);
+        const devName = devices.find(d => d.id === deviceId)?.name || 'A device';
+        if (dup) {
+          const overlap = sortedDays.filter(d => dup.days.includes(d)).map(d => DAY_NAMES[d]).join(', ');
+          setToast(`Duplicate: ${devName} already has a schedule to Turn ${dup.action ? 'ON' : 'OFF'} at ${formatTime(scheduleTime)} on ${overlap}.`); return;
+        }
+        if (contra) {
+          const overlap = sortedDays.filter(d => contra.days.includes(d)).map(d => DAY_NAMES[d]).join(', ');
+          setToast(`Conflict: ${devName} already has a schedule to Turn ${contra.action ? 'ON' : 'OFF'} at ${formatTime(scheduleTime)} on ${overlap}. Delete it first.`); return;
+        }
       }
     }
 
     // Cross-feature: schedule vs alarm
-    const { data: alarmConflicts } = await supabase.from('alarms').select('id, trigger_at, action').eq('user_id', user.id).eq('device_id', selectedDevice).eq('fired', false);
-    if (alarmConflicts) {
-      for (const alarm of alarmConflicts) {
-        const ad = new Date(alarm.trigger_at);
-        if (!sortedDays.includes(ad.getDay())) continue;
-        if (ad.getHours() !== newH || ad.getMinutes() !== newM) continue;
-        if (alarm.action !== scheduleAction) {
-          setToast(`Cross-conflict: an alarm on ${DAY_NAMES[ad.getDay()]} at ${formatTime(scheduleTime)} already sets this device to Turn ${alarm.action ? 'ON' : 'OFF'}.`); return;
+    for (const deviceId of selectedDevices) {
+      const { data: alarmConflicts } = await supabase.from('alarms').select('id, trigger_at, action').eq('user_id', user.id).eq('device_id', deviceId).eq('fired', false);
+      if (alarmConflicts) {
+        for (const alarm of alarmConflicts) {
+          const ad = new Date(alarm.trigger_at);
+          if (!sortedDays.includes(ad.getDay())) continue;
+          if (ad.getHours() !== newH || ad.getMinutes() !== newM) continue;
+          const devName = devices.find(d => d.id === deviceId)?.name || 'A device';
+          if (alarm.action !== scheduleAction) {
+            setToast(`Cross-conflict: ${devName} has an alarm on ${DAY_NAMES[ad.getDay()]} at ${formatTime(scheduleTime)} that sets it to Turn ${alarm.action ? 'ON' : 'OFF'}.`); return;
+          }
+          setToast(`Duplicate: ${devName} already has an alarm at this exact time/day.`); return;
         }
-        setToast('Duplicate: an alarm already exists for this device at this exact time/day.'); return;
       }
     }
 
+    const rows = selectedDevices.map(deviceId => ({
+      user_id: user.id,
+      device_id: deviceId,
+      action: scheduleAction,
+      time: scheduleTime,
+      days: sortedDays,
+      enabled: true,
+    }));
+
     if (editingSchedule) {
-      const { error: updateError } = await supabase.from('schedules').update({
-        device_id: selectedDevice, action: scheduleAction,
-        time: scheduleTime, days: sortedDays, enabled: true,
-      }).eq('id', editingSchedule.id);
-      if (updateError) { setToast(updateError.message); return; }
+      if (selectedDevices.length === 1 && selectedDevices[0] === editingSchedule.device_id) {
+         const { error: updateError } = await supabase.from('schedules').update(rows[0]).eq('id', editingSchedule.id);
+         if (updateError) { setToast(updateError.message); return; }
+      } else {
+         await supabase.from('schedules').delete().eq('id', editingSchedule.id);
+         const { error: insertError } = await supabase.from('schedules').insert(rows);
+         if (insertError) { setToast(insertError.message); return; }
+      }
       setToast('Schedule updated');
     } else {
-      const { error: insertError } = await supabase.from('schedules').insert({
-        user_id: user.id, device_id: selectedDevice, action: scheduleAction,
-        time: scheduleTime, days: sortedDays, enabled: true,
-      });
+      const { error: insertError } = await supabase.from('schedules').insert(rows);
       if (insertError) { setToast(insertError.message); return; }
-      setToast('Schedule created');
+      setToast(`Created ${rows.length} schedule${rows.length > 1 ? 's' : ''}`);
     }
     closeModal();
   };
@@ -439,7 +478,7 @@ export default function SchedulesPage() {
                   key={schedule.id}
                   className={`relative overflow-hidden rounded-[18px] border border-border bg-card p-[18px] shadow-lg transition-all duration-200 hover:-translate-y-px hover:border-accent/40 hover:shadow-2xl ${!schedule.enabled ? 'opacity-55' : ''}`}
                 >
-                  <div className="flex items-start justify-between gap-3 max-md:flex-col max-md:items-start w-full">
+                  <div className="flex items-start justify-between gap-3  max-md:items-start w-full">
                     <div className="min-w-0 flex-1">
                       {/* Big time */}
                       <div className="text-2xl font-extrabold text-text tracking-tight">{formatTime(schedule.time)}</div>
@@ -464,28 +503,35 @@ export default function SchedulesPage() {
                         </div>
                       )}
                     </div>
-                    {/* Toggle */}
-                    <div
-                      className={`relative shrink-0 mt-1 h-[24px] w-11 rounded-full border border-border bg-toggle-track transition-all duration-250 cursor-pointer ${schedule.enabled ? 'border-transparent bg-toggle-on shadow-[0_0_14px_var(--accent-glow)]' : ''}`}
-                      onClick={() => toggleSchedule(schedule)}
-                    >
-                      <div className={`absolute top-[2px] left-[2px] h-[18px] w-[18px] rounded-full bg-white shadow-[0_2px_6px_rgba(0,0,0,0.25)] transition-transform duration-250 ease-out ${schedule.enabled ? 'translate-x-[20px]' : ''}`} />
+                    <div className="flex gap-2 max-md:flex-col justify-end items-center max-md:mt-4">
+                      <button
+                        className={`inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 ${
+                          schedule.enabled 
+                            ? 'border-accent bg-accent text-[#0a0800] shadow-gold-glow'
+                            : 'border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]'
+                        }`}
+                        onClick={() => toggleSchedule(schedule)}
+                        title={schedule.enabled ? 'Disable Schedule' : 'Enable Schedule'}
+                      >
+                        {schedule.enabled ? <LucidePower size={16} strokeWidth={2.5} /> : <LucidePowerOff size={16} strokeWidth={2.5} />}
+                      </button>
+                      <button
+                        className="inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-border bg-card text-text-muted transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]"
+                        onClick={() => openEditModal(schedule)}
+                        title="Edit Schedule"
+                      >
+                        <Edit size={16} strokeWidth={2.5} />
+                      </button>
+                      <button
+                        className="inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-red-500/40 bg-red-500/10 text-red-500 transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 hover:bg-red-500 hover:text-white hover:shadow-[0_0_12px_rgba(239,68,68,0.5)]"
+                        onClick={() => deleteSchedule(schedule.id)}
+                        title="Delete Schedule"
+                      >
+                        <Trash2 size={16} strokeWidth={2.5} />
+                      </button>
                     </div>
                   </div>
-                  <div className="mt-3.5 flex gap-2 justify-end">
-                    <button
-                      className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-1 text-xs font-extrabold text-text transition-all cursor-pointer hover:bg-card-alt"
-                      onClick={() => openEditModal(schedule)}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-1 text-xs font-extrabold text-red-500 transition-all cursor-pointer hover:bg-red-500 hover:text-white"
-                      onClick={() => deleteSchedule(schedule.id)}
-                    >
-                      Delete
-                    </button>
-                  </div>
+              
                 </div>
               );
             })}
@@ -520,7 +566,7 @@ export default function SchedulesPage() {
               {/* Device — grouped by board with search */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-extrabold tracking-wide text-text-muted">Device</label>
-                <DevicePicker devices={devices} selectedDevice={selectedDevice} onSelect={setSelectedDevice} />
+                <DevicePicker devices={devices} selectedDevices={selectedDevices} onSelect={toggleDeviceSelection} />
               </div>
 
               {/* Time — custom 12h picker */}

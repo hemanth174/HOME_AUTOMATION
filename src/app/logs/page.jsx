@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import Loader from '@/components/Loader';
 import Toast from '@/components/Toast';
@@ -8,6 +8,8 @@ import Toast from '@/components/Toast';
 export default function LogsPage() {
   const [user, setUser] = useState(null);
   const [logs, setLogs] = useState([]);
+  const [boards, setBoards] = useState([]);
+  const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState('');
@@ -68,20 +70,34 @@ export default function LogsPage() {
           .delete()
           .lt('created_at', sevenDaysAgo);
 
-        const { data } = await supabase
-          .from('activity_logs')
-          .select('id, created_at, action, device_name, triggered_by')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(100);
+        const [logsRes, boardsRes, devicesRes] = await Promise.all([
+          supabase
+            .from('activity_logs')
+            .select('id, created_at, action, device_name, triggered_by, device_id')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(100),
+          supabase
+            .from('boards')
+            .select('id, name, board_identifier')
+            .eq('user_id', user.id),
+          supabase
+            .from('devices')
+            .select('id, name, board_id')
+            .eq('user_id', user.id)
+        ]);
 
-        if (active && data) setLogs(data);
+        if (active) {
+          if (logsRes.data) setLogs(logsRes.data);
+          if (boardsRes.data) setBoards(boardsRes.data);
+          if (devicesRes.data) setDevices(devicesRes.data);
+        }
       } catch (err) {
         console.warn('Logs table might not exist yet:', err);
       }
 
       const elapsed = Date.now() - startTime;
-      const remaining = Math.max(0, 2000 - elapsed);
+      const remaining = Math.max(0, 500 - elapsed);
       setTimeout(() => {
         if (active) setLoading(false);
       }, remaining);
@@ -133,14 +149,67 @@ export default function LogsPage() {
     }
   };
 
-  const filteredLogs = logs.filter(log => {
-    const term = search.toLowerCase();
-    return (
-      (log.device_name || '').toLowerCase().includes(term) ||
-      (log.action || '').toLowerCase().includes(term) ||
-      (log.triggered_by || '').toLowerCase().includes(term)
-    );
-  });
+  const getBoardIdentifier = (log) => {
+    if (!log.device_id) return 'board_main';
+    const device = devices.find(d => d.id === log.device_id);
+    if (!device) return 'board_main';
+    const board = boards.find(b => b.id === device.board_id);
+    return board ? board.board_identifier : 'board_main';
+  };
+
+  const getTriggerSource = (triggered_by) => {
+    if (!triggered_by) return 'Manual';
+    const lower = triggered_by.toLowerCase();
+    if (lower.includes('manual') || lower.includes('web dashboard') || lower.includes('override')) return 'Manual';
+    if (lower.includes('schedule')) return 'Schedule';
+    if (lower.includes('alarm')) return 'Alarm';
+    if (lower.includes('preset')) return 'Preset';
+    if (lower.includes('voice') || lower.includes('alexa') || lower.includes('google')) return 'Voice';
+    if (lower.includes('testing')) return 'Testing';
+    return triggered_by;
+  };
+
+  const getOrdinalSuffix = (day) => {
+    if (day > 3 && day < 21) return 'th';
+    switch (day % 10) {
+      case 1:  return 'st';
+      case 2:  return 'nd';
+      case 3:  return 'rd';
+      default: return 'th';
+    }
+  };
+
+  const formatLogTime = (dateString) => {
+    const date = new Date(dateString);
+    const day = date.getDate();
+    const month = date.toLocaleDateString([], { month: 'short' });
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
+    const seconds = date.getSeconds();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const formattedHours = String(hours % 12 || 12).padStart(2, '0');
+    const formattedMinutes = String(minutes).padStart(2, '0');
+    const formattedSeconds = String(seconds).padStart(2, '0');
+    return `${day}${getOrdinalSuffix(day)} ${month} ${formattedHours}:${formattedMinutes}:${formattedSeconds} ${ampm}`;
+  };
+
+  const filteredLogs = useMemo(() => {
+    const term = search.toLowerCase().trim();
+    if (!term) return logs;
+    return logs.filter(log => {
+      const boardIdVal = getBoardIdentifier(log).toLowerCase();
+      const triggerSource = getTriggerSource(log.triggered_by).toLowerCase();
+      const stateVal = (log.action?.toLowerCase().includes('on') || log.action?.toLowerCase().includes('activate')) ? 'on' : 'off';
+      return (
+        (log.device_name || '').toLowerCase().includes(term) ||
+        (log.action || '').toLowerCase().includes(term) ||
+        (log.triggered_by || '').toLowerCase().includes(term) ||
+        boardIdVal.includes(term) ||
+        triggerSource.includes(term) ||
+        stateVal === term
+      );
+    });
+  }, [logs, search, boards, devices]);
 
   if (loading) {
     return <Loader message="Loading activity logs..." />;
@@ -182,36 +251,52 @@ export default function LogsPage() {
             {search ? 'No matches found for your filter.' : 'No activity logged yet.'}
           </div>
         ) : (
-          <div className="divide-y divide-border/30">
-            {filteredLogs.map((log) => {
-              const date = new Date(log.created_at);
-              const formattedTime = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-              const formattedDate = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-              const isActionOn = log.action?.toLowerCase().includes('on') || log.action?.toLowerCase().includes('activate');
-
-              return (
-                <div key={log.id} className="flex items-center justify-between gap-4 px-5 py-3 hover:bg-white/[0.01] transition-colors max-sm:flex-col max-sm:items-start max-sm:gap-2">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className={`h-2 w-2 shrink-0 rounded-full ${isActionOn ? 'bg-accent shadow-gold-glow animate-pulse' : 'bg-text-muted/40'}`} />
-                    <div className="flex flex-col min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-extrabold text-text truncate max-w-[150px]">{log.device_name || 'Device'}</span>
-                        <span className={`text-[10px] font-black uppercase px-1.5 py-0.5 rounded tracking-wide ${isActionOn ? 'text-accent bg-accent-bg border border-accent/15' : 'text-text-muted bg-input border border-border/40'}`}>
-                          {log.action}
+          <div className="w-full overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[600px]">
+              <thead>
+                <tr className="border-b border-border/40 text-text-muted text-[10px] uppercase tracking-wider font-extrabold select-none">
+                  <th className="py-4 px-6 font-extrabold">board_id</th>
+                  <th className="py-4 px-6 font-extrabold">device name</th>
+                  <th className="py-4 px-6 font-extrabold">time</th>
+                  <th className="py-4 px-6 font-extrabold text-right">state</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/20 text-xs font-semibold text-text">
+                {filteredLogs.map((log) => {
+                  const isActionOn = log.action?.toLowerCase().includes('on') || log.action?.toLowerCase().includes('activate');
+                  const boardIdentifier = getBoardIdentifier(log);
+                  const triggerSource = getTriggerSource(log.triggered_by);
+                  
+                  return (
+                    <tr key={log.id} className="hover:bg-white/[0.01] transition-colors">
+                      <td className="py-3.5 px-6 font-mono text-[11px] text-text-muted">
+                        {boardIdentifier}
+                      </td>
+                      <td className="py-3.5 px-6 font-bold">
+                        <span className="text-text">{log.device_name || 'Device'}</span>
+                        <span className="text-text-muted font-bold text-[10px] ml-1.5">
+                          ({triggerSource})
                         </span>
-                      </div>
-                      <span className="text-[10px] text-text-muted mt-1 font-bold">
-                        Triggered via: <span className="text-text/80">{log.triggered_by}</span>
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="text-right text-[10px] font-extrabold text-text-muted shrink-0 max-sm:text-left">
-                    {formattedDate} at {formattedTime}
-                  </div>
-                </div>
-              );
-            })}
+                      </td>
+                      <td className="py-3.5 px-6 text-text-muted font-bold">
+                        {formatLogTime(log.created_at)}
+                      </td>
+                      <td className="py-3.5 px-6 text-right">
+                        <span 
+                          className={`inline-flex items-center justify-center min-w-[54px] py-1 px-3 rounded-full text-[9px] font-black uppercase tracking-wider select-none ${
+                            isActionOn 
+                              ? 'bg-accent text-[var(--btn-text)] shadow-gold-glow font-black' 
+                              : 'bg-border text-text-muted'
+                          }`}
+                        >
+                          {isActionOn ? 'ON' : 'OFF'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import Toast from '@/components/Toast';
 import Loader from '@/components/Loader';
+import { Trash2 } from 'lucide-react';
 
 export default function BoardsPage() {
   const [user, setUser] = useState(null);
@@ -230,10 +231,10 @@ export default function BoardsPage() {
                   </div>
                 </div>
                 <button
-                  className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-1 text-xs font-extrabold text-red-500 transition-all duration-250 cursor-pointer hover:bg-red-500 hover:text-white active:translate-y-0 max-md:w-full max-md:justify-center"
+                  className=" hover:text-[red] transition-all duration-300 border border-1 p-1 rounded-sm  max-md:w-full max-md:justify-center"
                   onClick={() => deleteBoard(board.id)}
                 >
-                  Delete
+                  <Trash2 />
                 </button>
               </div>
             ))}

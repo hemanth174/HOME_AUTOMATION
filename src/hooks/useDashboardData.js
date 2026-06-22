@@ -46,7 +46,15 @@ export default function useDashboardData() {
 
       if (boardsRes.data) setBoards(boardsRes.data);
       if (devicesRes.data) setDevices(devicesRes.data);
-      if (presetsRes.data) setPresets(presetsRes.data);
+      if (presetsRes.data) {
+        setPresets(presetsRes.data.map(p => {
+          let actions = p.actions;
+          if (typeof actions === 'string') {
+            try { actions = JSON.parse(actions); } catch(e) { actions = []; }
+          }
+          return { ...p, actions };
+        }));
+      }
 
       // Expand all boards by default
       if (boardsRes.data) {
@@ -83,8 +91,12 @@ export default function useDashboardData() {
         else if (payload.eventType === 'DELETE') setDevices(prev => prev.filter(d => d.id !== payload.old.id));
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'presets', filter: `user_id=eq.${user.id}` }, (payload) => {
-        if (payload.eventType === 'UPDATE') setPresets(prev => prev.map(p => p.id === payload.new.id ? payload.new : p));
-        else if (payload.eventType === 'INSERT') setPresets(prev => [...prev, payload.new]);
+        let newPreset = payload.new;
+        if (newPreset && typeof newPreset.actions === 'string') {
+          try { newPreset.actions = JSON.parse(newPreset.actions); } catch(e) { newPreset.actions = []; }
+        }
+        if (payload.eventType === 'UPDATE') setPresets(prev => prev.map(p => p.id === newPreset.id ? newPreset : p));
+        else if (payload.eventType === 'INSERT') setPresets(prev => [...prev, newPreset]);
         else if (payload.eventType === 'DELETE') setPresets(prev => prev.filter(p => p.id !== payload.old.id));
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'boards', filter: `user_id=eq.${user.id}` }, (payload) => {
@@ -106,7 +118,15 @@ export default function useDashboardData() {
             ]);
             if (boardsRes.data) setBoards(boardsRes.data);
             if (devicesRes.data) setDevices(devicesRes.data);
-            if (presetsRes.data) setPresets(presetsRes.data);
+            if (presetsRes.data) {
+              setPresets(presetsRes.data.map(p => {
+                let actions = p.actions;
+                if (typeof actions === 'string') {
+                  try { actions = JSON.parse(actions); } catch(e) { actions = []; }
+                }
+                return { ...p, actions };
+              }));
+            }
           }
         }
       });
