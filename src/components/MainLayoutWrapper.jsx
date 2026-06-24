@@ -9,7 +9,7 @@ import Loader from './Loader';
 
 export default function MainLayoutWrapper({ children }) {
   const pathname = usePathname();
-  const cleanPath = (pathname || '').replace(/\/$/, '') || '/';
+  const cleanPath = (pathname || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '') || '/';
   const VALID_ROUTES = ['/', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile'];
   const is404Page = !VALID_ROUTES.includes(cleanPath);
   const isLoginPage = cleanPath === '/login';

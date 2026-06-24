@@ -88,7 +88,7 @@ export default function Navbar() {
     window.location.href = '/login';
   };
 
-  const cleanPath = (pathname || '').replace(/\/$/, '') || '/';
+  const cleanPath = (pathname || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '') || '/';
   const VALID_ROUTES = ['/', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile'];
   const is404Page = !VALID_ROUTES.includes(cleanPath);
   const isLoginPage = cleanPath === '/login';

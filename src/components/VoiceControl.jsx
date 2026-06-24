@@ -59,6 +59,22 @@ const findBestDevice = (query, list, threshold = 0.4) => {
   return bestScore >= threshold ? best : null;
 };
 
+/**
+ * Parse time string (e.g. "9:30 pm", "8 am", "14:00") into hour and minute.
+ */
+const parseTime = (timeStr) => {
+  const match = timeStr.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (!match) return null;
+  let hour = parseInt(match[1], 10);
+  const minute = match[2] ? parseInt(match[2], 10) : 0;
+  const ampm = match[3] ? match[3].toLowerCase() : null;
+
+  if (ampm === 'pm' && hour < 12) hour += 12;
+  if (ampm === 'am' && hour === 12) hour = 0;
+
+  return { hour, minute };
+};
+
 // ---------------------------------------------------------------------------
 export default function VoiceControl({ devices: propDevices, boards: propBoards, presets: propPresets, applyPreset, onToast }) {
   const [listening, setListening] = useState(false);
@@ -73,6 +89,38 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
   useEffect(() => { devicesRef.current = propDevices ?? []; }, [propDevices]);
   useEffect(() => { boardsRef.current = propBoards ?? []; }, [propBoards]);
   useEffect(() => { presetsRef.current = propPresets ?? []; }, [propPresets]);
+
+  // Fetch missing prop data on mount if self-contained
+  useEffect(() => {
+    const fetchMissingData = async () => {
+      if (!propDevices || propDevices.length === 0) {
+        const { data: devs } = await supabase
+          .from('devices')
+          .select('id, name, is_on, board_id')
+          .order('relay_index');
+        if (devs) {
+          devicesRef.current = devs;
+        }
+      }
+      if (!propBoards || propBoards.length === 0) {
+        const { data: bds } = await supabase
+          .from('boards')
+          .select('id, name');
+        if (bds) {
+          boardsRef.current = bds;
+        }
+      }
+      if (!propPresets || propPresets.length === 0) {
+        const { data: prs } = await supabase
+          .from('presets')
+          .select('id, name, actions');
+        if (prs) {
+          presetsRef.current = prs;
+        }
+      }
+    };
+    fetchMissingData();
+  }, [propDevices, propBoards, propPresets]);
 
   // Speak confirmation using high-quality male voices
   const speak = useCallback((textToSpeak) => {
@@ -185,58 +233,11 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     const text = normalizeText(transcript);
     const commandDevices = await getLatestDevices();
     const commandBoards = boardsRef.current;
+    const safeToast = onToast || ((msg) => console.log(msg));
 
-    onToast(`Heard: "${transcript}"`);
+    safeToast(`Heard: "${transcript}"`);
 
-    // 1. Preset activation: "activate <name>"
-    if (text.startsWith('activate ')) {
-      const presetName = text.replace('activate ', '').trim();
-
-      // Try local presets first
-      const matchedPreset = presetsRef.current.find(p =>
-        normalizeText(p.name).includes(presetName) || presetName.includes(normalizeText(p.name))
-      );
-
-      if (matchedPreset) {
-        if (applyPreset) {
-          await applyPreset(matchedPreset);
-        } else {
-          await Promise.all(
-            matchedPreset.actions.map(action =>
-              supabase.from('devices')
-                .update({ is_on: action.is_on, last_changed: new Date().toISOString() })
-                .eq('id', action.device_id)
-            )
-          );
-        }
-        onToast(`Activated preset: ${matchedPreset.name}`);
-        speak(`Activated preset ${matchedPreset.name}`);
-      } else {
-        const { data: dbPresets } = await supabase
-          .from('presets')
-          .select('id, name, actions')
-          .ilike('name', `%${presetName}%`)
-          .limit(1);
-        if (dbPresets?.length) {
-          const preset = dbPresets[0];
-          await Promise.all(
-            preset.actions.map(action =>
-              supabase.from('devices')
-                .update({ is_on: action.is_on, last_changed: new Date().toISOString() })
-                .eq('id', action.device_id)
-            )
-          );
-          onToast(`Activated preset: ${preset.name}`);
-          speak(`Activated preset ${preset.name}`);
-        } else {
-          onToast(`Preset "${presetName}" not found`);
-          speak(`Preset ${presetName} not found`);
-        }
-      }
-      return;
-    }
-
-    // 2. All on / all off
+    // 1. All on / all off
     const allOnPhrases = ['turn on all', 'all on', 'everything on', 'all lights on', 'all devices on'];
     const allOffPhrases = ['turn off all', 'all off', 'everything off', 'all lights off', 'all devices off'];
 
@@ -244,7 +245,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       await Promise.all(commandDevices.map(d =>
         supabase.from('devices').update({ is_on: true, last_changed: new Date().toISOString() }).eq('id', d.id)
       ));
-      onToast('All devices turned ON');
+      safeToast('All devices turned ON');
       speak('All devices turned on');
       return;
     }
@@ -252,60 +253,357 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       await Promise.all(commandDevices.map(d =>
         supabase.from('devices').update({ is_on: false, last_changed: new Date().toISOString() }).eq('id', d.id)
       ));
-      onToast('All devices turned OFF');
+      safeToast('All devices turned OFF');
       speak('All devices turned off');
       return;
     }
 
-    // 3. Turn on/off a target (board name or device name)
-    const turnOnMatch = text.match(/(?:turn|switch|put)\s+on\s+(.+)/);
-    const turnOffMatch = text.match(/(?:turn|switch|put)\s+off\s+(.+)/);
+    // 2. Clear/Delete All Alarms or Schedules
+    if (text === 'delete all alarms' || text === 'clear all alarms') {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('alarms').delete().eq('user_id', user.id);
+        safeToast('All alarms deleted');
+        speak('All alarms deleted');
+      }
+      return;
+    }
+    if (text === 'delete all schedules' || text === 'clear all schedules') {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('schedules').delete().eq('user_id', user.id);
+        safeToast('All schedules deleted');
+        speak('All schedules deleted');
+      }
+      return;
+    }
 
-    if (turnOnMatch || turnOffMatch) {
-      const isOn = !!turnOnMatch;
-      const rawTarget = normalizeText((turnOnMatch ?? turnOffMatch)[1]);
+    // 3. Create Alarm: e.g. "set alarm for fan 2 to turn off at 9:30 pm"
+    const alarmCreateMatch = text.match(/^(?:set|create)\s+alarm\s+for\s+(.+?)\s+(?:to\s+turn\s+(on|off)\s+)?at\s+(.+)$/);
+    if (alarmCreateMatch) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-      // Try board name first
+      const deviceQuery = normalizeText(alarmCreateMatch[1]);
+      const actionWord = alarmCreateMatch[2]; // "on" or "off"
+      const timeStr = alarmCreateMatch[3];
+
+      const matchedDevice = findBestDevice(deviceQuery, commandDevices);
+      if (!matchedDevice) {
+        safeToast(`Device "${deviceQuery}" not found for alarm`);
+        speak(`Device ${deviceQuery} not found`);
+        return;
+      }
+
+      const parsedTime = parseTime(timeStr);
+      if (!parsedTime) {
+        safeToast(`Could not parse time "${timeStr}"`);
+        speak(`Could not parse time ${timeStr}`);
+        return;
+      }
+
+      const now = new Date();
+      const alarmDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parsedTime.hour, parsedTime.minute, 0);
+      if (alarmDate <= now) {
+        alarmDate.setDate(alarmDate.getDate() + 1); // Set for tomorrow
+      }
+
+      const isAlarmOn = actionWord ? actionWord === 'on' : true;
+      const { error } = await supabase.from('alarms').insert({
+        user_id: user.id,
+        device_id: matchedDevice.id,
+        action: isAlarmOn,
+        trigger_at: alarmDate.toISOString(),
+        fired: false
+      });
+
+      if (error) {
+        safeToast(error.message);
+      } else {
+        const timeDisplay = alarmDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        const dateDisplay = alarmDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        safeToast(`Alarm set for ${matchedDevice.name} on ${dateDisplay} at ${timeDisplay}`);
+        speak(`Alarm set for ${matchedDevice.name} on ${dateDisplay} at ${timeDisplay}`);
+      }
+      return;
+    }
+
+    // 4. Create Schedule: e.g. "set schedule for fan 2 to turn off at 8:00 am on weekdays"
+    const scheduleCreateMatch = text.match(/^(?:set|create)\s+schedule\s+for\s+(.+?)\s+(?:to\s+turn\s+(on|off)\s+)?at\s+(.+ ?)(?:\s+on\s+(.+))?$/);
+    if (scheduleCreateMatch) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const deviceQuery = normalizeText(scheduleCreateMatch[1]);
+      const actionWord = scheduleCreateMatch[2]; // "on" or "off"
+      const timeStr = scheduleCreateMatch[3];
+      const daysStr = scheduleCreateMatch[4] ? normalizeText(scheduleCreateMatch[4]) : 'everyday';
+
+      const matchedDevice = findBestDevice(deviceQuery, commandDevices);
+      if (!matchedDevice) {
+        safeToast(`Device "${deviceQuery}" not found for schedule`);
+        speak(`Device ${deviceQuery} not found`);
+        return;
+      }
+
+      const parsedTime = parseTime(timeStr);
+      if (!parsedTime) {
+        safeToast(`Could not parse time "${timeStr}"`);
+        speak(`Could not parse time ${timeStr}`);
+        return;
+      }
+
+      // Parse days
+      let days = [0, 1, 2, 3, 4, 5, 6]; // default everyday
+      if (daysStr.includes('weekday') || daysStr.includes('work day') || daysStr.includes('working day')) {
+        days = [1, 2, 3, 4, 5];
+      } else if (daysStr.includes('weekend')) {
+        days = [0, 6];
+      } else if (daysStr !== 'everyday' && daysStr !== 'every day' && daysStr !== 'all days') {
+        const daysMap = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+        const matchedDays = [];
+        for (const [dayName, dayCode] of Object.entries(daysMap)) {
+          if (daysStr.includes(dayName) || daysStr.includes(dayName.slice(0, 3))) {
+            matchedDays.push(dayCode);
+          }
+        }
+        if (matchedDays.length > 0) {
+          days = matchedDays.sort();
+        }
+      }
+
+      const isScheduleOn = actionWord ? actionWord === 'on' : true;
+      const formattedTime = `${String(parsedTime.hour).padStart(2, '0')}:${String(parsedTime.minute).padStart(2, '0')}`;
+      
+      const { error } = await supabase.from('schedules').insert({
+        user_id: user.id,
+        device_id: matchedDevice.id,
+        action: isScheduleOn,
+        time: formattedTime,
+        days: days,
+        enabled: true
+      });
+
+      if (error) {
+        safeToast(error.message);
+      } else {
+        const timeDisplay = `${parsedTime.hour % 12 || 12}:${String(parsedTime.minute).padStart(2, '0')} ${parsedTime.hour >= 12 ? 'PM' : 'AM'}`;
+        const daysDisplay = days.length === 7 ? 'every day' : days.length === 5 && days.includes(1) && !days.includes(0) ? 'weekdays' : 'selected days';
+        safeToast(`Schedule set for ${matchedDevice.name} at ${timeDisplay} on ${daysDisplay}`);
+        speak(`Schedule set for ${matchedDevice.name} at ${timeDisplay} on ${daysDisplay}`);
+      }
+      return;
+    }
+
+    // 5. Delete single alarm/schedule for device
+    const deleteMatch = text.match(/^(?:delete|cancel|remove)\s+(alarm|schedule)\s+for\s+(.+)$/);
+    if (deleteMatch) {
+      const type = deleteMatch[1]; // "alarm" or "schedule"
+      const deviceQuery = normalizeText(deleteMatch[2]);
+
+      const matchedDevice = findBestDevice(deviceQuery, commandDevices);
+      if (!matchedDevice) {
+        safeToast(`Device "${deviceQuery}" not found`);
+        speak(`Device ${deviceQuery} not found`);
+        return;
+      }
+
+      if (type === 'alarm') {
+        const { error } = await supabase.from('alarms').delete().eq('device_id', matchedDevice.id);
+        if (error) safeToast(error.message);
+        else {
+          safeToast(`Alarms deleted for ${matchedDevice.name}`);
+          speak(`Alarms deleted for ${matchedDevice.name}`);
+        }
+      } else {
+        const { error } = await supabase.from('schedules').delete().eq('device_id', matchedDevice.id);
+        if (error) safeToast(error.message);
+        else {
+          safeToast(`Schedules deleted for ${matchedDevice.name}`);
+          speak(`Schedules deleted for ${matchedDevice.name}`);
+        }
+      }
+      return;
+    }
+
+    // 6. Enable/disable schedules
+    const scheduleToggleMatch = text.match(/^(enable|disable|activate|deactivate|deactive)\s+schedule\s+for\s+(.+)$/);
+    if (scheduleToggleMatch) {
+      const action = scheduleToggleMatch[1]; // "enable", "disable", "deactivate", etc.
+      const deviceQuery = normalizeText(scheduleToggleMatch[2]);
+
+      const matchedDevice = findBestDevice(deviceQuery, commandDevices);
+      if (!matchedDevice) {
+        safeToast(`Device "${deviceQuery}" not found`);
+        speak(`Device ${deviceQuery} not found`);
+        return;
+      }
+
+      const enableVal = (action === 'enable' || action === 'activate');
+      const { error } = await supabase.from('schedules').update({ enabled: enableVal }).eq('device_id', matchedDevice.id);
+      if (error) safeToast(error.message);
+      else {
+        safeToast(`Schedules ${enableVal ? 'enabled' : 'disabled'} for ${matchedDevice.name}`);
+        speak(`Schedules ${enableVal ? 'enabled' : 'disabled'} for ${matchedDevice.name}`);
+      }
+      return;
+    }
+
+    // 7. Parse action (activate/deactivate) and target for presets/boards/devices
+    let isDeactivate = false;
+    let isActivate = false;
+    let target = '';
+
+    const deactPrefixes = [
+      'deactivate preset ', 'deactivate ', 'deactive preset ', 'deactive ',
+      'turn off preset ', 'turn off ', 'switch off ', 'put off ',
+      'disable preset ', 'disable ', 'stop '
+    ];
+
+    const actPrefixes = [
+      'activate preset ', 'activate ', 'turn on preset ', 'turn on ',
+      'switch on ', 'put on ', 'enable preset ', 'enable ', 'start '
+    ];
+
+    for (const prefix of deactPrefixes) {
+      if (text.startsWith(prefix)) {
+        isDeactivate = true;
+        target = text.substring(prefix.length).trim();
+        break;
+      }
+    }
+
+    if (!isDeactivate) {
+      for (const prefix of actPrefixes) {
+        if (text.startsWith(prefix)) {
+          isActivate = true;
+          target = text.substring(prefix.length).trim();
+          break;
+        }
+      }
+    }
+
+    const isOn = isActivate ? true : (isDeactivate ? false : null);
+
+    // If an action is specified (either activate or deactivate)
+    if (isOn !== null) {
+      // A. Try preset matching first
+      const matchedPreset = presetsRef.current.find(p =>
+        normalizeText(p.name).includes(target) || target.includes(normalizeText(p.name))
+      );
+
+      if (matchedPreset) {
+        if (applyPreset) {
+          await applyPreset(matchedPreset, isDeactivate);
+        } else {
+          await Promise.all(
+            matchedPreset.actions.map(action => {
+              const targetState = isDeactivate ? !action.is_on : action.is_on;
+              return supabase.from('devices')
+                .update({ is_on: targetState, last_changed: new Date().toISOString() })
+                .eq('id', action.device_id);
+            })
+          );
+        }
+        safeToast(`${isDeactivate ? 'Deactivated' : 'Activated'} preset: ${matchedPreset.name}`);
+        speak(`${isDeactivate ? 'Deactivated' : 'Activated'} preset ${matchedPreset.name}`);
+        return;
+      }
+
+      // Check DB presets if not found locally
+      try {
+        const { data: dbPresets } = await supabase
+          .from('presets')
+          .select('id, name, actions')
+          .ilike('name', `%${target}%`)
+          .limit(1);
+
+        if (dbPresets?.length) {
+          const preset = dbPresets[0];
+          if (applyPreset) {
+            await applyPreset(preset, isDeactivate);
+          } else {
+            await Promise.all(
+              preset.actions.map(action => {
+                const targetState = isDeactivate ? !action.is_on : action.is_on;
+                return supabase.from('devices')
+                  .update({ is_on: targetState, last_changed: new Date().toISOString() })
+                  .eq('id', action.device_id);
+              })
+            );
+          }
+          safeToast(`${isDeactivate ? 'Deactivated' : 'Activated'} preset: ${preset.name}`);
+          speak(`${isDeactivate ? 'Deactivated' : 'Activated'} preset ${preset.name}`);
+          return;
+        }
+      } catch (err) {
+        console.error('Error fetching preset from DB:', err);
+      }
+
+      // B. Try board name matching next
       let matchedBoard = null;
       let bestBoardScore = -1;
       for (const board of commandBoards) {
-        const score = fuzzyScore(rawTarget, normalizeText(board.name));
+        const score = fuzzyScore(target, normalizeText(board.name));
         if (score > bestBoardScore) { bestBoardScore = score; matchedBoard = board; }
       }
 
       if (bestBoardScore >= 0.6 && matchedBoard) {
         const boardDevices = commandDevices.filter(d => d.board_id === matchedBoard.id);
         if (!boardDevices.length) {
-          onToast(`No devices found on board "${matchedBoard.name}"`);
+          safeToast(`No devices found on board "${matchedBoard.name}"`);
           speak(`No devices found on board ${matchedBoard.name}`);
           return;
         }
         await Promise.all(boardDevices.map(d =>
           supabase.from('devices').update({ is_on: isOn, last_changed: new Date().toISOString() }).eq('id', d.id)
         ));
-        onToast(`All devices on "${matchedBoard.name}" turned ${isOn ? 'ON' : 'OFF'}`);
+        safeToast(`All devices on "${matchedBoard.name}" turned ${isOn ? 'ON' : 'OFF'}`);
         speak(`All devices on ${matchedBoard.name} turned ${isOn ? 'on' : 'off'}`);
         return;
       }
 
-      // Fall back to fuzzy device match
-      const matchedDevice = findBestDevice(rawTarget, commandDevices);
+      // C. Try device name matching last
+      const matchedDevice = findBestDevice(target, commandDevices);
       if (matchedDevice) {
         await supabase.from('devices')
           .update({ is_on: isOn, last_changed: new Date().toISOString() })
           .eq('id', matchedDevice.id);
-        onToast(`${matchedDevice.name} turned ${isOn ? 'ON' : 'OFF'}`);
+        safeToast(`${matchedDevice.name} turned ${isOn ? 'ON' : 'OFF'}`);
         speak(`${matchedDevice.name} turned ${isOn ? 'on' : 'off'}`);
-      } else {
-        onToast(`Could not find a device or board matching "${rawTarget}"`);
-        speak(`Could not find a device or board matching ${rawTarget}`);
+        return;
       }
+
+      // Not found
+      safeToast(`Could not find preset, board, or device matching "${target}"`);
+      speak(`Could not find any match for ${target}`);
       return;
     }
 
-    onToast('Command not recognised. Try: "turn on fan 2", "turn off living room", "activate party mode", or "all off"');
+    // 8. Fallback: If no activation/deactivation prefix, check direct preset name match (assumes activation)
+    const matchedPresetDirect = presetsRef.current.find(p => 
+      normalizeText(p.name) === text || fuzzyScore(text, normalizeText(p.name)) >= 0.8
+    );
+    if (matchedPresetDirect) {
+      if (applyPreset) {
+        await applyPreset(matchedPresetDirect);
+      } else {
+        await Promise.all(
+          matchedPresetDirect.actions.map(action =>
+            supabase.from('devices')
+              .update({ is_on: action.is_on, last_changed: new Date().toISOString() })
+              .eq('id', action.device_id)
+          )
+        );
+      }
+      safeToast(`Activated preset: ${matchedPresetDirect.name}`);
+      speak(`Activated preset ${matchedPresetDirect.name}`);
+      return;
+    }
+
+    safeToast('Command not recognised. Try: "turn on fan 2", "turn off living room", "activate party mode", or "all off"');
     speak('Command not recognized');
-  }, [getLatestDevices, onToast, speak]);
+  }, [getLatestDevices, onToast, speak, applyPreset]);
 
   // Speech Recognition
   const startListening = () => {

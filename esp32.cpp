@@ -3,42 +3,27 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <time.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 
 // ============================================================
-//  PINS & DISPLAY SETUP
+//  DIRECT GPIO SETUP
 // ============================================================
+// OUTPUT: Connect your Relay's 'IN' pin directly to this GPIO
+#define RELAY_PIN 32  
 
-// --- Rotary Encoder & PIR ---
-#define CLK_PIN   25
-#define DT_PIN    26
-#define SW_PIN    27
-#define PIR_PIN   13
+// INPUT: Connect your physical switch between this GPIO and GND
+#define INPUT_PIN 19  
 
-// --- SHARED CLOCK PIN ---
-#define SHARED_CLK 33   // Clock shared by both 595 (SHCP) and 165 (CLK)
-
-// --- 74HC595 – Serial-In Parallel-Out (relay OUTPUT shift register) ---
-#define SH_DS    32   // Serial data in   (SER / DS)
-#define SH_STCP  18   // Storage/latch    (RCLK  / STCP)
-
-// --- 74HC165 – Parallel-In Serial-Out (feedback INPUT shift register) ---
-#define LD_PIN   19   // Parallel load   (PL / SH-LD, active-LOW)
-#define QH_PIN   22   // Serial data out (Q7 / QH)
-
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+// INPUT: Connect your AC Detector's output to this GPIO
+#define AC_DETECTOR_PIN 21 
 
 // ============================================================
 //  CREDENTIALS
 // ============================================================
 const char* ssid     = "NxtWave_Te@m";
 const char* password = "Nxtwave@KKH2026";
-const char* BOARD_IDENTIFIER = "board_1";
-const char* SUPABASE_BASE = "https://ojuvphlkzbxwjhqzexbt.supabase.co";
+
+const char* BOARD_IDENTIFIER = "my_board_1";
+const char* SUPABASE_BASE = "https://ojuvphlkzbxwjhqzexbt.supabase.co/rest/v1";
 const char* SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qdXZwaGxremJ4d2pocXpleGJ0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTg2Nzk2MiwiZXhwIjoyMDk3NDQzOTYyfQ.SN6g_bR4bpVEIGdIW-GLPTHRlqZBHF5YBUKjHDMWjLU"; 
 
 // ============================================================
@@ -48,16 +33,23 @@ String boardUUID = "";
 String deviceUUID = "";
 bool isRelayOn = false;
 
-// Current byte sent to 74HC595 (bit 0 = relay 0, active-LOW)
-byte shiftOutState = 0xFF;  // All outputs HIGH (all relays OFF) at startup
+// --- Switch Input State Tracking (with standard debounce) ---
+bool lastInputRead = HIGH; 
+bool confirmedInputState = HIGH;
+unsigned long lastDebounceTime = 0;
+const unsigned long DEBOUNCE_DELAY = 50; // 50ms debounce window
+
+// --- AC Detector Input State Tracking (Pulse Detection) ---
+unsigned long lastAcPulseTime = 0;
+bool currentAcState = false;      // True = AC ON, False = AC OFF
+bool lastReportedAcState = false; 
+const unsigned long AC_TIMEOUT = 100; // 100ms without a pulse means AC is OFF
+
+// --- Live Serial Monitor ---
+unsigned long lastSerialDumpTime = 0;
+const unsigned long SERIAL_DUMP_INTERVAL = 5000; // Print live state every 5 seconds
 
 WiFiMulti wifiMulti;
-
-// 74HC165 Feedback Filters
-int lastAcState = -1;
-unsigned long lastAcCheck = 0;
-bool acDetectedThisWindow = false;
-unsigned long acStateChangeTime = 0; 
 
 // HTTP Polling
 unsigned long lastPollTime = 0;
@@ -70,117 +62,31 @@ Alarm alarms[MAX_ALARMS];
 unsigned long lastAlarmPoll = 0;
 const unsigned long ALARM_POLL_INTERVAL = 30000; 
 
-// Offline Local Timers & Motion
-bool motionEnabled = false;
-unsigned long lastMotionTrigger = 0;
-const unsigned long MOTION_COOLDOWN = 4000; 
-
-bool localTimerActive = false;
-bool localTimerAction = false;
-unsigned long localTimerStart = 0;
-unsigned long localTimerDuration = 0;
-
-// OLED Menu & Encoder State
-int page = 0; 
-int cursor = 0;
-volatile bool encoderMoved = false;
-volatile int encoderDir = 0;
-volatile unsigned long lastEncoderISRTime = 0;
-
-volatile bool buttonPressed = false;
-volatile unsigned long lastButtonISRTime = 0;
-
-String mainMenu[] = {"Lights & Devices", "Motion Sensor"}; 
-int mainItems = 2;
-String lightsMenu[] = {"Toggle ON/OFF", "10 Min Timer", "5 Min Timer", "< Back"}; 
-int lightsItems = 4;
-String motionMenu[] = {"Enable Sensor", "Disable Sensor", "< Back"}; 
-int motionItems = 3;
-
-// ============================================================
-//  BULLETPROOF INTERRUPTS (EMI FILTERED)
-// ============================================================
-void IRAM_ATTR encoderISR() {
-  unsigned long now = millis();
-  if (now - lastEncoderISRTime > 80) { 
-    if (digitalRead(CLK_PIN) == LOW) { 
-      if (digitalRead(DT_PIN) == HIGH) encoderDir = 1;
-      else encoderDir = -1;
-      encoderMoved = true;
-      lastEncoderISRTime = now;
-    }
-  }
-}
-
-void IRAM_ATTR buttonISR() {
-  unsigned long now = millis();
-  if (now - lastButtonISRTime > 300) { 
-    if (digitalRead(SW_PIN) == LOW) {
-      buttonPressed = true;
-      lastButtonISRTime = now;
-    }
-  }
-}
-
 // Function Prototypes
-void writeShiftOut(byte value);
-byte readShiftIn(); 
 void setRelay(bool on);
 void updateDeviceInDB(bool state);
 void updateFeedbackInDB(bool feedback);
+void updateACFeedbackInDB(bool feedback);
 void markAlarmFiredInDB(String alarmId);
 void pollDatabase();
 void pollAlarms();
 bool resolveBoardAndDevice();
 void fetchInitialState();
-void drawMenu();
-void executeAction();
-void showOLED(String msg);
 
 // ============================================================
-//  74HC595 – SHIFT OUT (relay control using SHARED_CLK)
-// ============================================================
-void writeShiftOut(byte value) {
-  shiftOutState = value;
-  digitalWrite(SH_STCP, LOW);        // Ensure latch is low while shifting
-  
-  // Shift out data using the shared clock
-  shiftOut(SH_DS, SHARED_CLK, MSBFIRST, value);
-  
-  digitalWrite(SH_STCP, HIGH);       // Latch: push data to outputs
-  digitalWrite(SH_STCP, LOW);        // Return latch low (ready for next)
-}
-
-// ============================================================
-//  74HC165 – SHIFT IN (feedback read using SHARED_CLK)
-// ============================================================
-byte readShiftIn() {
-  // Pulse PL LOW to latch all physical parallel inputs into the register
-  digitalWrite(LD_PIN, LOW);
-  delayMicroseconds(5);
-  digitalWrite(LD_PIN, HIGH);
-
-  byte result = 0;
-  for (int i = 7; i >= 0; i--) {
-    result |= (digitalRead(QH_PIN) << i);
-    
-    // Toggle the shared clock to shift to the next bit
-    digitalWrite(SHARED_CLK, HIGH);
-    delayMicroseconds(2);
-    digitalWrite(SHARED_CLK, LOW);
-    delayMicroseconds(2);
-  }
-  return result;
-}
-
-// ============================================================
-//  setRelay – convenient wrapper for relay 0
+//  setRelay – Direct GPIO Control
 // ============================================================
 void setRelay(bool on) {
-  byte val = shiftOutState;
-  if (on) val &= ~(1 << 0);  // Clear bit 0 → relay ON
-  else    val |=  (1 << 0);  // Set   bit 0 → relay OFF
-  writeShiftOut(val);
+  isRelayOn = on;
+  
+  if (on) {
+    digitalWrite(RELAY_PIN, LOW);  // Turn Relay ON
+  } else {
+    digitalWrite(RELAY_PIN, HIGH); // Turn Relay OFF
+  }
+  
+  Serial.print(">> RELAY STATE CHANGED TO: ");
+  Serial.println(on ? "ON" : "OFF");
 }
 
 // ============================================================
@@ -200,46 +106,54 @@ String getIsoTime() {
 // ============================================================
 void setup() {
   Serial.begin(115200);
+  delay(1000);
+  Serial.println("\n\n===========================================");
+  Serial.println("  ESP32 Cloud Relay (GPIO + Switch + AC Detect)");
+  Serial.println("===========================================\n");
 
-  // --- Shift Register Pins ---
-  pinMode(SHARED_CLK, OUTPUT); // Shared by both 595 and 165
-  pinMode(SH_DS,      OUTPUT);
-  pinMode(SH_STCP,    OUTPUT);
-  pinMode(LD_PIN,     OUTPUT);
-  pinMode(QH_PIN,     INPUT);
+  // --- Initialize Direct Relay Pin (Output) ---
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, HIGH); // Start with relay OFF (Active-LOW)
+  Serial.println("-> Relay GPIO initialized (Relay OFF)");
 
-  // Initial Shift Register States
-  digitalWrite(SHARED_CLK, LOW);
-  digitalWrite(SH_STCP,    LOW);
-  digitalWrite(LD_PIN,     HIGH);  // Hold HIGH; pulse LOW to latch 165 inputs
+  // --- Initialize Direct Input Pin (Feedback) ---
+  pinMode(INPUT_PIN, INPUT_PULLUP);
+  confirmedInputState = digitalRead(INPUT_PIN);
+  Serial.println("-> Switch Input GPIO initialized");
 
-  writeShiftOut(0xFF);  // All outputs HIGH → all relays OFF (active-LOW)
+  // --- Initialize AC Detector Pin (Feedback) ---
+  pinMode(AC_DETECTOR_PIN, INPUT);
+  Serial.println("-> AC Detector GPIO initialized");
 
-  // --- Encoder, button, PIR ---
-  pinMode(CLK_PIN, INPUT_PULLUP);
-  pinMode(DT_PIN,  INPUT_PULLUP);
-  pinMode(SW_PIN,  INPUT_PULLUP);
-  pinMode(PIR_PIN, INPUT);
-  attachInterrupt(digitalPinToInterrupt(CLK_PIN), encoderISR, FALLING);
-  attachInterrupt(digitalPinToInterrupt(SW_PIN),  buttonISR,  FALLING);
-
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { Serial.println(F("OLED failed")); }
-  display.setTextSize(1); display.setTextColor(SSD1306_WHITE);
-  showOLED("Connecting Wi-Fi...");
-
+  // --- Wi-Fi Setup ---
+  Serial.print("-> Connecting to Wi-Fi: ");
+  Serial.println(ssid);
   WiFi.mode(WIFI_STA);
   wifiMulti.addAP(ssid, password);
-  while (wifiMulti.run() != WL_CONNECTED) delay(500);
+  
+  while (wifiMulti.run() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\n✅ Wi-Fi Connected! IP: " + WiFi.localIP().toString());
 
-  showOLED("Syncing Time...");
+  // --- Time Sync ---
+  Serial.print("-> Syncing Time with NTP...");
   configTime(0, 0, "pool.ntp.org");
   time_t now = time(nullptr);
-  while (now < 100000) { delay(500); now = time(nullptr); }
+  while (now < 100000) { delay(500); Serial.print("."); now = time(nullptr); }
+  Serial.println("\n✅ Time Synced: " + getIsoTime());
 
-  showOLED("Linking Cloud...");
-  if (resolveBoardAndDevice()) { fetchInitialState(); pollAlarms(); }
-
-  drawMenu();
+  // --- Supabase Link ---
+  Serial.println("-> Linking to Supabase Database...");
+  if (resolveBoardAndDevice()) { 
+    Serial.println("✅ Board and Device verified.");
+    fetchInitialState(); 
+    pollAlarms(); 
+  } else {
+    Serial.println("❌ FAILED to link Board/Device. Check Supabase 'boards' table.");
+  }
+  Serial.println("===========================================\n");
 }
 
 // ============================================================
@@ -247,83 +161,71 @@ void setup() {
 // ============================================================
 void loop() {
   // ----------------------------------------------------------
-  // 1. OLED MENU NAVIGATION
+  // 1. PHYSICAL SWITCH INPUT READING (Debounced)
   // ----------------------------------------------------------
-  if (encoderMoved) {
-    encoderMoved = false;
-    int maxItems = (page == 0) ? mainItems : ((page == 1) ? lightsItems : motionItems);
-    cursor += encoderDir;
-    
-    if (cursor < 0) cursor = 0;
-    if (cursor >= maxItems) cursor = maxItems - 1;
-    
-    drawMenu();
+  bool currentRead = digitalRead(INPUT_PIN);
+
+  if (currentRead != lastInputRead) {
+    lastDebounceTime = millis();
   }
 
-  if (buttonPressed) {
-    buttonPressed = false;
-    executeAction();
-  }
-
-  // ----------------------------------------------------------
-  // 2. FEEDBACK READ via 74HC165 (250ms Anti-Spam Window)
-  // ----------------------------------------------------------
-  {
-    byte inputs = readShiftIn();
-    bool feedbackBitLow = !(inputs & 0x01); 
-    if (feedbackBitLow) acDetectedThisWindow = true; 
-  }
-
-  if (millis() - lastAcCheck >= 250) {
-    bool currentAcPresent = acDetectedThisWindow;
-    acDetectedThisWindow = false;
-    lastAcCheck = millis();
-
-    if (lastAcState == -1 || currentAcPresent != (lastAcState == 1)) {
-      lastAcState = currentAcPresent ? 1 : 0;
-      acStateChangeTime = millis(); 
-      updateFeedbackInDB(currentAcPresent);
+  if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY) {
+    if (currentRead != confirmedInputState) {
+      confirmedInputState = currentRead;
+      
+      bool isSwitchOn = (confirmedInputState == LOW);
+      Serial.print("!! PHYSICAL INPUT CHANGED: ");
+      Serial.println(isSwitchOn ? "ON (Switch Closed)" : "OFF (Switch Open)");
+      
+      updateFeedbackInDB(isSwitchOn);
     }
   }
+  lastInputRead = currentRead;
 
   // ----------------------------------------------------------
-  // 3. MOTION SENSOR AUTOMATION (Filtered)
+  // 2. AC DETECTOR MODULE READING (Missing Pulse Logic)
   // ----------------------------------------------------------
-  if (motionEnabled && digitalRead(PIR_PIN) == HIGH) {
-    if (millis() - acStateChangeTime > 2500) {
-      if (millis() - lastMotionTrigger > MOTION_COOLDOWN) {
-        delay(50); 
-        if (digitalRead(PIR_PIN) == HIGH) {
-          lastMotionTrigger = millis();
-          if (!isRelayOn) {
-            isRelayOn = true;
-            setRelay(true);          
-            updateDeviceInDB(true);
-            showOLED("Motion Triggered!");
-            delay(1000);
-            drawMenu();
-          }
-        }
-      }
-    }
+  bool rawAcRead = digitalRead(AC_DETECTOR_PIN);
+
+  // If the optocoupler pulls the pin LOW, we register a pulse
+  if (rawAcRead == LOW) {
+    lastAcPulseTime = millis();
+    currentAcState = true; // AC is present
+  }
+
+  // If 100ms has passed without a single LOW pulse, AC is off
+  if (millis() - lastAcPulseTime > AC_TIMEOUT) {
+    currentAcState = false; // No AC detected
+  }
+
+  // If the confirmed state changed, push the update
+  if (currentAcState != lastReportedAcState) {
+    lastReportedAcState = currentAcState;
+    
+    Serial.print("!! AC DETECTOR CHANGED: ");
+    Serial.println(currentAcState ? "ON (AC Present)" : "OFF (No AC Detected)");
+    
+    updateACFeedbackInDB(currentAcState);
   }
 
   // ----------------------------------------------------------
-  // 4. OFFLINE LOCAL TIMERS
+  // 3. LIVE SERIAL MONITORING (Prints every 5 seconds)
   // ----------------------------------------------------------
-  if (localTimerActive && (millis() - localTimerStart >= localTimerDuration)) {
-    localTimerActive = false;
-    isRelayOn = localTimerAction;
-    setRelay(isRelayOn);             
-    updateDeviceInDB(isRelayOn);
+  if (millis() - lastSerialDumpTime >= SERIAL_DUMP_INTERVAL) {
+    lastSerialDumpTime = millis();
+    Serial.println("\n--- 📡 LIVE STATE MONITOR ---");
+    Serial.print("🔹 Relay State : "); Serial.println(isRelayOn ? "ON" : "OFF");
+    Serial.print("🔹 Switch State: "); Serial.println(confirmedInputState == LOW ? "ON" : "OFF");
+    Serial.print("🔹 AC Detector : "); Serial.println(currentAcState ? "DETECTED" : "NO CURRENT");
+    Serial.println("-----------------------------\n");
   }
 
   // ----------------------------------------------------------
-  // 5. HTTP POLLING & EDGE ALARMS
+  // 4. HTTP POLLING & EDGE ALARMS
   // ----------------------------------------------------------
   if (millis() - lastPollTime >= POLL_INTERVAL) {
     lastPollTime = millis();
-    pollDatabase();
+    pollDatabase(); 
   }
 
   if (millis() - lastAlarmPoll >= ALARM_POLL_INTERVAL) {
@@ -334,9 +236,12 @@ void loop() {
   String nowIso = getIsoTime();
   for (int i = 0; i < MAX_ALARMS; i++) {
     if (alarms[i].active && nowIso >= alarms[i].triggerAt) {
+      Serial.println("⏰ ALARM FIRED! ID: " + alarms[i].id);
+      
       alarms[i].active = false;
       isRelayOn = alarms[i].action;
-      setRelay(isRelayOn);           
+      
+      setRelay(isRelayOn);          
       updateDeviceInDB(isRelayOn);
       markAlarmFiredInDB(alarms[i].id);
     }
@@ -344,65 +249,11 @@ void loop() {
 }
 
 // ============================================================
-//  OLED MENU FUNCTIONS
-// ============================================================
-void showOLED(String msg) {
-  display.clearDisplay(); display.setCursor(10, 25); display.println(msg); display.display();
-}
-
-void drawMenu() {
-  display.clearDisplay();
-  String title = (page == 0) ? "-- MAIN MENU --" : ((page == 1) ? "-- DEVICE 1 --" : "-- SENSOR --");
-  String* currentMenu = (page == 0) ? mainMenu : ((page == 1) ? lightsMenu : motionMenu);
-  int items = (page == 0) ? mainItems : ((page == 1) ? lightsItems : motionItems);
-
-  display.setCursor(10, 0); display.println(title); display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
-  int startY = 18; int lineSpacing = 14;
-
-  for (int i = 0; i < items; i++) {
-    int yPos = startY + (i * lineSpacing);
-    display.setCursor(0, yPos);
-    if (i == cursor) display.print("> "); else display.print("  ");
-    display.println(currentMenu[i]);
-  }
-  display.display();
-}
-
-void executeAction() {
-  if (page == 0) {
-    if (cursor == 0) page = 1; else if (cursor == 1) page = 2; cursor = 0;
-  }
-  else if (page == 1) {
-    if (cursor == 0) {
-      isRelayOn = !isRelayOn;
-      setRelay(isRelayOn);           
-      updateDeviceInDB(isRelayOn);
-      showOLED(isRelayOn ? "Light ON" : "Light OFF");
-      delay(800);
-    }
-    else if (cursor == 1) {
-      localTimerActive = true; localTimerStart = millis(); localTimerDuration = 10 * 60 * 1000;
-      localTimerAction = !isRelayOn; showOLED("10 Min Timer Set!"); delay(800);
-    }
-    else if (cursor == 2) {
-      localTimerActive = true; localTimerStart = millis(); localTimerDuration = 5 * 60 * 1000;
-      localTimerAction = !isRelayOn; showOLED("5 Min Timer Set!"); delay(800);
-    }
-    else if (cursor == 3) { page = 0; cursor = 0; }
-  }
-  else if (page == 2) {
-    if (cursor == 0) { motionEnabled = true;  showOLED("Sensor Active!");   delay(800); }
-    else if (cursor == 1) { motionEnabled = false; showOLED("Sensor Disabled"); delay(800); }
-    else if (cursor == 2) { page = 0; cursor = 0; }
-  }
-  drawMenu();
-}
-
-// ============================================================
 //  SUPABASE HTTP FUNCTIONS
 // ============================================================
 void pollDatabase() {
   if(deviceUUID == "") return;
+  
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUID + "&select=is_on");
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
@@ -413,9 +264,11 @@ void pollDatabase() {
     deserializeJson(doc, http.getString());
     if (doc.size() > 0) {
       bool dbState = doc[0]["is_on"];
+      
       if (dbState != isRelayOn) {
-        isRelayOn = dbState;
-        setRelay(isRelayOn);         
+        Serial.print("☁️ CLOUD COMMAND RECEIVED: Turn ");
+        Serial.println(dbState ? "ON" : "OFF");
+        setRelay(dbState);        
       }
     }
   }
@@ -424,6 +277,9 @@ void pollDatabase() {
 
 void updateDeviceInDB(bool state) {
   if(deviceUUID == "") return;
+  Serial.print("☁️ Pushing Relay State to Cloud: ");
+  Serial.println(state ? "ON" : "OFF");
+
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUID);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
@@ -435,34 +291,68 @@ void updateDeviceInDB(bool state) {
 
 void updateFeedbackInDB(bool feedback) {
   if(deviceUUID == "") return;
+  Serial.print("☁️ Pushing Switch Feedback to Cloud: ");
+  Serial.println(feedback ? "ON" : "OFF");
+
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUID);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");
+  
+  http.PATCH("{\"feedback_on\":" + String(feedback ? "true" : "false") + "}");
+  http.end();
+}
+
+void updateACFeedbackInDB(bool feedback) {
+  if(deviceUUID == "") return;
+  Serial.print("☁️ Pushing AC Feedback to Cloud: ");
+  Serial.println(feedback ? "DETECTED" : "NONE");
+
+  HTTPClient http;
+  http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUID);
+  http.addHeader("apikey", SUPABASE_SERVICE_KEY);
+  http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
+  http.addHeader("Content-Type", "application/json");
+  
+  // Update the 'feedback_on' column in the Supabase 'devices' table
   http.PATCH("{\"feedback_on\":" + String(feedback ? "true" : "false") + "}");
   http.end();
 }
 
 bool resolveBoardAndDevice() {
   HTTPClient http;
+  
+  // 1. Find Board UUID
   http.begin(String(SUPABASE_BASE) + "/boards?board_identifier=eq." + BOARD_IDENTIFIER + "&select=id");
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
+  
   if (http.GET() == 200) {
     DynamicJsonDocument doc(1024); deserializeJson(doc, http.getString());
-    if (doc.size() > 0) boardUUID = doc[0]["id"].as<String>();
+    if (doc.size() > 0) {
+      boardUUID = doc[0]["id"].as<String>();
+      Serial.println("  -> Found Board UUID: " + boardUUID);
+    }
   }
   http.end();
 
-  http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&relay_index=eq.0&select=id");
-  http.addHeader("apikey", SUPABASE_SERVICE_KEY);
-  http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
-  if (http.GET() == 200) {
-    DynamicJsonDocument doc(1024); deserializeJson(doc, http.getString());
-    if (doc.size() > 0) deviceUUID = doc[0]["id"].as<String>();
+  // 2. Find Device UUID
+  if(boardUUID != "") {
+    http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&relay_index=eq.0&select=id");
+    http.addHeader("apikey", SUPABASE_SERVICE_KEY);
+    http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
+    
+    if (http.GET() == 200) {
+      DynamicJsonDocument doc(1024); deserializeJson(doc, http.getString());
+      if (doc.size() > 0) {
+        deviceUUID = doc[0]["id"].as<String>();
+        Serial.println("  -> Found Device UUID: " + deviceUUID);
+      }
+    }
+    http.end();
   }
-  http.end();
+  
   return (deviceUUID != "");
 }
 
@@ -471,11 +361,14 @@ void fetchInitialState() {
   http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUID + "&select=is_on");
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
+  
   if (http.GET() == 200) {
     DynamicJsonDocument doc(512); deserializeJson(doc, http.getString());
     if (doc.size() > 0) {
-      isRelayOn = doc[0]["is_on"];
-      setRelay(isRelayOn);           
+      bool initState = doc[0]["is_on"];
+      Serial.print("  -> Initial State from Cloud: ");
+      Serial.println(initState ? "ON" : "OFF");
+      setRelay(initState);          
     }
   }
   http.end();
@@ -511,4 +404,5 @@ void markAlarmFiredInDB(String alarmId) {
   http.addHeader("Content-Type", "application/json");
   http.PATCH("{\"fired\":true}");
   http.end();
+  Serial.println("☁️ Alarm marked as fired in database.");
 }

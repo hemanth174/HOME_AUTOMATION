@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import Toast from '@/components/Toast';
 import Loader from '@/components/Loader';
 import { Edit, LucideTrash2 } from 'lucide-react';
+import VoiceControl from '@/components/VoiceControl';
+import CardVoiceButton from '@/components/CardVoiceButton';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -305,6 +307,53 @@ export default function AlarmsPage() {
   const [confirmed, setConfirmed] = useState(false);
   const [editingAlarm, setEditingAlarm] = useState(null);
 
+  // Speak utility using premium/male voices
+  const speak = useCallback((textToSpeak) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+    let voices = window.speechSynthesis.getVoices();
+    const findBestVoice = () => {
+      const englishVoices = voices.filter(v => v.lang.startsWith('en'));
+      if (englishVoices.length === 0) return voices[0];
+      const premiumVoice = englishVoices.find(v =>
+        v.name.toLowerCase().includes('natural') ||
+        v.name.toLowerCase().includes('online') ||
+        v.name.toLowerCase().includes('google') ||
+        v.name.toLowerCase().includes('premium')
+      );
+      if (premiumVoice) return premiumVoice;
+      const enhancedVoice = englishVoices.find(v => v.name.toLowerCase().includes('enhanced'));
+      if (enhancedVoice) return enhancedVoice;
+      return englishVoices[0];
+    };
+    const selectedVoice = findBestVoice();
+    if (selectedVoice) utterance.voice = selectedVoice;
+    const voiceName = selectedVoice ? selectedVoice.name.toLowerCase() : '';
+    const isMale = ['male', 'david', 'daniel', 'google uk english male'].some(k => voiceName.includes(k));
+    if (isMale) {
+      utterance.pitch = 0.9;
+      utterance.rate = 0.95;
+    } else {
+      utterance.pitch = 0.75;
+      utterance.rate = 0.90;
+    }
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
+  const handleAlarmCardCommand = async (alarm, transcript) => {
+    const text = transcript.toLowerCase().trim();
+    const devName = alarm.devices?.name || 'device';
+
+    if (text.includes('delete') || text.includes('remove') || text.includes('cancel') || text.includes('trash')) {
+      await deleteAlarm(alarm.id);
+      speak(`Alarm for ${devName} deleted`);
+    } else {
+      setToast(`Command not recognized: "${transcript}". Try "delete" or "cancel".`);
+      speak(`Command not recognized`);
+    }
+  };
+
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     const init = async () => {
@@ -560,18 +609,24 @@ export default function AlarmsPage() {
                       {status}
                     </span>
                   </div>
-                  <div className="mt-3.5 flex gap-2 justify-end">
+                  <div className="mt-3.5 flex gap-2 justify-end items-center">
+                    <CardVoiceButton
+                      onCommand={(tr) => handleAlarmCardCommand(alarm, tr)}
+                      onToast={setToast}
+                    />
                     <button
-                      className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-1 text-xs font-extrabold text-text transition-all cursor-pointer hover:bg-card-alt"
+                      className="inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-border bg-card text-text-muted transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]"
                       onClick={() => openEditModal(alarm)}
+                      title="Edit Alarm"
                     >
-                      <Edit />
+                      <Edit size={16} strokeWidth={2.5} />
                     </button>
                     <button
-                      className="inline-flex min-h-[30px] items-center justify-center gap-2  px-4 py-1 text-xs font-extrabold text-red-500 transition-all cursor-pointer hover:bg-red-500 hover:text-white"
+                      className="inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-red-500/40 bg-red-500/10 text-red-500 transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 hover:bg-red-500 hover:text-white hover:shadow-[0_0_12px_rgba(239,68,68,0.5)]"
                       onClick={() => deleteAlarm(alarm.id)}
+                      title="Delete Alarm"
                     >
-                      <LucideTrash2 />
+                      <LucideTrash2 size={16} strokeWidth={2.5} />
                     </button>
                   </div>
                 </div>
@@ -704,6 +759,7 @@ export default function AlarmsPage() {
         </div>
       )}
 
+      <VoiceControl onToast={setToast} />
       <Toast message={toast} onClose={() => setToast('')} />
     </>
   );

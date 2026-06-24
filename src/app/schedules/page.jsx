@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import Toast from '@/components/Toast';
 import Loader from '@/components/Loader';
 import { Edit, Trash2, LucidePower, LucidePowerOff } from 'lucide-react';
+import VoiceControl from '@/components/VoiceControl';
+import CardVoiceButton from '@/components/CardVoiceButton';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -231,6 +233,69 @@ export default function SchedulesPage() {
   const [timeConfirmed, setTimeConfirmed] = useState(false);
   const [timeError, setTimeError] = useState('');
   const [editingSchedule, setEditingSchedule] = useState(null);
+
+  // Speak utility using premium/male voices
+  const speak = useCallback((textToSpeak) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+    let voices = window.speechSynthesis.getVoices();
+    const findBestVoice = () => {
+      const englishVoices = voices.filter(v => v.lang.startsWith('en'));
+      if (englishVoices.length === 0) return voices[0];
+      const premiumVoice = englishVoices.find(v =>
+        v.name.toLowerCase().includes('natural') ||
+        v.name.toLowerCase().includes('online') ||
+        v.name.toLowerCase().includes('google') ||
+        v.name.toLowerCase().includes('premium')
+      );
+      if (premiumVoice) return premiumVoice;
+      const enhancedVoice = englishVoices.find(v => v.name.toLowerCase().includes('enhanced'));
+      if (enhancedVoice) return enhancedVoice;
+      return englishVoices[0];
+    };
+    const selectedVoice = findBestVoice();
+    if (selectedVoice) utterance.voice = selectedVoice;
+    const voiceName = selectedVoice ? selectedVoice.name.toLowerCase() : '';
+    const isMale = ['male', 'david', 'daniel', 'google uk english male'].some(k => voiceName.includes(k));
+    if (isMale) {
+      utterance.pitch = 0.9;
+      utterance.rate = 0.95;
+    } else {
+      utterance.pitch = 0.75;
+      utterance.rate = 0.90;
+    }
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
+  const handleScheduleCardCommand = async (schedule, transcript) => {
+    const text = transcript.toLowerCase().trim();
+    const devName = schedule.devices?.name || 'device';
+
+    if (text.includes('delete') || text.includes('remove') || text.includes('trash') || text.includes('cancel')) {
+      await deleteSchedule(schedule.id);
+      speak(`Schedule for ${devName} deleted`);
+    } else if (text.includes('disable') || text.includes('turn off') || text.includes('deactivate') || text.includes('deactive')) {
+      if (schedule.enabled) {
+        await toggleSchedule(schedule);
+        speak(`Schedule for ${devName} disabled`);
+      } else {
+        setToast(`Schedule for ${devName} is already disabled`);
+        speak(`Schedule for ${devName} is already disabled`);
+      }
+    } else if (text.includes('enable') || text.includes('turn on') || text.includes('activate')) {
+      if (!schedule.enabled) {
+        await toggleSchedule(schedule);
+        speak(`Schedule for ${devName} enabled`);
+      } else {
+        setToast(`Schedule for ${devName} is already enabled`);
+        speak(`Schedule for ${devName} is already enabled`);
+      }
+    } else {
+      setToast(`Command not recognized: "${transcript}". Try "disable", "enable", or "delete".`);
+      speak(`Command not recognized`);
+    }
+  };
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -504,6 +569,10 @@ export default function SchedulesPage() {
                       )}
                     </div>
                     <div className="flex gap-2 max-md:flex-col justify-end items-center max-md:mt-4">
+                      <CardVoiceButton
+                        onCommand={(tr) => handleScheduleCardCommand(schedule, tr)}
+                        onToast={setToast}
+                      />
                       <button
                         className={`inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 ${
                           schedule.enabled 
@@ -666,6 +735,7 @@ export default function SchedulesPage() {
         </div>
       )}
 
+      <VoiceControl onToast={setToast} />
       <Toast message={toast} onClose={() => setToast('')} />
     </>
   );
