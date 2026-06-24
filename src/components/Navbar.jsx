@@ -88,7 +88,10 @@ export default function Navbar() {
     window.location.href = '/login';
   };
 
-  const isLoginPage = pathname === '/login';
+  const cleanPath = (pathname || '').replace(/\/$/, '') || '/';
+  const VALID_ROUTES = ['/', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile'];
+  const is404Page = !VALID_ROUTES.includes(cleanPath);
+  const isLoginPage = cleanPath === '/login';
 
   const links = [
     { href: '/', label: 'Dashboard', icon: LayoutGrid },
@@ -148,8 +151,8 @@ export default function Navbar() {
     setCurrentY(0);
   };
 
-  // If on login page or not authenticated, hide navigation completely
-  if (isLoginPage || !user) {
+  // If on login page, 404 page, or not authenticated, hide navigation completely
+  if (isLoginPage || is404Page || !user) {
     return null;
   }
 

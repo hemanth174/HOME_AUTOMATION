@@ -426,7 +426,7 @@ export default function Dashboard() {
         handleModalTouchEnd={handleModalTouchEnd}
       />
 
-      <VoiceControl devices={devices} boards={boards} onToast={showToast} />
+      <VoiceControl devices={devices} boards={boards} presets={presets} applyPreset={applyPreset} onToast={showToast} />
       <Toast message={toast} onClose={() => setToast('')} />
     </>
   );

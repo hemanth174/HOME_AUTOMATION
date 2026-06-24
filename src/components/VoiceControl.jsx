@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Mic } from 'lucide-react';
+import { Mic, X } from 'lucide-react';
 
 // Number-word to digit map
 const WORD_TO_NUM = {
@@ -60,16 +60,77 @@ const findBestDevice = (query, list, threshold = 0.4) => {
 };
 
 // ---------------------------------------------------------------------------
-export default function VoiceControl({ devices: propDevices, boards: propBoards, onToast }) {
+export default function VoiceControl({ devices: propDevices, boards: propBoards, presets: propPresets, applyPreset, onToast }) {
   const [listening, setListening] = useState(false);
 
   // Mutable refs so WS callbacks always see latest data without re-subscribing
   const devicesRef = useRef(propDevices ?? []);
-  const boardsRef  = useRef(propBoards  ?? []);
+  const boardsRef = useRef(propBoards ?? []);
+  const presetsRef = useRef(propPresets ?? []);
+  const recognitionRef = useRef(null);
 
   // Sync refs when parent state changes
   useEffect(() => { devicesRef.current = propDevices ?? []; }, [propDevices]);
-  useEffect(() => { boardsRef.current  = propBoards  ?? []; }, [propBoards]);
+  useEffect(() => { boardsRef.current = propBoards ?? []; }, [propBoards]);
+  useEffect(() => { presetsRef.current = propPresets ?? []; }, [propPresets]);
+
+  // Speak confirmation using high-quality male voices
+  const speak = useCallback((textToSpeak) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+
+    // 1. Cancel any ongoing speech immediately to prevent overlapping/queueing
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+
+    // 2. Get available voices
+    let voices = window.speechSynthesis.getVoices();
+
+    const findBestVoice = () => {
+      // Filter for English voices
+      const englishVoices = voices.filter(v => v.lang.startsWith('en'));
+      if (englishVoices.length === 0) return voices[0]; // Fallback to system default
+
+      // Target Premium/Natural/Google voices first (Regardless of gender, for ultimate quality)
+      const premiumVoice = englishVoices.find(v =>
+        v.name.toLowerCase().includes('natural') ||
+        v.name.toLowerCase().includes('online') ||
+        v.name.toLowerCase().includes('google') ||
+        v.name.toLowerCase().includes('premium')
+      );
+
+      if (premiumVoice) return premiumVoice;
+
+      // Secondary choice: Enhanced Apple voices if on iOS/Mac (e.g., "Daniel (Enhanced)")
+      const enhancedVoice = englishVoices.find(v => v.name.toLowerCase().includes('enhanced'));
+      if (enhancedVoice) return enhancedVoice;
+
+      // Fallback to the first available English voice
+      return englishVoices[0];
+    };
+
+    const selectedVoice = findBestVoice();
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+    }
+
+    // 3. Perfect Tone Sweet Spots (Do not exceed 0.5 - 2.0 range)
+    // If the chosen voice is male, a pitch of 0.9 or 1.0 is best. 
+    // Lowering pitch to 0.6 on female or standard voices makes them sound like slowed-down robots.
+
+    const voiceName = selectedVoice ? selectedVoice.name.toLowerCase() : '';
+    const isMale = ['male', 'david', 'daniel', 'google uk english male'].some(k => voiceName.includes(k));
+
+    if (isMale) {
+      utterance.pitch = 0.9; // Smooth, deeper male tone without sounding glitchy
+      utterance.rate = 0.95; // Just a tiny bit slower than normal for ultimate clarity
+    } else {
+      utterance.pitch = 0.75; // Perfect natural pitch for high-quality female/neutral voices
+      utterance.rate = 0.90;  // Normal human conversational speed
+    }
+
+    window.speechSynthesis.speak(utterance);
+  }, []);
 
   // Realtime WebSocket: devices + boards
   useEffect(() => {
@@ -121,45 +182,70 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
 
   // Main command processor
   const processCommand = useCallback(async (transcript) => {
-    const text           = normalizeText(transcript);
+    const text = normalizeText(transcript);
     const commandDevices = await getLatestDevices();
-    const commandBoards  = boardsRef.current;
+    const commandBoards = boardsRef.current;
 
     onToast(`Heard: "${transcript}"`);
 
     // 1. Preset activation: "activate <name>"
     if (text.startsWith('activate ')) {
       const presetName = text.replace('activate ', '').trim();
-      const { data: presets } = await supabase
-        .from('presets')
-        .select('id, name, actions')
-        .ilike('name', `%${presetName}%`)
-        .limit(1);
-      if (presets?.length) {
-        const preset = presets[0];
-        await Promise.all(
-          preset.actions.map(action =>
-            supabase.from('devices')
-              .update({ is_on: action.is_on, last_changed: new Date().toISOString() })
-              .eq('id', action.device_id)
-          )
-        );
-        onToast(`Activated preset: ${preset.name}`);
+
+      // Try local presets first
+      const matchedPreset = presetsRef.current.find(p =>
+        normalizeText(p.name).includes(presetName) || presetName.includes(normalizeText(p.name))
+      );
+
+      if (matchedPreset) {
+        if (applyPreset) {
+          await applyPreset(matchedPreset);
+        } else {
+          await Promise.all(
+            matchedPreset.actions.map(action =>
+              supabase.from('devices')
+                .update({ is_on: action.is_on, last_changed: new Date().toISOString() })
+                .eq('id', action.device_id)
+            )
+          );
+        }
+        onToast(`Activated preset: ${matchedPreset.name}`);
+        speak(`Activated preset ${matchedPreset.name}`);
       } else {
-        onToast(`Preset "${presetName}" not found`);
+        const { data: dbPresets } = await supabase
+          .from('presets')
+          .select('id, name, actions')
+          .ilike('name', `%${presetName}%`)
+          .limit(1);
+        if (dbPresets?.length) {
+          const preset = dbPresets[0];
+          await Promise.all(
+            preset.actions.map(action =>
+              supabase.from('devices')
+                .update({ is_on: action.is_on, last_changed: new Date().toISOString() })
+                .eq('id', action.device_id)
+            )
+          );
+          onToast(`Activated preset: ${preset.name}`);
+          speak(`Activated preset ${preset.name}`);
+        } else {
+          onToast(`Preset "${presetName}" not found`);
+          speak(`Preset ${presetName} not found`);
+        }
       }
       return;
     }
 
     // 2. All on / all off
-    const allOnPhrases  = ['turn on all', 'all on', 'everything on', 'all lights on', 'all devices on'];
+    const allOnPhrases = ['turn on all', 'all on', 'everything on', 'all lights on', 'all devices on'];
     const allOffPhrases = ['turn off all', 'all off', 'everything off', 'all lights off', 'all devices off'];
 
     if (allOnPhrases.some(p => text.includes(p))) {
       await Promise.all(commandDevices.map(d =>
-        supabase.from('devices').update({ is_on: true,  last_changed: new Date().toISOString() }).eq('id', d.id)
+        supabase.from('devices').update({ is_on: true, last_changed: new Date().toISOString() }).eq('id', d.id)
       ));
       onToast('All devices turned ON');
+      speak('All devices turned on');
       return;
     }
     if (allOffPhrases.some(p => text.includes(p))) {
@@ -167,19 +253,20 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         supabase.from('devices').update({ is_on: false, last_changed: new Date().toISOString() }).eq('id', d.id)
       ));
       onToast('All devices turned OFF');
+      speak('All devices turned off');
       return;
     }
 
     // 3. Turn on/off a target (board name or device name)
-    const turnOnMatch  = text.match(/(?:turn|switch|put)\s+on\s+(.+)/);
+    const turnOnMatch = text.match(/(?:turn|switch|put)\s+on\s+(.+)/);
     const turnOffMatch = text.match(/(?:turn|switch|put)\s+off\s+(.+)/);
 
     if (turnOnMatch || turnOffMatch) {
-      const isOn      = !!turnOnMatch;
+      const isOn = !!turnOnMatch;
       const rawTarget = normalizeText((turnOnMatch ?? turnOffMatch)[1]);
 
       // Try board name first
-      let matchedBoard   = null;
+      let matchedBoard = null;
       let bestBoardScore = -1;
       for (const board of commandBoards) {
         const score = fuzzyScore(rawTarget, normalizeText(board.name));
@@ -190,12 +277,14 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         const boardDevices = commandDevices.filter(d => d.board_id === matchedBoard.id);
         if (!boardDevices.length) {
           onToast(`No devices found on board "${matchedBoard.name}"`);
+          speak(`No devices found on board ${matchedBoard.name}`);
           return;
         }
         await Promise.all(boardDevices.map(d =>
           supabase.from('devices').update({ is_on: isOn, last_changed: new Date().toISOString() }).eq('id', d.id)
         ));
         onToast(`All devices on "${matchedBoard.name}" turned ${isOn ? 'ON' : 'OFF'}`);
+        speak(`All devices on ${matchedBoard.name} turned ${isOn ? 'on' : 'off'}`);
         return;
       }
 
@@ -206,14 +295,17 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           .update({ is_on: isOn, last_changed: new Date().toISOString() })
           .eq('id', matchedDevice.id);
         onToast(`${matchedDevice.name} turned ${isOn ? 'ON' : 'OFF'}`);
+        speak(`${matchedDevice.name} turned ${isOn ? 'on' : 'off'}`);
       } else {
         onToast(`Could not find a device or board matching "${rawTarget}"`);
+        speak(`Could not find a device or board matching ${rawTarget}`);
       }
       return;
     }
 
     onToast('Command not recognised. Try: "turn on fan 2", "turn off living room", "activate party mode", or "all off"');
-  }, [getLatestDevices, onToast]);
+    speak('Command not recognized');
+  }, [getLatestDevices, onToast, speak]);
 
   // Speech Recognition
   const startListening = () => {
@@ -222,15 +314,52 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       onToast('Voice control is not supported in this browser');
       return;
     }
-    const recognition      = new SpeechRecognition();
-    recognition.continuous     = false;
+
+    // Abort any active recognition first
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort(); } catch (e) { }
+    }
+
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+
+    recognition.continuous = false;
     recognition.interimResults = false;
-    recognition.lang           = 'en-US';
-    recognition.onstart  = () => setListening(true);
-    recognition.onend    = () => setListening(false);
-    recognition.onerror  = () => { setListening(false); onToast('Voice recognition error. Please try again.'); };
-    recognition.onresult = (event) => { processCommand(event.results[0][0].transcript); };
-    recognition.start();
+    recognition.lang = 'en-US';
+    recognition.onstart = () => setListening(true);
+    recognition.onend = () => {
+      setListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onerror = (event) => {
+      setListening(false);
+      recognitionRef.current = null;
+      if (event.error !== 'aborted') {
+        onToast('Voice recognition error. Please try again.');
+      }
+    };
+    recognition.onresult = (event) => {
+      processCommand(event.results[0][0].transcript);
+    };
+
+    try {
+      recognition.start();
+    } catch (err) {
+      console.error(err);
+      setListening(false);
+      recognitionRef.current = null;
+    }
+  };
+
+  const toggleListening = () => {
+    if (listening) {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch (e) { }
+      }
+      setListening(false);
+    } else {
+      startListening();
+    }
   };
 
   return (
@@ -247,7 +376,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         </div>
       )}
       <button
-        onClick={startListening}
+        onClick={toggleListening}
         className={`fixed bottom-7 right-7 max-md:bottom-20 max-md:right-6 w-14 h-14 rounded-full border-none bg-gradient-to-tr from-accent to-[#e2cc89] text-[#0a0800] cursor-pointer z-[200] shadow-[0_6px_24px_var(--accent-glow)] shadow-gold-glow hover:scale-[1.08] active:scale-100 transition-all duration-300 flex items-center justify-center select-none group`}
         title="Voice Control"
       >
@@ -257,9 +386,9 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
             <span className="absolute inset-0 rounded-full bg-accent/40 animate-ping [animation-duration:1.2s]" />
             <span className="absolute inset-[-6px] rounded-full bg-accent/25 animate-ping [animation-duration:1.6s]" />
             <span className="absolute inset-[-12px] rounded-full bg-accent/10 animate-ping [animation-duration:2s]" />
-            
-            {/* Mic Icon */}
-            <Mic size={20} className="stroke-[2.5px] relative z-10 animate-pulse text-[#0a0800]" />
+
+            {/* Cross Icon */}
+            <X size={20} className="stroke-[2.5px] relative z-10 animate-pulse text-[#0a0800]" />
           </div>
         ) : (
           <Mic size={20} className="stroke-[2.5px] group-hover:scale-110 transition-transform text-[#0a0800]" />

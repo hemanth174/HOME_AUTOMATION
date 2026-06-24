@@ -205,7 +205,7 @@ export default function BoardsPage() {
             {boards.map((board) => (
               <div
                 key={board.id}
-                className="relative overflow-hidden rounded-[18px] border border-border bg-card p-[18px] shadow-lg transition-all duration-200 hover:-translate-y-px hover:border-accent/40 hover:shadow-2xl flex items-center justify-between gap-4 max-md:flex-col max-md:items-start"
+                className="relative overflow-hidden rounded-[18px] border border-border bg-card p-[18px] shadow-lg transition-all duration-200 hover:-translate-y-px hover:border-accent/40 hover:shadow-2xl flex items-center justify-between  "
               >
                 <div className="min-w-0">
                   {editingBoard === board.id ? (
@@ -231,7 +231,7 @@ export default function BoardsPage() {
                   </div>
                 </div>
                 <button
-                  className=" hover:text-[red] transition-all duration-300 border border-1 p-1 rounded-sm  max-md:w-full max-md:justify-center"
+                  className="flex justify-between cursor-pointer transition-all duration-200 border border-1 hover:border-[red] p-1 rounded-lg hover:text-[red]"
                   onClick={() => deleteBoard(board.id)}
                 >
                   <Trash2 />
