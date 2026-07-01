@@ -36,6 +36,92 @@ export default function Dashboard() {
   const [showEditBoardModal, setShowEditBoardModal] = useState(false);
   const [editingBoardObj, setEditingBoardObj] = useState(null);
 
+  // Driver.js guided tour for first-time users
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const onboarded = localStorage.getItem('home_automation_onboarded');
+      if (!onboarded) {
+        const timer = setTimeout(() => {
+          import('driver.js').then(({ driver }) => {
+            import('driver.js/dist/driver.css');
+            
+            const steps = [
+              {
+                popover: {
+                  title: 'Welcome to Smart Home!',
+                  description: 'Let us take you on a quick interactive tour to navigate your home dashboard.',
+                  side: 'center',
+                  align: 'start'
+                }
+              }
+            ];
+
+            if (document.querySelector('.quick-presets-section')) {
+              steps.push({
+                element: '.quick-presets-section',
+                popover: {
+                  title: 'Quick Presets',
+                  description: 'Toggle groups of devices instantly (like activating "All ON" or custom preset combos).',
+                  side: 'bottom',
+                  align: 'start'
+                }
+              });
+            }
+
+            if (document.querySelector('.boards-section-selector')) {
+              steps.push({
+                element: '.boards-section-selector',
+                popover: {
+                  title: 'Boards & Devices',
+                  description: 'Manage and monitor all connected ESP32 boards and device relays in real-time.',
+                  side: 'top',
+                  align: 'start'
+                }
+              });
+            }
+
+            if (document.querySelector('.board-card-selector')) {
+              steps.push({
+                element: '.board-card-selector',
+                popover: {
+                  title: 'XOR Dual-Control Logic',
+                  description: 'Separate visual states! Clicking the toggle switch commands the relay (is_on). The lightbulb icon displays actual AC current feedback (reality).',
+                  side: 'top',
+                  align: 'start'
+                }
+              });
+            }
+
+            if (document.querySelector('#voice-control-mic-btn')) {
+              steps.push({
+                element: '#voice-control-mic-btn',
+                popover: {
+                  title: 'Hands-Free Voice Assistant',
+                  description: 'Tap this mic and speak instructions like "turn on Light 1" or "deactivate Party Mode". Try saying commands directly!',
+                  side: 'left',
+                  align: 'start'
+                }
+              });
+            }
+
+            const driverObj = driver({
+              showProgress: true,
+              theme: 'dark',
+              steps: steps,
+              onDestroyed: () => {
+                localStorage.setItem('home_automation_onboarded', 'true');
+              }
+            });
+            
+            driverObj.drive();
+          });
+        }, 1200);
+
+        return () => clearTimeout(timer);
+      }
+    }
+  }, []);
+
   // Modal drag-to-close gesture state for mobile
   const [modalDragY, setModalDragY] = useState(0);
   const [modalDragging, setModalDragging] = useState(false);
@@ -348,7 +434,7 @@ export default function Dashboard() {
           deletePreset={deletePreset}
         />
 
-        <div className="flex flex-col min-[480px]:flex-row justify-between min-[480px]:items-center gap-3 mb-5 ml-1 select-none">
+        <div className="flex flex-col min-[480px]:flex-row justify-between min-[480px]:items-center gap-3 mb-5 ml-1 select-none boards-section-selector">
           <h2 className="text-lg font-extrabold text-text tracking-tight whitespace-nowrap">Boards & Devices</h2>
           <div className="flex items-center gap-2 max-[480px]:w-full max-[480px]:justify-between">
           <div className='flex gap-3'>

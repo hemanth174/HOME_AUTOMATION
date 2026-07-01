@@ -11,7 +11,7 @@ export default function QuickPresets({
   if (!presets || presets.length === 0) return null;
 
   return (
-    <section className="mb-[18px]">
+    <section className="mb-[18px] quick-presets-section">
       <div className="ml-1 mb-[9px] text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">Quick Presets</div>
       <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pt-0.5 pb-3">
         {presets.map((preset) => {

@@ -216,7 +216,7 @@ export default function LogsPage() {
   }
 
   return (
-    <div className="mx-auto w-[min(100%-32px,960px)] pt-[104px] pb-8 animate-fade-up max-md:w-[min(100%-24px,620px)] max-md:pt-[92px]">
+    <div className="mx-auto w-[min(100%-32px,960px)] pt-[104px] pb-8 animate-fade-up max-md:w-[min(100%-24px,620px)] max-md:pt-[92px] max-md:pb-[100px]">
       {/* Header */}
       <div className="ml-1 mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-col gap-1">
@@ -313,7 +313,7 @@ export default function LogsPage() {
               transform: `translateY(${modalDragY}px)`,
               transition: modalDragging ? 'none' : 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
             }}
-            className="max-h-[82vh] w-[min(100%,420px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl backdrop-blur-xl animate-fade-up max-md:w-full max-md:max-h-[85vh] max-md:rounded-t-[24px] max-md:rounded-b-none max-md:border-t max-md:border-x-0 max-md:border-b-0 max-md:pb-10 max-md:animate-slide-up max-md:shadow-none flex flex-col"
+            className="max-h-[82vh] w-[min(100%,420px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl backdrop-blur-xl animate-fade-up max-md:w-full max-md:max-h-[85vh] max-md:rounded-t-[24px] max-md:rounded-b-none max-md:border-t max-md:border-x-0 max-md:border-b-0 max-md:pb-24 max-md:animate-slide-up max-md:shadow-none flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Drag Handle for Mobile */}

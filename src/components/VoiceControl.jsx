@@ -674,6 +674,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         </div>
       )}
       <button
+        id="voice-control-mic-btn"
         onClick={toggleListening}
         className={`fixed bottom-7 right-7 max-md:bottom-20 max-md:right-6 w-14 h-14 rounded-full border-none bg-gradient-to-tr from-accent to-[#e2cc89] text-[#0a0800] cursor-pointer z-[200] shadow-[0_6px_24px_var(--accent-glow)] shadow-gold-glow hover:scale-[1.08] active:scale-100 transition-all duration-300 flex items-center justify-center select-none group`}
         title="Voice Control"

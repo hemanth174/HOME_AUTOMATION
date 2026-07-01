@@ -20,7 +20,9 @@ import {
   Sun,
   Bell,
   Crown,
-  Download
+  Download,
+  HelpCircle,
+  FileText
 } from 'lucide-react';
 
 export default function Navbar() {
@@ -28,6 +30,8 @@ export default function Navbar() {
   const [user, setUser] = useState(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showFaqModal, setShowFaqModal] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
 
   // Touch gesture state for drag-to-close bottom sheet
   const [startY, setStartY] = useState(0);
@@ -89,7 +93,7 @@ export default function Navbar() {
   };
 
   const cleanPath = (pathname || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '') || '/';
-  const VALID_ROUTES = ['/', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile'];
+  const VALID_ROUTES = ['/', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms'];
   const is404Page = !VALID_ROUTES.includes(cleanPath);
   const isLoginPage = cleanPath === '/login';
 
@@ -193,6 +197,25 @@ export default function Navbar() {
             );
           })}
         </nav>
+
+        {/* Support & Legal Section */}
+        <div className="flex flex-col gap-1.5 mt-2">
+          <span className="text-[9px] font-extrabold uppercase tracking-widest text-text-muted px-2 mb-1">SUPPORT & LEGAL</span>
+          <Link
+            href="/faq"
+            className="rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all duration-200 text-text-muted hover:bg-accent-bg hover:text-accent flex items-center gap-3"
+          >
+            <HelpCircle size={16} className="stroke-[2.5px]" />
+            <span>FAQ's</span>
+          </Link>
+          <Link
+            href="/terms"
+            className="rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all duration-200 text-text-muted hover:bg-accent-bg hover:text-accent flex items-center gap-3"
+          >
+            <FileText size={16} className="stroke-[2.5px]" />
+            <span>Terms & Conditions</span>
+          </Link>
+        </div>
       </div>
 
       {/* Bottom: User & Info */}
@@ -380,6 +403,33 @@ export default function Navbar() {
             })}
           </div>
 
+          {/* Support & Legal inside mobile drawer */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[9px] font-extrabold uppercase tracking-widest text-text-muted px-2">Support & Legal</span>
+            <Link
+              href="/faq"
+              onClick={() => {
+                setMobileOpen(false);
+                setCurrentY(0);
+              }}
+              className="rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all text-text hover:bg-accent-bg/30 flex items-center gap-3"
+            >
+              <HelpCircle size={16} className="stroke-[2.5px]" />
+              <span>FAQ's</span>
+            </Link>
+            <Link
+              href="/terms"
+              onClick={() => {
+                setMobileOpen(false);
+                setCurrentY(0);
+              }}
+              className="rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all text-text hover:bg-accent-bg/30 flex items-center gap-3"
+            >
+              <FileText size={16} className="stroke-[2.5px]" />
+              <span>Terms & Conditions</span>
+            </Link>
+          </div>
+
           {/* User Profile Info Card inside bottom drawer */}
           <div className="flex flex-col gap-1.5 px-2">
             <span className="text-[9px] font-extrabold uppercase tracking-widest text-text-muted">Account Profile</span>
@@ -460,6 +510,7 @@ export default function Navbar() {
           </div>
         </div>
       )}
+
     </>
   );
 }

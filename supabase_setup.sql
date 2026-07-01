@@ -241,3 +241,44 @@ $$;
 --     '0 0 * * *', -- run daily at midnight
 --     $$ DELETE FROM public.activity_logs WHERE created_at < NOW() - INTERVAL '7 days' $$
 -- );
+
+
+-- ============================================================
+-- 7. MANUAL WALL SWITCH ACTIVITY LOGGING TRIGGER
+-- ============================================================
+-- Automatically log manual wall switch toggles when AC feedback changes
+-- without a matching recent cloud command log.
+CREATE OR REPLACE FUNCTION log_manual_ac_feedback()
+RETURNS TRIGGER AS $$
+DECLARE
+    recent_log_exists boolean;
+BEGIN
+    IF (OLD.feedback_on IS DISTINCT FROM NEW.feedback_on) AND (NEW.feedback_on IS NOT NULL) THEN
+        -- Check if there is a log in the last 5 seconds matching this device and action
+        SELECT EXISTS (
+            SELECT 1 FROM public.activity_logs
+            WHERE device_id = NEW.id
+              AND action = (CASE WHEN NEW.feedback_on = true THEN 'turned ON' ELSE 'turned OFF' END)
+              AND created_at >= NOW() - INTERVAL '5 seconds'
+        ) INTO recent_log_exists;
+
+        -- If no matching recent log exists, it was flipped physically
+        IF NOT recent_log_exists THEN
+            INSERT INTO public.activity_logs (user_id, device_id, device_name, action, triggered_by)
+            VALUES (
+                NEW.user_id,
+                NEW.id,
+                NEW.name,
+                CASE WHEN NEW.feedback_on = true THEN 'turned ON' ELSE 'turned OFF' END,
+                'Manual Wall Switch'
+            );
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE TRIGGER trigger_log_manual_ac_feedback
+AFTER UPDATE ON public.devices
+FOR EACH ROW
+EXECUTE FUNCTION log_manual_ac_feedback();
