@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import Toast from '@/components/Toast';
 import Loader from '@/components/Loader';
-import { Edit, LucideEdit2, LucidePower, LucidePowerOff, PowerOffIcon, Trash } from 'lucide-react';
+import { Edit, LucideEdit2, LucidePower, LucidePowerOff, PowerOffIcon, Trash, SlidersHorizontal } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -330,6 +330,10 @@ export default function PresetsPage() {
   };
 
   const allOn = async () => {
+    if (devices.length === 0) {
+      setToast('No devices available to turn ON. Please add a board first.');
+      return;
+    }
     const devicesToTurnOn = devices.filter(d => !d.is_on);
     if (devicesToTurnOn.length === 0) { setToast('All devices are already ON'); return; }
     setDevices(prev => prev.map(d => ({ ...d, is_on: true })));
@@ -343,6 +347,10 @@ export default function PresetsPage() {
   };
 
   const allOff = async () => {
+    if (devices.length === 0) {
+      setToast('No devices available to turn OFF. Please add a board first.');
+      return;
+    }
     const devicesToTurnOff = devices.filter(d => d.is_on);
     if (devicesToTurnOff.length === 0) { setToast('All devices are already OFF'); return; }
     setDevices(prev => prev.map(d => ({ ...d, is_on: false })));
@@ -387,8 +395,22 @@ export default function PresetsPage() {
         </div>
 
         {presets.length === 0 ? (
-          <div className="grid min-h-[220px] place-items-center rounded-[18px] border border-dashed border-border bg-white/[0.03] px-5 py-10 text-center text-sm font-semibold text-text-muted animate-scale-in">
-            No presets yet. Create custom presets for quick control.
+          <div className="flex flex-col items-center justify-center rounded-[24px] border border-border border-dashed bg-card p-10 text-center animate-scale-in max-w-lg mx-auto select-none gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-accent-bg flex items-center justify-center text-accent border border-accent/20 shadow-gold-glow">
+              <SlidersHorizontal size={24} className="stroke-[2.5px]" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <h3 className="text-base font-extrabold text-text tracking-tight">No Presets Configured</h3>
+              <p className="text-xs text-text-muted font-semibold leading-relaxed px-4">
+                Presets let you control multiple devices simultaneously with a single tap. Create one now to automate your routine!
+              </p>
+            </div>
+            <button
+              onClick={openCreateModal}
+              className="inline-flex min-h-[36px] items-center justify-center rounded-xl bg-accent px-5 text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer mt-1"
+            >
+              Create Preset
+            </button>
           </div>
         ) : (
           <div className="flex flex-col gap-3">

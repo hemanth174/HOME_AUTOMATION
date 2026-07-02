@@ -26,6 +26,7 @@ export default function AnalyticsPage() {
   const [boards, setBoards] = useState([]);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [dailyAnalytics, setDailyAnalytics] = useState([]);
   
   // Guide and Tour States
   const [showPowerGuide, setShowPowerGuide] = useState(false);
@@ -52,19 +53,28 @@ export default function AnalyticsPage() {
     startOfToday.setHours(0, 0, 0, 0);
 
     try {
-      const [devicesRes, boardsRes, logsRes] = await Promise.all([
+      // Trigger database daily rollup aggregation and log pruning trigger
+      await supabase.rpc('summarize_and_prune_old_logs');
+
+      const [devicesRes, boardsRes, logsRes, dailyAnalyticsRes] = await Promise.all([
         supabase.from('devices').select('id, name, is_on, last_changed, board_id').eq('user_id', user.id),
         supabase.from('boards').select('id, name').eq('user_id', user.id),
         supabase.from('activity_logs')
           .select('id, device_id, action, created_at')
           .eq('user_id', user.id)
           .gte('created_at', startOfToday.toISOString())
-          .order('created_at', { ascending: true })
+          .order('created_at', { ascending: true }),
+        supabase.from('daily_analytics')
+          .select('date, total_kwh, total_cost, avg_on_time')
+          .eq('user_id', user.id)
+          .order('date', { ascending: true })
+          .limit(30)
       ]);
 
       if (devicesRes.data) setDevices(devicesRes.data);
       if (boardsRes.data) setBoards(boardsRes.data);
       if (logsRes.data) setLogs(logsRes.data);
+      if (dailyAnalyticsRes.data) setDailyAnalytics(dailyAnalyticsRes.data);
     } catch (err) {
       console.error('Failed to load analytics data', err);
     } finally {
@@ -164,10 +174,36 @@ export default function AnalyticsPage() {
       )
       .subscribe();
 
+    const dailyAnalyticsChannel = supabase
+      .channel('analytics-daily-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'daily_analytics',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setDailyAnalytics(prev => {
+              if (prev.some(d => d.date === payload.new.date)) return prev;
+              return [...prev, payload.new].sort((a, b) => new Date(a.date) - new Date(b.date));
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setDailyAnalytics(prev => prev.map(d => d.date === payload.new.date ? payload.new : d));
+          } else if (payload.eventType === 'DELETE') {
+            setDailyAnalytics(prev => prev.filter(d => d.date !== payload.old.date));
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(devicesChannel);
       supabase.removeChannel(boardsChannel);
       supabase.removeChannel(logsChannel);
+      supabase.removeChannel(dailyAnalyticsChannel);
     };
   }, [user]);
 
@@ -578,6 +614,50 @@ export default function AnalyticsPage() {
                 })}
               </div>
             </>
+          )}
+        </div>
+      </section>
+
+      {/* Historical Daily Consumption (Last 30 Days) */}
+      <section className="border border-border bg-card p-5 rounded-2xl shadow-lg flex flex-col min-h-[340px] mt-6">
+        <h2 className="text-xs font-black uppercase tracking-wider text-text mb-4">Historical Daily Consumption (Last 30 Days)</h2>
+        <div className="flex-1 w-full min-h-[250px]">
+          {dailyAnalytics.length === 0 ? (
+            <div className="grid h-full place-items-center text-xs font-bold text-text-muted select-none text-center px-4">
+              No historical daily summary calculated yet. Check back tomorrow!
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={dailyAnalytics} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+                <XAxis 
+                  dataKey="date" 
+                  stroke="#666" 
+                  tick={{ fontSize: 9, fontWeight: 'bold' }} 
+                  tickFormatter={(str) => {
+                    const d = new Date(str);
+                    return isNaN(d.getTime()) ? str : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+                  }}
+                />
+                <YAxis stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#111', border: '1px solid #c9a84c', borderRadius: '8px' }}
+                  labelStyle={{ color: '#fff', fontSize: '10px', fontWeight: 'bold' }}
+                  itemStyle={{ color: '#c9a84c', fontSize: '10px', fontWeight: 'bold' }}
+                  formatter={(value, name) => {
+                    if (name === "total_kwh") return [`${value} kWh`, "Energy"];
+                    if (name === "total_cost") return [`₹${value}`, "Cost"];
+                    if (name === "avg_on_time") return [`${value} hrs`, "Avg Active Time"];
+                    return [value, name];
+                  }}
+                />
+                <Bar dataKey="total_kwh" fill="#c9a84c" radius={[4, 4, 0, 0]}>
+                  {dailyAnalytics.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           )}
         </div>
       </section>

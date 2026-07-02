@@ -228,6 +228,126 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     return data ?? [];
   }, []);
 
+  // Execute structured action returned by the LLM
+  const executeLLMAction = useCallback(async (result, safeToast) => {
+    const { actionType, deviceId, isOn, deviceName, presetId, presetName, triggerAt, time, days } = result;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    switch (actionType) {
+      case 'TOGGLE_DEVICE': {
+        await supabase.from('devices')
+          .update({ is_on: isOn, last_changed: new Date().toISOString() })
+          .eq('id', deviceId);
+        
+        await supabase.from('activity_logs').insert({
+          user_id: user.id,
+          device_id: deviceId,
+          device_name: deviceName,
+          action: isOn ? 'turned ON' : 'turned OFF',
+          triggered_by: 'Voice Command (AI)'
+        });
+        
+        const feedbackMsg = `${deviceName} turned ${isOn ? 'on' : 'off'}`;
+        safeToast(feedbackMsg);
+        speak(feedbackMsg);
+        break;
+      }
+
+      case 'TOGGLE_ALL': {
+        const latestDevices = await getLatestDevices();
+        const devicesToUpdate = latestDevices.filter(d => d.is_on !== isOn);
+        if (devicesToUpdate.length > 0) {
+          await supabase.from('devices')
+            .update({ is_on: isOn, last_changed: new Date().toISOString() })
+            .eq('user_id', user.id);
+          
+          await Promise.all(devicesToUpdate.map(async (d) => {
+            await supabase.from('activity_logs').insert({
+              user_id: user.id,
+              device_id: d.id,
+              device_name: d.name,
+              action: isOn ? 'turned ON' : 'turned OFF',
+              triggered_by: 'Voice Command (AI)'
+            });
+          }));
+        }
+        const feedbackMsg = `All devices turned ${isOn ? 'on' : 'off'}`;
+        safeToast(feedbackMsg);
+        speak(feedbackMsg);
+        break;
+      }
+
+      case 'APPLY_PRESET': {
+        const preset = presetsRef.current.find(p => p.id === presetId);
+        if (preset) {
+          await applyPreset(preset, result.deactivate || false);
+          const feedbackMsg = `${result.deactivate ? 'Deactivated' : 'Activated'} preset: ${presetName}`;
+          safeToast(feedbackMsg);
+          speak(feedbackMsg);
+        }
+        break;
+      }
+
+      case 'CREATE_ALARM': {
+        const latestDevices = await getLatestDevices();
+        const device = latestDevices.find(d => d.id === deviceId);
+        if (device) {
+          await supabase.from('alarms').insert({
+            user_id: user.id,
+            device_id: deviceId,
+            action: isOn,
+            trigger_at: triggerAt,
+            fired: false
+          });
+          const displayTime = new Date(triggerAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+          const feedbackMsg = `Alarm set for ${device.name} to turn ${isOn ? 'on' : 'off'} at ${displayTime}`;
+          safeToast(feedbackMsg);
+          speak(feedbackMsg);
+        }
+        break;
+      }
+
+      case 'CREATE_SCHEDULE': {
+        const latestDevices = await getLatestDevices();
+        const device = latestDevices.find(d => d.id === deviceId);
+        if (device) {
+          await supabase.from('schedules').insert({
+            user_id: user.id,
+            device_id: deviceId,
+            action: isOn,
+            time: time,
+            days: days,
+            enabled: true
+          });
+          const feedbackMsg = `Schedule created for ${device.name}`;
+          safeToast(feedbackMsg);
+          speak(feedbackMsg);
+        }
+        break;
+      }
+
+      case 'DELETE_ALL_ALARMS': {
+        await supabase.from('alarms').delete().eq('user_id', user.id);
+        const feedbackMsg = 'All alarms cleared';
+        safeToast(feedbackMsg);
+        speak(feedbackMsg);
+        break;
+      }
+
+      case 'DELETE_ALL_SCHEDULES': {
+        await supabase.from('schedules').delete().eq('user_id', user.id);
+        const feedbackMsg = 'All schedules cleared';
+        safeToast(feedbackMsg);
+        speak(feedbackMsg);
+        break;
+      }
+
+      default:
+        break;
+    }
+  }, [getLatestDevices, speak, applyPreset]);
+
   // Main command processor
   const processCommand = useCallback(async (transcript) => {
     const text = normalizeText(transcript);
@@ -236,6 +356,45 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     const safeToast = onToast || ((msg) => console.log(msg));
 
     safeToast(`Heard: "${transcript}"`);
+
+    if (commandDevices.length === 0) {
+      safeToast('No devices found. Please add a board first.');
+      speak('No devices found. Please add a board first.');
+      return;
+    }
+
+    // Try OpenRouter AI Voice Command route first
+    try {
+      const response = await fetch('/api/voice-command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript: transcript,
+          devices: commandDevices,
+          presets: presetsRef.current,
+          currentTime: new Date().toISOString()
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result && result.actionType && result.actionType !== 'UNKNOWN') {
+          await executeLLMAction(result, safeToast);
+          return;
+        } else if (result && result.actionType === 'UNKNOWN') {
+          console.log('OpenRouter returned UNKNOWN action:', result.message);
+          const clarifyMsg = result.message || 'Could not understand voice command.';
+          safeToast(clarifyMsg);
+          speak(clarifyMsg);
+          return;
+        }
+      } else {
+        const errResult = await response.json().catch(() => ({}));
+        console.warn(`Voice Command API failed with status ${response.status}:`, errResult.message || 'Unknown error');
+      }
+    } catch (e) {
+      console.warn('AI voice command failed, falling back to local parser:', e);
+    }
 
     // 1. All on / all off
     const allOnPhrases = ['turn on all', 'all on', 'everything on', 'all lights on', 'all devices on'];

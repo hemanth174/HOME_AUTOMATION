@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { ScrollText } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import Loader from '@/components/Loader';
 import Toast from '@/components/Toast';
@@ -247,8 +248,20 @@ export default function LogsPage() {
       {/* Logs Container */}
       <div className="border border-border bg-card rounded-2xl shadow-lg overflow-hidden max-h-[600px] overflow-y-auto">
         {filteredLogs.length === 0 ? (
-          <div className="text-center py-12 text-xs font-semibold text-text-muted">
-            {search ? 'No matches found for your filter.' : 'No activity logged yet.'}
+          <div className="flex flex-col items-center justify-center p-12 text-center select-none gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-accent-bg flex items-center justify-center text-accent border border-accent/20 shadow-gold-glow">
+              <ScrollText size={24} className="stroke-[2.5px]" />
+            </div>
+            <div className="flex flex-col gap-1 max-w-xs mx-auto">
+              <h3 className="text-sm font-extrabold text-text tracking-tight">
+                {search ? 'No Matches Found' : 'No Activity Logs'}
+              </h3>
+              <p className="text-xs text-text-muted font-semibold leading-relaxed">
+                {search 
+                  ? 'We couldn\'t find any logs matching your filter query. Try searching another term.' 
+                  : 'Historical events and relay triggers will be shown here. Logs older than 7 days are automatically cleared.'}
+              </p>
+            </div>
           </div>
         ) : (
           <div className="w-full overflow-x-auto">

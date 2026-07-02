@@ -10,6 +10,7 @@ import AddBoardModal from '@/components/AddBoardModal';
 import EditBoardModal from '@/components/EditBoardModal';
 import QuickPresets from '@/components/QuickPresets';
 import useDashboardData from '@/hooks/useDashboardData';
+import { Cpu } from 'lucide-react';
 
 export default function Dashboard() {
   const {
@@ -230,6 +231,10 @@ export default function Dashboard() {
 
   const turnAllDevicesOn = useCallback(async () => {
     if (!user) return;
+    if (devices.length === 0) {
+      showToast('No devices available to turn ON. Please add a board first.');
+      return;
+    }
     const devicesToTurnOn = devices.filter(d => !d.is_on);
     if (devicesToTurnOn.length === 0) {
       showToast('All devices are already ON');
@@ -257,6 +262,10 @@ export default function Dashboard() {
 
   const turnAllDevicesOff = useCallback(async () => {
     if (!user) return;
+    if (devices.length === 0) {
+      showToast('No devices available to turn OFF. Please add a board first.');
+      return;
+    }
     const devicesToTurnOff = devices.filter(d => d.is_on);
     if (devicesToTurnOff.length === 0) {
       showToast('All devices are already OFF');
@@ -461,8 +470,22 @@ export default function Dashboard() {
         </div>
 
         {boards.length === 0 ? (
-          <div className="grid min-h-[220px] place-items-center rounded-[18px] border border-dashed border-border bg-white/[0.03] px-5 py-10 text-center text-sm font-semibold text-text-muted animate-scale-in">
-            No boards yet. Tap Add Board to add your first ESP32 board.
+          <div className="flex flex-col items-center justify-center rounded-[24px] border border-border border-dashed bg-card p-10 text-center animate-scale-in max-w-lg mx-auto select-none gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-accent-bg flex items-center justify-center text-accent border border-accent/20 shadow-gold-glow">
+              <Cpu size={24} className="stroke-[2.5px]" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <h3 className="text-base font-extrabold text-text tracking-tight">No Boards Registered Yet</h3>
+              <p className="text-xs text-text-muted font-semibold leading-relaxed px-4">
+                To start controlling your appliances, add your first ESP32 Board. You will be able to configure up to 4 relay switches per board.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowAddBoardModal(true)}
+              className="inline-flex min-h-[36px] items-center justify-center rounded-xl bg-accent px-5 text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer mt-1"
+            >
+              Add Your First Board
+            </button>
           </div>
         ) : (
           <div className="flex flex-col gap-3">

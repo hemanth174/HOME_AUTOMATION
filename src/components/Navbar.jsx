@@ -171,8 +171,8 @@ export default function Navbar() {
       {/* Top: Branding & Navigation */}
       <div className="flex flex-col gap-6">
         <div className="flex items-center justify-between px-2">
-          <Link href="/" className="flex items-center gap-2 text-xl font-black text-accent tracking-tight hover:opacity-90 transition-opacity">
-            <Crown className="text-accent fill-accent/10" size={20} />
+          <Link href="/" className="flex items-center gap-2.5 text-lg font-black text-accent tracking-tight hover:opacity-90 transition-opacity">
+            <img src="/file.enc" alt="Logo" className="w-10 h-10 rounded-full object-cover border border-accent/25 shadow-gold-glow" />
             <span>Smart Home</span>
           </Link>
         </div>
@@ -299,8 +299,9 @@ export default function Navbar() {
 
       {/* Mobile Top Header */}
       <header className="fixed top-0 left-0 right-0 h-14 border-b border-border bg-header/90 backdrop-blur-md flex items-center justify-between px-4 z-40 md:hidden select-none">
-        <Link href="/" className="text-base font-black text-accent tracking-tight">
-          smart home
+        <Link href="/" className="flex items-center gap-2 text-base font-black text-accent tracking-tight">
+          <img src="/file.enc" alt="Logo" className="w-5 h-5 rounded-full object-cover border border-accent/25 shadow-gold-glow" />
+          <span>smart home</span>
         </Link>
         <div className="flex items-center gap-2">
           {/* Theme switcher directly in mobile header */}
