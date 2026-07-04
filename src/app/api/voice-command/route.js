@@ -50,12 +50,12 @@ You must return a single JSON object. Do not include any markdown formatting, ba
   "deactivate": true or false
 }
 
-- Create Alarm: (Trigger a device to turn ON or OFF at a specific future timestamp. Use the provided currentTime to calculate triggerAt ISO string accurately. All timestamps for CREATE_ALARM must be in the future relative to currentTime)
+- Create Alarm: (Trigger a device to turn ON or OFF at a specific future timestamp. Calculate triggerAt ISO string relative to currentTime's timezone offset. IMPORTANT: You MUST retain the same timezone offset suffix as currentTime (e.g., if currentTime ends in +05:30, your triggerAt MUST end in +05:30) and match the local hour specified. Do NOT output a UTC Z-timestamp if currentTime has an offset. All timestamps for CREATE_ALARM must be in the future relative to currentTime)
 {
   "actionType": "CREATE_ALARM",
   "deviceId": "device UUID",
   "isOn": true or false,
-  "triggerAt": "ISO timestamp string in the future (e.g. 2026-07-02T21:00:00.000Z)"
+  "triggerAt": "ISO timestamp string in the future matching user's local offset (e.g. 2026-07-02T21:00:00.000+05:30)"
 }
 
 - Create Schedule: (Repeat action on specific days of week. days is an array of numbers from 0 (Sunday) to 6 (Saturday))
@@ -90,7 +90,8 @@ Rules:
   - isOn: default to true (ON).
   - days: default to everyday [0, 1, 2, 3, 4, 5, 6].
 - If the command specifies multiple devices, return the first one or prioritize the most relevant.
-- All timestamps for CREATE_ALARM must be in the future relative to currentTime.`;
+- All timestamps for CREATE_ALARM must be in the future relative to currentTime.
+- When generating the triggerAt timestamp, do timezone offset calculations carefully. If the user is in the +05:30 timezone (represented in currentTime) and asks for '1:00 PM', your triggerAt MUST be for '13:00' with the '+05:30' suffix (e.g., '2026-07-02T13:00:00.000+05:30'). do NOT shift the local time or subtract the offset; just represent the exact date and hour the user spoke in their local time.`;
 
     const userMessage = JSON.stringify({
       transcript,

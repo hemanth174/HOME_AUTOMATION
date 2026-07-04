@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import Toast from '@/components/Toast';
 import Loader from '@/components/Loader';
 import Link from 'next/link';
-import { X, KeyRound } from 'lucide-react';
+import { X, KeyRound, Zap } from 'lucide-react';
 
 export default function ProfilePage() {
   const [user, setUser] = useState(null);
@@ -15,6 +15,12 @@ export default function ProfilePage() {
   const [updating, setUpdating] = useState(false);
   const [toast, setToast] = useState('');
   const [promptUpdate, setPromptUpdate] = useState(false);
+
+  // Energy settings state
+  const [tariff, setTariff] = useState('8.00');
+  const [voltage, setVoltage] = useState('230');
+  const [currency, setCurrency] = useState('INR');
+  const [savingEnergy, setSavingEnergy] = useState(false);
 
   // Password states
   const [newPassword, setNewPassword] = useState('');
@@ -46,6 +52,18 @@ export default function ProfilePage() {
       const metadata = user.user_metadata || {};
       setNewName(metadata.full_name || metadata.name || '');
       setNewEmail(user.email || '');
+
+      // Fetch energy settings
+      const { data: settings } = await supabase
+        .from('user_settings')
+        .select('tariff_per_kwh, voltage, currency')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (settings) {
+        setTariff(String(settings.tariff_per_kwh));
+        setVoltage(String(settings.voltage));
+        setCurrency(settings.currency || 'INR');
+      }
 
       const elapsed = Date.now() - startTime;
       const remaining = Math.max(0, 500 - elapsed);
@@ -105,6 +123,30 @@ export default function ProfilePage() {
     });
     const resData = await response.json();
     if (!response.ok) throw new Error(resData.error || 'Failed to deliver verification code');
+  };
+
+  const handleSaveEnergySettings = async (e) => {
+    e.preventDefault();
+    const parsedTariff = parseFloat(tariff);
+    const parsedVoltage = parseInt(voltage);
+    if (isNaN(parsedTariff) || parsedTariff <= 0) { setToast('Please enter a valid tariff rate.'); return; }
+    if (isNaN(parsedVoltage) || parsedVoltage < 100 || parsedVoltage > 500) { setToast('Voltage must be between 100 and 500V.'); return; }
+    setSavingEnergy(true);
+    try {
+      const { error } = await supabase.from('user_settings').upsert({
+        user_id: user.id,
+        tariff_per_kwh: parsedTariff,
+        voltage: parsedVoltage,
+        currency,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' });
+      if (error) throw error;
+      setToast('Energy settings saved successfully!');
+    } catch (err) {
+      setToast('Failed to save settings: ' + err.message);
+    } finally {
+      setSavingEnergy(false);
+    }
   };
 
   const handleTriggerEmailVerification = async () => {
@@ -411,6 +453,88 @@ export default function ProfilePage() {
             </Link>
           </div>
         </div>
+      </div>
+
+      {/* Energy Settings Card */}
+      <div id="energy-settings" className="relative overflow-hidden rounded-[18px] border border-border bg-card p-8 shadow-lg mt-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-accent-bg flex items-center justify-center text-accent border border-accent/20 shadow-gold-glow">
+            <Zap size={18} className="stroke-[2.5px]" />
+          </div>
+          <div>
+            <h2 className="text-base font-extrabold text-text tracking-tight">Energy &amp; Billing Settings</h2>
+            <p className="text-xs font-semibold text-text-muted">Configure your electricity tariff and household voltage for accurate cost calculations.</p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSaveEnergySettings} className="flex flex-col gap-4 max-w-md">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-extrabold tracking-wide text-text-muted">Electricity Tariff</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-text-muted">
+                  {currency === 'USD' ? '$' : currency === 'EUR' ? '€' : '₹'}
+                </span>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={tariff}
+                  onChange={e => setTariff(e.target.value)}
+                  className="w-full pl-7 pr-3 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
+                  placeholder="8.00"
+                  required
+                />
+              </div>
+              <span className="text-[10px] font-semibold text-text-muted">per kWh</span>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-extrabold tracking-wide text-text-muted">Household Voltage</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="100"
+                  max="500"
+                  step="1"
+                  value={voltage}
+                  onChange={e => setVoltage(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
+                  placeholder="230"
+                  required
+                />
+              </div>
+              <span className="text-[10px] font-semibold text-text-muted">Volts (V) — India: 230V, US: 120V</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-extrabold tracking-wide text-text-muted">Currency Symbol</label>
+            <select
+              value={currency}
+              onChange={e => setCurrency(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent cursor-pointer"
+            >
+              <option value="INR">₹ INR — Indian Rupee</option>
+              <option value="USD">$ USD — US Dollar</option>
+              <option value="EUR">€ EUR — Euro</option>
+              <option value="GBP">£ GBP — British Pound</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-3 p-3 rounded-xl bg-accent-bg/40 border border-accent/15 text-[11px] font-semibold text-text-muted">
+            <Zap size={13} className="text-accent shrink-0" />
+            <span>Cost = Energy (kWh) × <strong className="text-text">{currency === 'USD' ? '$' : currency === 'EUR' ? '€' : '₹'}{tariff || '?'}/kWh</strong> · Current (A) = Watts ÷ <strong className="text-text">{voltage || '?'}V</strong></span>
+          </div>
+
+          <button
+            type="submit"
+            disabled={savingEnergy}
+            className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg bg-accent px-6 py-2 text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow disabled:opacity-50 disabled:cursor-not-allowed self-start"
+          >
+            {savingEnergy ? 'Saving...' : 'Save Energy Settings'}
+          </button>
+        </form>
       </div>
 
       {showMfaModal && (

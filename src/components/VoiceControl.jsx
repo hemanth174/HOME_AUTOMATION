@@ -21,6 +21,17 @@ const WORD_TO_NUM = {
  * - convert number-words to digits  ("fan two" => "fan 2")
  * - collapse whitespace
  */
+const getLocalISOString = () => {
+  const tzoffset = (new Date()).getTimezoneOffset() * 60000;
+  const localISOTime = (new Date(Date.now() - tzoffset)).toISOString().slice(0, -1);
+  const offsetMinutes = (new Date()).getTimezoneOffset();
+  const absOffset = Math.abs(offsetMinutes);
+  const sign = offsetMinutes > 0 ? "-" : "+";
+  const pad = (n) => String(n).padStart(2, "0");
+  const offsetStr = `${sign}${pad(Math.floor(absOffset / 60))}:${pad(absOffset % 60)}`;
+  return `${localISOTime}${offsetStr}`;
+};
+
 const normalizeText = (value) => {
   let s = value
     .toLowerCase()
@@ -372,7 +383,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           transcript: transcript,
           devices: commandDevices,
           presets: presetsRef.current,
-          currentTime: new Date().toISOString()
+          currentTime: getLocalISOString()
         })
       });
 
