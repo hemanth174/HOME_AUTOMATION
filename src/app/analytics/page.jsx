@@ -449,7 +449,8 @@ export default function AnalyticsPage() {
   // If there is no data, show an empty state
   if (boards.length === 0 || devices.length === 0) {
     return (
-      <div className="mx-auto w-[min(100%-32px,960px)] pt-[104px] pb-8 animate-fade-up max-md:w-[min(100%-24px,620px)] max-md:pt-[92px] max-md:pb-[96px] min-h-[70vh] flex flex-col justify-center items-center select-none">
+      <div className="relative w-full h-full">
+        <div className="mx-auto w-[min(100%-32px,960px)] pt-[104px] pb-8 animate-fade-up max-md:w-[min(100%-24px,620px)] max-md:pt-[92px] max-md:pb-[96px] min-h-[70vh] flex flex-col justify-center items-center select-none">
         <div className="text-center max-w-md flex flex-col items-center gap-4 p-8 border border-border bg-card rounded-[24px] shadow-lg backdrop-blur-md animate-scale-in">
           <div className="w-12 h-12 rounded-2xl bg-accent-bg flex items-center justify-center text-accent border border-accent/20 shadow-gold-glow">
             <TrendingUp size={24} className="stroke-[2.5px]" />
@@ -479,6 +480,7 @@ export default function AnalyticsPage() {
               User Guide
             </button>
           </div>
+        </div>
         </div>
         <OnboardingGuide isOpen={showOnboarding} onClose={() => setShowOnboarding(false)} />
       </div>
@@ -543,11 +545,23 @@ export default function AnalyticsPage() {
     };
   }).filter(item => item.value > 0);
 
+  // ── Shared chart style constants ───────────────────────────────────────────
+  const CHART_AXIS_STROKE   = '#6b7280';          // gray-500 — visible on dark bg
+  const CHART_TICK_STYLE    = { fontSize: 10, fontWeight: 700, fill: '#9ca3af' }; // gray-400
+  const CHART_GRID_STROKE   = 'rgba(255,255,255,0.06)';
+  const CHART_TOOLTIP_STYLE = {
+    contentStyle: { backgroundColor: '#1a1a1a', border: '1px solid #c9a84c', borderRadius: '10px', padding: '8px 12px' },
+    labelStyle:   { color: '#f3f4f6', fontSize: '11px', fontWeight: 'bold' },
+    itemStyle:    { color: '#c9a84c', fontSize: '11px', fontWeight: '600' },
+    cursor:       { fill: 'rgba(201,168,76,0.06)' }
+  };
+  const CHART_LEGEND_STYLE = { wrapperStyle: { fontSize: '11px', fontWeight: '600', color: '#d1d5db' } };
+
   const COLORS = ['#c9a84c', '#e6c875', '#ffd700', '#f4e0a5', '#bfa054', '#8c7030', '#e5c158', '#ffd670'];
 
   return (
-    <div className="mx-auto w-[min(100%-32px,960px)] pt-[104px] pb-8 animate-fade-up max-md:w-[min(100%-24px,620px)] max-md:pt-[92px] max-md:pb-[96px]">
-      
+    <div className="relative w-full h-full">
+      <div className="mx-auto w-[min(100%-32px,960px)] pt-[104px] pb-8 animate-fade-up max-md:w-[min(100%-24px,620px)] max-md:pt-[92px] max-md:pb-[96px]">
       {/* Header section with buttons */}
       <div className="ml-1 mb-6 flex flex-wrap items-center justify-between gap-4 select-none">
         <div className="flex flex-col gap-1">
@@ -630,14 +644,10 @@ export default function AnalyticsPage() {
                       <stop offset="95%" stopColor="#c9a84c" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                  <XAxis dataKey="time" stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} />
-                  <YAxis stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#111', border: '1px solid #c9a84c', borderRadius: '8px' }}
-                    labelStyle={{ color: '#fff', fontSize: '10px', fontWeight: 'bold' }}
-                    itemStyle={{ color: '#c9a84c', fontSize: '10px', fontWeight: 'bold' }}
-                  />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
+                  <XAxis dataKey="time" stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} />
+                  <YAxis stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} />
+                  <Tooltip {...CHART_TOOLTIP_STYLE} />
                   <Area type="monotone" dataKey="Usage" stroke="#c9a84c" strokeWidth={2} fillOpacity={1} fill="url(#colorUsage)" />
                 </AreaChart>
               </ResponsiveContainer>
@@ -656,14 +666,10 @@ export default function AnalyticsPage() {
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={boardData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                  <XAxis dataKey="name" stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} />
-                  <YAxis stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#111', border: '1px solid #c9a84c', borderRadius: '8px' }}
-                    labelStyle={{ color: '#fff', fontSize: '10px', fontWeight: 'bold' }}
-                    itemStyle={{ color: '#c9a84c', fontSize: '10px', fontWeight: 'bold' }}
-                  />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
+                  <XAxis dataKey="name" stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} />
+                  <YAxis stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} />
+                  <Tooltip {...CHART_TOOLTIP_STYLE} />
                   <Bar dataKey="Usage" fill="#c9a84c" radius={[4, 4, 0, 0]}>
                     {boardData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -702,9 +708,9 @@ export default function AnalyticsPage() {
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#111', border: '1px solid #c9a84c', borderRadius: '8px' }}
-                      itemStyle={{ color: '#c9a84c', fontSize: '10px', fontWeight: 'bold' }}
+                  <Tooltip
+                      contentStyle={CHART_TOOLTIP_STYLE.contentStyle}
+                      itemStyle={CHART_TOOLTIP_STYLE.itemStyle}
                     />
                   </PieChart>
                 </ResponsiveContainer>
@@ -739,21 +745,19 @@ export default function AnalyticsPage() {
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={dailyAnalytics} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
                 <XAxis 
                   dataKey="date" 
-                  stroke="#666" 
-                  tick={{ fontSize: 9, fontWeight: 'bold' }} 
+                  stroke={CHART_AXIS_STROKE} 
+                  tick={CHART_TICK_STYLE} 
                   tickFormatter={(str) => {
                     const d = new Date(str);
                     return isNaN(d.getTime()) ? str : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
                   }}
                 />
-                <YAxis stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} />
+                <YAxis stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#111', border: '1px solid #c9a84c', borderRadius: '8px' }}
-                  labelStyle={{ color: '#fff', fontSize: '10px', fontWeight: 'bold' }}
-                  itemStyle={{ color: '#c9a84c', fontSize: '10px', fontWeight: 'bold' }}
+                  {...CHART_TOOLTIP_STYLE}
                   formatter={(value, name) => {
                     if (name === "total_kwh") return [`${value} kWh`, "Energy"];
                     if (name === "total_cost") return [`₹${value}`, "Cost"];
@@ -792,10 +796,10 @@ export default function AnalyticsPage() {
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={uptimeData} layout="vertical" margin={{ top: 4, right: 24, left: 10, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#222" horizontal={false} />
-                    <XAxis type="number" stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} unit="h" />
-                    <YAxis type="category" dataKey="name" stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} width={90} />
-                    <Tooltip contentStyle={{ backgroundColor: '#111', border: '1px solid #c9a84c', borderRadius: '8px' }} itemStyle={{ color: '#c9a84c', fontSize: '10px', fontWeight: 'bold' }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
+                    <XAxis type="number" stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} unit="h" />
+                    <YAxis type="category" dataKey="name" stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} width={100} />
+                    <Tooltip {...CHART_TOOLTIP_STYLE} />
                     <Bar dataKey="Hours" radius={[0, 4, 4, 0]}>
                       {uptimeData.map((entry, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                     </Bar>
@@ -827,10 +831,10 @@ export default function AnalyticsPage() {
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={heatmapData} margin={{ top: 4, right: 10, left: -28, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                    <XAxis dataKey="hour" stroke="#666" tick={{ fontSize: 8, fontWeight: 'bold' }} interval={2} />
-                    <YAxis stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} allowDecimals={false} />
-                    <Tooltip contentStyle={{ backgroundColor: '#111', border: '1px solid #c9a84c', borderRadius: '8px' }} itemStyle={{ color: '#c9a84c', fontSize: '10px', fontWeight: 'bold' }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
+                    <XAxis dataKey="hour" stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} interval={2} />
+                    <YAxis stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} allowDecimals={false} />
+                    <Tooltip {...CHART_TOOLTIP_STYLE} />
                     <Bar dataKey="Events" radius={[3, 3, 0, 0]}>
                       {heatmapData.map((entry, i) => (
                         <Cell key={i} fill={entry.Events === Math.max(...heatmapData.map(d => d.Events)) ? '#ffd700' : '#c9a84c'} />
@@ -870,7 +874,7 @@ export default function AnalyticsPage() {
                         <Pie data={ghostPie} cx="50%" cy="50%" innerRadius={42} outerRadius={65} paddingAngle={3} dataKey="value">
                           {ghostPie.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
                         </Pie>
-                        <Tooltip contentStyle={{ backgroundColor: '#111', border: '1px solid #c9a84c', borderRadius: '8px' }} itemStyle={{ color: '#c9a84c', fontSize: '10px', fontWeight: 'bold' }} />
+                        <Tooltip contentStyle={CHART_TOOLTIP_STYLE.contentStyle} itemStyle={CHART_TOOLTIP_STYLE.itemStyle} />
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="flex gap-4 text-xs font-bold">
@@ -915,12 +919,12 @@ export default function AnalyticsPage() {
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={wowData} margin={{ top: 4, right: 10, left: -28, bottom: 4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                      <XAxis dataKey="date" stroke="#666" tick={{ fontSize: 8, fontWeight: 'bold' }}
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
+                      <XAxis dataKey="date" stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE}
                         tickFormatter={s => { const d = new Date(s); return isNaN(d.getTime()) ? s : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }); }} />
-                      <YAxis stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} />
-                      <Tooltip contentStyle={{ backgroundColor: '#111', border: '1px solid #c9a84c', borderRadius: '8px' }} itemStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
-                      <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
+                      <YAxis stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} />
+                      <Tooltip {...CHART_TOOLTIP_STYLE} />
+                      <Legend {...CHART_LEGEND_STYLE} />
                       <Line type="monotone" dataKey="This Week" stroke="#c9a84c" strokeWidth={2} dot={false} />
                       {lastWeek && <Line type="monotone" dataKey="Last Week" stroke="#555" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />}
                     </LineChart>
@@ -952,11 +956,11 @@ export default function AnalyticsPage() {
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <RadarChart data={radarData} margin={{ top: 10, right: 30, left: 30, bottom: 10 }}>
-                    <PolarGrid stroke="#333" />
-                    <PolarAngleAxis dataKey="board" tick={{ fontSize: 10, fontWeight: 'bold', fill: '#aaa' }} />
-                    <PolarRadiusAxis tick={{ fontSize: 8, fill: '#666' }} />
+                    <PolarGrid stroke="rgba(255,255,255,0.12)" />
+                    <PolarAngleAxis dataKey="board" tick={{ fontSize: 11, fontWeight: 'bold', fill: '#d1d5db' }} />
+                    <PolarRadiusAxis tick={{ fontSize: 9, fill: '#9ca3af' }} />
                     <Radar dataKey="Active Hours" stroke="#c9a84c" fill="#c9a84c" fillOpacity={0.35} />
-                    <Tooltip contentStyle={{ backgroundColor: '#111', border: '1px solid #c9a84c', borderRadius: '8px' }} itemStyle={{ color: '#c9a84c', fontSize: '10px', fontWeight: 'bold' }} />
+                    <Tooltip {...CHART_TOOLTIP_STYLE} />
                   </RadarChart>
                 </ResponsiveContainer>
               )}
@@ -990,11 +994,11 @@ export default function AnalyticsPage() {
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <ScatterChart margin={{ top: 10, right: 20, left: -20, bottom: 10 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                      <XAxis type="number" dataKey="toggles" name="Toggles" stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} label={{ value: 'Toggles', position: 'insideBottom', offset: -4, fontSize: 9, fill: '#666' }} />
-                      <YAxis type="number" dataKey="avgMinutes" name="Avg Min/Toggle" stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} label={{ value: 'Avg Min/Toggle', angle: -90, position: 'insideLeft', fontSize: 9, fill: '#666' }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
+                      <XAxis type="number" dataKey="toggles" name="Toggles" stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} label={{ value: 'Toggles', position: 'insideBottom', offset: -4, fontSize: 10, fill: '#9ca3af' }} />
+                      <YAxis type="number" dataKey="avgMinutes" name="Avg Min/Toggle" stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} label={{ value: 'Avg Min/Toggle', angle: -90, position: 'insideLeft', fontSize: 10, fill: '#9ca3af' }} />
                       <ZAxis range={[40, 160]} />
-                      <Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ backgroundColor: '#111', border: '1px solid #c9a84c', borderRadius: '8px' }} itemStyle={{ color: '#c9a84c', fontSize: '10px', fontWeight: 'bold' }}
+                      <Tooltip cursor={{ strokeDasharray: '3 3' }} {...CHART_TOOLTIP_STYLE}
                         content={({ payload }) => payload?.length ? (
                           <div style={{ background: '#111', border: '1px solid #c9a84c', borderRadius: 8, padding: '6px 10px' }}>
                             <p style={{ color: '#fff', fontSize: 10, fontWeight: 'bold', margin: 0 }}>{payload[0]?.payload?.name}</p>
@@ -1078,10 +1082,10 @@ export default function AnalyticsPage() {
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={automationData} margin={{ top: 4, right: 10, left: -28, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                    <XAxis dataKey="hour" stroke="#666" tick={{ fontSize: 8, fontWeight: 'bold' }} interval={2} />
-                    <YAxis stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} allowDecimals={false} />
-                    <Tooltip contentStyle={{ backgroundColor: '#111', border: '1px solid #c9a84c', borderRadius: '8px' }} itemStyle={{ color: '#c9a84c', fontSize: '10px', fontWeight: 'bold' }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
+                    <XAxis dataKey="hour" stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} interval={2} />
+                    <YAxis stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} allowDecimals={false} />
+                    <Tooltip {...CHART_TOOLTIP_STYLE} />
                     <Bar dataKey="Events" fill="#c9a84c" radius={[3, 3, 0, 0]} opacity={0.7} />
                     {sortedPeaks.map((p, i) => (
                       <ReferenceLine key={i} x={p.hour} stroke="#ffd700" strokeDasharray="4 3" strokeWidth={1.5}
@@ -1121,10 +1125,10 @@ export default function AnalyticsPage() {
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={alwaysOnData} layout="vertical" margin={{ top: 4, right: 10, left: 10, bottom: 4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#222" horizontal={false} />
-                      <XAxis type="number" stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} unit="m" />
-                      <YAxis type="category" dataKey="name" stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} width={85} />
-                      <Tooltip contentStyle={{ backgroundColor: '#111', border: '1px solid #c9a84c', borderRadius: '8px' }} itemStyle={{ fontSize: '10px', fontWeight: 'bold' }} formatter={v => [`${v} min`, 'Uptime']} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
+                      <XAxis type="number" stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} unit="m" />
+                      <YAxis type="category" dataKey="name" stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} width={95} />
+                      <Tooltip {...CHART_TOOLTIP_STYLE} formatter={v => [`${v} min`, 'Uptime']} />
                       <Bar dataKey="Minutes" radius={[0, 4, 4, 0]}>
                         {alwaysOnData.map((entry, i) => <Cell key={i} fill={entry.alwaysOn ? '#ef4444' : '#c9a84c'} />)}
                       </Bar>
@@ -1160,11 +1164,11 @@ export default function AnalyticsPage() {
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={relayData} margin={{ top: 4, right: 10, left: -28, bottom: 4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                      <XAxis dataKey="board" stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} />
-                      <YAxis stroke="#666" tick={{ fontSize: 9, fontWeight: 'bold' }} unit="h" />
-                      <Tooltip contentStyle={{ backgroundColor: '#111', border: '1px solid #c9a84c', borderRadius: '8px' }} itemStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
-                      <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
+                      <XAxis dataKey="board" stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} />
+                      <YAxis stroke={CHART_AXIS_STROKE} tick={CHART_TICK_STYLE} unit="h" />
+                      <Tooltip {...CHART_TOOLTIP_STYLE} />
+                      <Legend {...CHART_LEGEND_STYLE} />
                       {[0,1,2,3].map(r => (
                         <Bar key={r} dataKey={`Relay ${r}`} stackId="a" fill={relayColors[r]} radius={r === 3 ? [3, 3, 0, 0] : [0, 0, 0, 0]} />
                       ))}
@@ -1175,6 +1179,7 @@ export default function AnalyticsPage() {
             </section>
           );
         })()}
+      </div>
       </div>
 
       {/* Onboarding Guide Modal */}

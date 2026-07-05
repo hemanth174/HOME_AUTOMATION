@@ -2,7 +2,8 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Mic, X } from 'lucide-react';
+import { Mic, X, LayoutGrid, List } from 'lucide-react';
+import { speak } from '@/utils/voice';
 
 // Number-word to digit map
 const WORD_TO_NUM = {
@@ -133,63 +134,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     fetchMissingData();
   }, [propDevices, propBoards, propPresets]);
 
-  // Speak confirmation using high-quality male voices
-  const speak = useCallback((textToSpeak) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
-
-    // 1. Cancel any ongoing speech immediately to prevent overlapping/queueing
-    window.speechSynthesis.cancel();
-
-    const utterance = new SpeechSynthesisUtterance(textToSpeak);
-
-    // 2. Get available voices
-    let voices = window.speechSynthesis.getVoices();
-
-    const findBestVoice = () => {
-      // Filter for English voices
-      const englishVoices = voices.filter(v => v.lang.startsWith('en'));
-      if (englishVoices.length === 0) return voices[0]; // Fallback to system default
-
-      // Target Premium/Natural/Google voices first (Regardless of gender, for ultimate quality)
-      const premiumVoice = englishVoices.find(v =>
-        v.name.toLowerCase().includes('natural') ||
-        v.name.toLowerCase().includes('online') ||
-        v.name.toLowerCase().includes('google') ||
-        v.name.toLowerCase().includes('premium')
-      );
-
-      if (premiumVoice) return premiumVoice;
-
-      // Secondary choice: Enhanced Apple voices if on iOS/Mac (e.g., "Daniel (Enhanced)")
-      const enhancedVoice = englishVoices.find(v => v.name.toLowerCase().includes('enhanced'));
-      if (enhancedVoice) return enhancedVoice;
-
-      // Fallback to the first available English voice
-      return englishVoices[0];
-    };
-
-    const selectedVoice = findBestVoice();
-    if (selectedVoice) {
-      utterance.voice = selectedVoice;
-    }
-
-    // 3. Perfect Tone Sweet Spots (Do not exceed 0.5 - 2.0 range)
-    // If the chosen voice is male, a pitch of 0.9 or 1.0 is best. 
-    // Lowering pitch to 0.6 on female or standard voices makes them sound like slowed-down robots.
-
-    const voiceName = selectedVoice ? selectedVoice.name.toLowerCase() : '';
-    const isMale = ['male', 'david', 'daniel', 'google uk english male'].some(k => voiceName.includes(k));
-
-    if (isMale) {
-      utterance.pitch = 0.9; // Smooth, deeper male tone without sounding glitchy
-      utterance.rate = 0.95; // Just a tiny bit slower than normal for ultimate clarity
-    } else {
-      utterance.pitch = 0.75; // Perfect natural pitch for high-quality female/neutral voices
-      utterance.rate = 0.90;  // Normal human conversational speed
-    }
-
-    window.speechSynthesis.speak(utterance);
-  }, []);
+  // The 'speak' function is now imported from @/utils/voice to guarantee the exact same voice globally
 
   // Realtime WebSocket: devices + boards
   useEffect(() => {
@@ -304,17 +249,57 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         const latestDevices = await getLatestDevices();
         const device = latestDevices.find(d => d.id === deviceId);
         if (device) {
-          await supabase.from('alarms').insert({
-            user_id: user.id,
-            device_id: deviceId,
-            action: isOn,
-            trigger_at: triggerAt,
-            fired: false
+          // ── Guard 1: Reject past timestamps immediately ──────────────────
+          const triggerDate = new Date(triggerAt);
+          if (isNaN(triggerDate.getTime()) || triggerDate.getTime() <= Date.now()) {
+            const pastMsg = `Cannot set an alarm in the past. Please provide a future date and time.`;
+            safeToast(`⚠ ${pastMsg}`);
+            speak(pastMsg);
+            break;
+          }
+
+          // ── Guard 2: Deduplication — unfired alarm within 1-minute window ─
+          const triggerMs   = triggerDate.getTime();
+          const windowMs    = 60 * 1000;
+          const actionBool  = isOn === true || isOn === 'true';
+          const { data: existingAlarms } = await supabase
+            .from('alarms')
+            .select('id, trigger_at, action')
+            .eq('device_id', deviceId)
+            .eq('user_id', user.id)
+            .eq('fired', false);
+
+          const duplicate = (existingAlarms || []).find(a => {
+            const diff = Math.abs(new Date(a.trigger_at).getTime() - triggerMs);
+            return diff <= windowMs && !!a.action === actionBool;
           });
-          const displayTime = new Date(triggerAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-          const feedbackMsg = `Alarm set for ${device.name} to turn ${isOn ? 'on' : 'off'} at ${displayTime}`;
-          safeToast(feedbackMsg);
-          speak(feedbackMsg);
+
+          if (duplicate) {
+            const displayTime = new Date(duplicate.trigger_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            const displayDate = new Date(duplicate.trigger_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            const msg = `${device.name} already has an alarm at ${displayTime} on ${displayDate}. Duplicate not created.`;
+            safeToast(msg);
+            speak(`Duplicate alarm skipped for ${device.name}`);
+          } else {
+            const { error } = await supabase.from('alarms').insert({
+              user_id: user.id,
+              device_id: deviceId,
+              action: actionBool,
+              trigger_at: triggerAt,
+              fired: false
+            });
+            if (error) {
+              const msg = `Could not create alarm for ${device.name}. Please try again.`;
+              safeToast(`⚠ ${msg}`);
+              speak(msg);
+            } else {
+              const displayTime = triggerDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+              const displayDate = triggerDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+              const feedbackMsg = `✅ Alarm set for ${device.name} to turn ${actionBool ? 'on' : 'off'} at ${displayTime} on ${displayDate}`;
+              safeToast(feedbackMsg);
+              speak(`Alarm set for ${device.name} at ${displayTime}`);
+            }
+          }
         }
         break;
       }
@@ -323,17 +308,48 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         const latestDevices = await getLatestDevices();
         const device = latestDevices.find(d => d.id === deviceId);
         if (device) {
-          await supabase.from('schedules').insert({
-            user_id: user.id,
-            device_id: deviceId,
-            action: isOn,
-            time: time,
-            days: days,
-            enabled: true
-          });
-          const feedbackMsg = `Schedule created for ${device.name}`;
-          safeToast(feedbackMsg);
-          speak(feedbackMsg);
+          // Normalise: take first 5 chars of time (HH:MM) to handle DB storing HH:MM:SS
+          const normTime   = (time || '').trim().slice(0, 5);
+          const actionBool = isOn === true || isOn === 'true';
+
+          // Deduplication: same device + same HH:MM + same action — filter by user_id too
+          const { data: existingSchedules } = await supabase
+            .from('schedules')
+            .select('id, time, action')
+            .eq('device_id', deviceId)
+            .eq('user_id', user.id);
+
+          const duplicate = (existingSchedules || []).find(s =>
+            (s.time || '').slice(0, 5) === normTime && !!s.action === actionBool
+          );
+
+          if (duplicate) {
+            const msg = `${device.name} already has a schedule to turn ${actionBool ? 'on' : 'off'} at ${normTime}. Duplicate not created.`;
+            safeToast(msg);
+            speak(`Duplicate schedule skipped for ${device.name}`);
+          } else {
+            const { error } = await supabase.from('schedules').insert({
+              user_id: user.id,
+              device_id: deviceId,
+              action: actionBool,
+              time: normTime,
+              days: days,
+              enabled: true
+            });
+            if (error) {
+              const msg = `Could not create schedule for ${device.name}. Please try again.`;
+              safeToast(`⚠ ${msg}`);
+              speak(msg);
+            } else {
+              const [hh, mm] = normTime.split(':').map(Number);
+              const h12 = hh % 12 || 12;
+              const ampm = hh >= 12 ? 'PM' : 'AM';
+              const timeDisplay = `${h12}:${String(mm).padStart(2, '0')} ${ampm}`;
+              const feedbackMsg = `✅ Schedule created for ${device.name} at ${timeDisplay}`;
+              safeToast(feedbackMsg);
+              speak(`Schedule created for ${device.name} at ${timeDisplay}`);
+            }
+          }
         }
         break;
       }
@@ -357,7 +373,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       default:
         break;
     }
-  }, [getLatestDevices, speak, applyPreset]);
+  }, [getLatestDevices, applyPreset]);
 
   // Main command processor
   const processCommand = useCallback(async (transcript) => {
@@ -478,7 +494,40 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         alarmDate.setDate(alarmDate.getDate() + 1); // Set for tomorrow
       }
 
+      // ── Guard 1: Reject alarms in the past ─────────────────────────────
+      if (alarmDate.getTime() <= Date.now()) {
+        const pastMsg = `Cannot set an alarm in the past. "${timeStr}" has already passed. Please say a future time or date.`;
+        safeToast(`⚠ ${pastMsg}`);
+        speak(`Cannot set alarm in the past`);
+        return;
+      }
+
       const isAlarmOn = actionWord ? actionWord === 'on' : true;
+
+      // ── Guard 2: Deduplication — same device + 1-min window + same action ─
+      const { data: existingAlarms } = await supabase
+        .from('alarms')
+        .select('id, trigger_at, action')
+        .eq('device_id', matchedDevice.id)
+        .eq('user_id', user.id)
+        .eq('fired', false);
+
+      const windowMs = 60 * 1000;
+      const alarmTs = alarmDate.getTime();
+      const duplicate = (existingAlarms || []).find(a => {
+        const diff = Math.abs(new Date(a.trigger_at).getTime() - alarmTs);
+        return diff <= windowMs && !!a.action === isAlarmOn;
+      });
+
+      if (duplicate) {
+        const existingTime = new Date(duplicate.trigger_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        const existingDate = new Date(duplicate.trigger_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const dupMsg = `${matchedDevice.name} already has an alarm at ${existingTime} on ${existingDate}. Only one alarm per device at a time is allowed.`;
+        safeToast(dupMsg);
+        speak(`Duplicate alarm already exists for ${matchedDevice.name}`);
+        return;
+      }
+
       const { error } = await supabase.from('alarms').insert({
         user_id: user.id,
         device_id: matchedDevice.id,
@@ -488,11 +537,13 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       });
 
       if (error) {
-        safeToast(error.message);
+        const errMsg = `Couldn't set alarm for ${matchedDevice.name}. Please try again.`;
+        safeToast(`⚠ ${errMsg}`);
+        speak(errMsg);
       } else {
         const timeDisplay = alarmDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-        const dateDisplay = alarmDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        safeToast(`Alarm set for ${matchedDevice.name} on ${dateDisplay} at ${timeDisplay}`);
+        const dateDisplay = alarmDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        safeToast(`✅ Alarm set for ${matchedDevice.name} on ${dateDisplay} at ${timeDisplay}`);
         speak(`Alarm set for ${matchedDevice.name} on ${dateDisplay} at ${timeDisplay}`);
       }
       return;
@@ -544,7 +595,27 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
 
       const isScheduleOn = actionWord ? actionWord === 'on' : true;
       const formattedTime = `${String(parsedTime.hour).padStart(2, '0')}:${String(parsedTime.minute).padStart(2, '0')}`;
-      
+
+      // Dedup: normalize time to HH:MM (5 chars) — DB may store HH:MM:SS
+      // Cast action to boolean so type mismatches don't let duplicates through
+      const { data: existingSchedules } = await supabase
+        .from('schedules')
+        .select('id, time, action')
+        .eq('device_id', matchedDevice.id)
+        .eq('user_id', user.id);
+
+      const dupSched = (existingSchedules || []).find(s =>
+        (s.time || '').slice(0, 5) === formattedTime && !!s.action === isScheduleOn
+      );
+
+      if (dupSched) {
+        const timeDisplay = `${parsedTime.hour % 12 || 12}:${String(parsedTime.minute).padStart(2, '0')} ${parsedTime.hour >= 12 ? 'PM' : 'AM'}`;
+        const dupMsg = `${matchedDevice.name} already has a schedule to turn ${isScheduleOn ? 'on' : 'off'} at ${timeDisplay}. Duplicate not created.`;
+        safeToast(dupMsg);
+        speak(`Duplicate schedule already exists for ${matchedDevice.name}`);
+        return;
+      }
+
       const { error } = await supabase.from('schedules').insert({
         user_id: user.id,
         device_id: matchedDevice.id,
@@ -555,11 +626,13 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       });
 
       if (error) {
-        safeToast(error.message);
+        const errMsg = `Couldn't create schedule for ${matchedDevice.name}. Please try again.`;
+        safeToast(`⚠ ${errMsg}`);
+        speak(errMsg);
       } else {
         const timeDisplay = `${parsedTime.hour % 12 || 12}:${String(parsedTime.minute).padStart(2, '0')} ${parsedTime.hour >= 12 ? 'PM' : 'AM'}`;
         const daysDisplay = days.length === 7 ? 'every day' : days.length === 5 && days.includes(1) && !days.includes(0) ? 'weekdays' : 'selected days';
-        safeToast(`Schedule set for ${matchedDevice.name} at ${timeDisplay} on ${daysDisplay}`);
+        safeToast(`✅ Schedule set for ${matchedDevice.name} at ${timeDisplay} on ${daysDisplay}`);
         speak(`Schedule set for ${matchedDevice.name} at ${timeDisplay} on ${daysDisplay}`);
       }
       return;
@@ -580,16 +653,16 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
 
       if (type === 'alarm') {
         const { error } = await supabase.from('alarms').delete().eq('device_id', matchedDevice.id);
-        if (error) safeToast(error.message);
+        if (error) safeToast(`⚠ Could not delete alarms for ${matchedDevice.name}. Please try again.`);
         else {
-          safeToast(`Alarms deleted for ${matchedDevice.name}`);
+          safeToast(`✅ Alarms deleted for ${matchedDevice.name}`);
           speak(`Alarms deleted for ${matchedDevice.name}`);
         }
       } else {
         const { error } = await supabase.from('schedules').delete().eq('device_id', matchedDevice.id);
-        if (error) safeToast(error.message);
+        if (error) safeToast(`⚠ Could not delete schedules for ${matchedDevice.name}. Please try again.`);
         else {
-          safeToast(`Schedules deleted for ${matchedDevice.name}`);
+          safeToast(`✅ Schedules deleted for ${matchedDevice.name}`);
           speak(`Schedules deleted for ${matchedDevice.name}`);
         }
       }

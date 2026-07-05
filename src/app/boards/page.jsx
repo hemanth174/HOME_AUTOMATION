@@ -125,12 +125,32 @@ export default function BoardsPage() {
   const addBoard = async (e) => {
     e.preventDefault();
     if (!boardIdentifier.trim()) { setToast('Board identifier is required'); return; }
+    const trimmedId = boardIdentifier.trim();
+    const trimmedName = boardName.trim() || 'New Board';
+
+    // Verify uniqueness
+    const { data: existingBoards } = await supabase
+      .from('boards')
+      .select('board_identifier, name')
+      .eq('user_id', user.id);
+
+    const duplicateId = existingBoards?.find(b => b.board_identifier === trimmedId);
+    if (duplicateId) {
+      setToast('A board with this identifier already exists.');
+      return;
+    }
+
+    const duplicateName = existingBoards?.find(b => b.name.toLowerCase() === trimmedName.toLowerCase());
+    if (duplicateName) {
+      setToast('A board with this name already exists.');
+      return;
+    }
 
     // Insert board
     const { data: board, error: boardError } = await supabase.from('boards').insert({
       user_id: user.id,
-      board_identifier: boardIdentifier.trim(),
-      name: boardName.trim() || 'New Board',
+      board_identifier: trimmedId,
+      name: trimmedName,
     }).select('id').single();
 
     if (boardError) { setToast(boardError.message); return; }

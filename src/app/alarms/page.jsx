@@ -6,6 +6,7 @@ import Toast from '@/components/Toast';
 import Loader from '@/components/Loader';
 import { Edit, LucideTrash2, AlarmClock } from 'lucide-react';
 import VoiceControl from '@/components/VoiceControl';
+import { speak } from '@/utils/voice';
 import CardVoiceButton from '@/components/CardVoiceButton';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -306,40 +307,7 @@ export default function AlarmsPage() {
   const [dateError, setDateError] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [editingAlarm, setEditingAlarm] = useState(null);
-
-  // Speak utility using premium/male voices
-  const speak = useCallback((textToSpeak) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(textToSpeak);
-    let voices = window.speechSynthesis.getVoices();
-    const findBestVoice = () => {
-      const englishVoices = voices.filter(v => v.lang.startsWith('en'));
-      if (englishVoices.length === 0) return voices[0];
-      const premiumVoice = englishVoices.find(v =>
-        v.name.toLowerCase().includes('natural') ||
-        v.name.toLowerCase().includes('online') ||
-        v.name.toLowerCase().includes('google') ||
-        v.name.toLowerCase().includes('premium')
-      );
-      if (premiumVoice) return premiumVoice;
-      const enhancedVoice = englishVoices.find(v => v.name.toLowerCase().includes('enhanced'));
-      if (enhancedVoice) return enhancedVoice;
-      return englishVoices[0];
-    };
-    const selectedVoice = findBestVoice();
-    if (selectedVoice) utterance.voice = selectedVoice;
-    const voiceName = selectedVoice ? selectedVoice.name.toLowerCase() : '';
-    const isMale = ['male', 'david', 'daniel', 'google uk english male'].some(k => voiceName.includes(k));
-    if (isMale) {
-      utterance.pitch = 0.9;
-      utterance.rate = 0.95;
-    } else {
-      utterance.pitch = 0.75;
-      utterance.rate = 0.90;
-    }
-    window.speechSynthesis.speak(utterance);
-  }, []);
+  // Speak utility is now imported from @/utils/voice
 
   const handleAlarmCardCommand = async (alarm, transcript) => {
     const text = transcript.toLowerCase().trim();

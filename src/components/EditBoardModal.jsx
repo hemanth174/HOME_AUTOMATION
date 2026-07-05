@@ -18,7 +18,7 @@ export default function EditBoardModal({
   const [boardIdentifier, setBoardIdentifier] = useState('');
   const [deviceNames, setDeviceNames] = useState(['', '', '', '']);
 
-  // Pre-fill form when modal opens
+  // Pre-fill form when modal opens or when editing a different board
   useEffect(() => {
     if (showEditBoardModal && editingBoardObj) {
       setBoardName(editingBoardObj.name || '');
@@ -34,7 +34,10 @@ export default function EditBoardModal({
       }
       setDeviceNames(newDevNames);
     }
-  }, [showEditBoardModal, editingBoardObj, editingBoardDevices]);
+  // We explicitly ignore editingBoardDevices in dependencies to prevent the form from 
+  // resetting on every parent re-render (which happens on touch events for the drag gesture).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showEditBoardModal, editingBoardObj?.id]);
 
   const handleDeviceNameChange = (index, value) => {
     const updated = [...deviceNames];
