@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import ThemeToggle from '@/components/ThemeToggle';
 import Toast from '@/components/Toast';
-import { Eye, EyeClosed } from 'lucide-react';
+import { Eye, EyeClosed, ArrowLeft } from 'lucide-react';
 import SignupForm from '@/components/SignupForm';
 import ForgotQuestionsForm from '@/components/ForgotQuestionsForm';
 
@@ -288,6 +289,16 @@ export default function LoginPage() {
 
   return (
     <div className="relative min-h-screen w-full flex items-center justify-center p-6">
+      <div className="absolute top-5 left-5 z-50">
+        <Link 
+          href="/" 
+          className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border bg-card text-xs font-extrabold text-text hover:bg-card-alt hover:border-accent/40 transition-all cursor-pointer select-none"
+        >
+          <ArrowLeft size={14} />
+          <span>Back to Home</span>
+        </Link>
+      </div>
+
       <div className="absolute top-5 right-5 z-50">
         <ThemeToggle />
       </div>
