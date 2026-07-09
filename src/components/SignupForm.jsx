@@ -103,7 +103,7 @@ export default function SignupForm({
         />
       </div>
       <button
-        className="w-full py-3 rounded-lg text-sm font-bold bg-accent text-[#0a0800] transition-all hover:bg-accent-hover active:translate-y-0 cursor-pointer shadow-gold-glow mt-2 shrink-0"
+        className="w-full py-3 rounded-lg text-sm font-bold bg-accent text-[var(--btn-text)] transition-all hover:bg-accent-hover active:translate-y-0 cursor-pointer shadow-gold-glow mt-2 shrink-0"
         type="submit"
         disabled={loading}
       >

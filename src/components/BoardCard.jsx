@@ -39,7 +39,7 @@ const BoardCard = memo(function BoardCard({
           <button
             className={`inline-flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-full border transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 ${
               anyOn 
-                ? 'border-accent bg-accent text-[#0a0800] shadow-gold-glow'
+                ? 'border-accent bg-accent text-[var(--btn-text)] shadow-gold-glow'
                 : 'border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]'
             }`}
             onClick={() => {
@@ -150,7 +150,7 @@ const BoardCard = memo(function BoardCard({
                 <button
                   className={`inline-flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-full border transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 ${
                     isRelayOn 
-                      ? 'border-accent bg-accent text-[#0a0800] shadow-gold-glow'
+                      ? 'border-accent bg-accent text-[var(--btn-text)] shadow-gold-glow'
                       : 'border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]'
                   }`}
                   onClick={() => toggleDevice(device)}

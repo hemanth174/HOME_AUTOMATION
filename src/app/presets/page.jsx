@@ -74,7 +74,7 @@ function PresetDeviceList({ devices, presetActions, onToggleDevice, onToggleActi
                       type="button"
                       className={`shrink-0 min-h-[26px] min-w-[46px] inline-flex items-center justify-center rounded px-2.5 py-1 text-[10px] font-black cursor-pointer transition-all duration-200 ${
                         presetActions[d.id]?.is_on
-                          ? 'bg-accent text-[#0a0800] shadow-gold-glow'
+                          ? 'bg-accent text-[var(--btn-text)] shadow-gold-glow'
                           : 'border border-border bg-card text-text'
                       }`}
                       onClick={() => onToggleAction(d.id)}
@@ -367,11 +367,11 @@ export default function PresetsPage() {
 
   return (
     <>
-      <div className="mx-auto w-[min(100%-32px,960px)] pt-[104px] pb-8 animate-fade-up max-md:w-[min(100%-24px,620px)] max-md:pt-[92px] select-none">
+      <div className="dashboard-container animate-fade-up select-none">
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-lg font-extrabold text-text tracking-tight">Presets</h2>
           <button
-            className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-1 text-xs font-extrabold text-[#0a0800] transition-all duration-250 cursor-pointer hover:bg-accent-hover shadow-gold-glow"
+            className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-1 text-xs font-extrabold text-[var(--btn-text)] transition-all duration-250 cursor-pointer hover:bg-accent-hover shadow-gold-glow"
             onClick={openCreateModal}
           >
             Add Preset
@@ -407,7 +407,7 @@ export default function PresetsPage() {
             </div>
             <button
               onClick={openCreateModal}
-              className="inline-flex min-h-[36px] items-center justify-center rounded-xl bg-accent px-5 text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer mt-1"
+              className="inline-flex min-h-[36px] items-center justify-center rounded-xl bg-accent px-5 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer mt-1"
             >
               Create Preset
             </button>
@@ -436,7 +436,7 @@ export default function PresetsPage() {
                       <button
                         className={`inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 ${
                           active 
-                            ? 'border-accent bg-accent text-[#0a0800] shadow-gold-glow'
+                            ? 'border-accent bg-accent text-[var(--btn-text)] shadow-gold-glow'
                             : 'border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]'
                         }`}
                         onClick={() => applyPreset(preset, active)}
@@ -533,7 +533,7 @@ export default function PresetsPage() {
                 </button>
                 <button
                   type="submit"
-                  className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2 text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow"
+                  className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow"
                 >
                   {editingPreset ? 'Save Changes' : 'Create'}
                 </button>

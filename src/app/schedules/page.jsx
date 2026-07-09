@@ -178,7 +178,7 @@ function DevicePicker({ devices, selectedDevices, onSelect }) {
                   type="button"
                   onClick={() => onSelect(d.id)}
                   className={`w-full text-left px-4 py-2.5 text-xs font-bold border-b border-border last:border-b-0 transition-all cursor-pointer ${
-                    isSelected ? 'bg-accent text-[#0a0800]' : 'text-text hover:bg-accent-bg/50'
+                    isSelected ? 'bg-accent text-[var(--btn-text)]' : 'text-text hover:bg-accent-bg/50'
                   }`}
                 >
                   {isSelected ? '✓ ' : '  '}{d.name}
@@ -477,7 +477,7 @@ export default function SchedulesPage() {
 
   return (
     <>
-      <div className="mx-auto w-[min(100%-32px,960px)] pt-[104px] pb-8 animate-fade-up max-md:w-[min(100%-24px,620px)] max-md:pt-[92px] select-none">
+      <div className="dashboard-container animate-fade-up select-none">
         {/* Header */}
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-lg font-extrabold text-text tracking-tight">Schedules</h2>
@@ -491,7 +491,7 @@ export default function SchedulesPage() {
               </button>
             )}
             <button
-              className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-1 text-xs font-extrabold text-[#0a0800] transition-all cursor-pointer hover:bg-accent-hover shadow-gold-glow"
+              className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-1 text-xs font-extrabold text-[var(--btn-text)] transition-all cursor-pointer hover:bg-accent-hover shadow-gold-glow"
               onClick={() => setShowModal(true)}
             >
               Add Schedule
@@ -512,7 +512,7 @@ export default function SchedulesPage() {
             </div>
             <button
               onClick={() => setShowModal(true)}
-              className="inline-flex min-h-[36px] items-center justify-center rounded-xl bg-accent px-5 text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer mt-1"
+              className="inline-flex min-h-[36px] items-center justify-center rounded-xl bg-accent px-5 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer mt-1"
             >
               Add Your First Schedule
             </button>
@@ -559,7 +559,7 @@ export default function SchedulesPage() {
                       <button
                         className={`inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 ${
                           schedule.enabled 
-                            ? 'border-accent bg-accent text-[#0a0800] shadow-gold-glow'
+                            ? 'border-accent bg-accent text-[var(--btn-text)] shadow-gold-glow'
                             : 'border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]'
                         }`}
                         onClick={() => toggleSchedule(schedule)}
@@ -636,7 +636,7 @@ export default function SchedulesPage() {
                   className={`self-end px-4 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer border ${
                     timeConfirmed
                       ? 'bg-green-500/20 border-green-500/40 text-green-500'
-                      : 'bg-accent-bg border-accent/40 text-accent hover:bg-accent hover:text-[#0a0800]'
+                      : 'bg-accent-bg border-accent/40 text-accent hover:bg-accent hover:text-[var(--btn-text)]'
                   }`}
                 >
                   {timeConfirmed ? '✓ Confirmed' : 'Confirm Time'}
@@ -654,7 +654,7 @@ export default function SchedulesPage() {
                       title={DAY_FULL[idx]}
                       className={`grid h-[38px] w-[38px] place-items-center rounded-full border text-xs font-extrabold transition-all cursor-pointer hover:-translate-y-px ${
                         scheduleDays.includes(idx)
-                          ? 'border-accent bg-accent text-[#100d06] shadow-gold-glow'
+                          ? 'border-accent bg-accent text-[var(--btn-text)] shadow-gold-glow'
                           : 'border-border bg-input text-text-muted hover:border-accent hover:bg-accent-bg'
                       }`}
                       onClick={() => toggleDay(idx)}
@@ -688,7 +688,7 @@ export default function SchedulesPage() {
                 <button
                   type="submit"
                   disabled={!!timeError || !timeConfirmed || scheduleDays.length === 0}
-                  className="inline-flex min-h-[36px] items-center justify-center rounded-lg bg-accent px-5 py-2 text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="inline-flex min-h-[36px] items-center justify-center rounded-lg bg-accent px-5 py-2 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {editingSchedule ? 'Save Changes' : 'Create Schedule'}
                 </button>

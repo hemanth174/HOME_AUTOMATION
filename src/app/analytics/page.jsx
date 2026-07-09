@@ -450,7 +450,7 @@ export default function AnalyticsPage() {
   if (boards.length === 0 || devices.length === 0) {
     return (
       <div className="relative w-full h-full">
-        <div className="mx-auto w-[min(100%-32px,960px)] pt-[104px] pb-8 animate-fade-up max-md:w-[min(100%-24px,620px)] max-md:pt-[92px] max-md:pb-[96px] min-h-[70vh] flex flex-col justify-center items-center select-none">
+        <div className="dashboard-container min-h-[70vh] flex flex-col justify-center items-center select-none animate-fade-up">
         <div className="text-center max-w-md flex flex-col items-center gap-4 p-8 border border-border bg-card rounded-[24px] shadow-lg backdrop-blur-md animate-scale-in">
           <div className="w-12 h-12 rounded-2xl bg-accent-bg flex items-center justify-center text-accent border border-accent/20 shadow-gold-glow">
             <TrendingUp size={24} className="stroke-[2.5px]" />
@@ -462,7 +462,7 @@ export default function AnalyticsPage() {
           <div className="flex flex-col sm:flex-row gap-2.5 mt-2 w-full">
             <button
               onClick={() => window.location.href = '/'}
-              className="flex-1 inline-flex min-h-[36px] items-center justify-center rounded-xl bg-accent text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer"
+              className="flex-1 inline-flex min-h-[36px] items-center justify-center rounded-xl bg-accent text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer"
             >
               Dashboard
             </button>
@@ -561,7 +561,7 @@ export default function AnalyticsPage() {
 
   return (
     <div className="relative w-full h-full">
-      <div className="mx-auto w-[min(100%-32px,960px)] pt-[104px] pb-8 animate-fade-up max-md:w-[min(100%-24px,620px)] max-md:pt-[92px] max-md:pb-[96px]">
+      <div className="dashboard-container animate-fade-up">
       {/* Header section with buttons */}
       <div className="ml-1 mb-6 flex flex-wrap items-center justify-between gap-4 select-none">
         <div className="flex flex-col gap-1">
@@ -595,7 +595,7 @@ export default function AnalyticsPage() {
           </button>
           <button
             onClick={() => setShowPowerGuide(true)}
-            className="inline-flex min-h-[32px] items-center gap-1.5 rounded-lg bg-accent px-3 py-1 text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer"
+            className="inline-flex min-h-[32px] items-center gap-1.5 rounded-lg bg-accent px-3 py-1 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer"
           >
             How it Works
           </button>

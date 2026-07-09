@@ -30,62 +30,114 @@
   --animate-glow-pulse: glow-pulse 3s ease infinite;
   --animate-pulse-ring: pulse-ring 1.4s ease infinite;
   --animate-pulse-dot-red: pulse-dot-red 1.5s ease infinite;
+
+  /* Scoped Landing Page Themes mapping to CSS Variables */
+  --color-lp-bg: var(--lp-bg);
+  --color-lp-surface: var(--lp-surface);
+  --color-lp-surface-low: var(--lp-surface-low);
+  --color-lp-surface-lowest: var(--lp-surface-lowest);
+  --color-lp-primary: var(--lp-primary);
+  --color-lp-primary-container: var(--lp-primary-container);
+  --color-lp-on-primary-container: var(--lp-on-primary-container);
+  --color-lp-secondary: var(--lp-secondary);
+  --color-lp-on-surface: var(--lp-on-surface);
+  --color-lp-on-surface-variant: var(--lp-on-surface-variant);
+  --color-lp-outline: var(--lp-outline);
+  --color-lp-outline-variant: var(--lp-outline-variant);
+  --color-lp-slate-gray: var(--lp-surface-low);
+
+  /* Font Families */
+  --font-display-lg: 'Sora', sans-serif;
+  --font-label-caps: 'JetBrains Mono', monospace;
+  --font-headline-sm: 'Sora', sans-serif;
+  --font-body-lg: 'JetBrains Mono', monospace;
+  --font-headline-md: 'Sora', sans-serif;
+  --font-body-md: 'JetBrains Mono', monospace;
+  --font-data-point: 'JetBrains Mono', monospace;
 }
 
 /* -------- CSS Variables (Theme Tokens) matching esp.css -------- */
 :root,
 [data-theme="dark"] {
-    --bg: #060606;
-    --bg-card: #0e0e0e;
-    --bg-card-alt: #141414;
-    --bg-input: #141414;
-    --bg-header: rgba(8, 8, 8, 0.88);
-    --text: #f0ece4;
-    --text-muted: #6b6456;
-    --accent: #c9a84c;
-    --accent-hover: #b8943a;
-    --accent-bg: rgba(201, 168, 76, 0.08);
-    --accent-glow: rgba(201, 168, 76, 0.35);
-    --border: #1e1b14;
-    --toggle-track: #262218;
-    --toggle-on: #c9a84c;
-    --shadow: rgba(0, 0, 0, 0.50);
-    --on-bg: rgba(201, 168, 76, 0.07);
-    --on-border: rgba(201, 168, 76, 0.40);
-    --divider: #1e1b14;
-    --auth-bg: #060606;
-    --auth-card: #0e0e0e;
-    --card-shadow: 0 2px 16px rgba(0, 0, 0, 0.40);
+    --bg: #09090b;
+    --bg-card: #18181b;
+    --bg-card-alt: #27272a;
+    --bg-input: #18181b;
+    --bg-header: rgba(9, 9, 11, 0.88);
+    --text: #f4f4f5;
+    --text-muted: #a1a1aa;
+    --accent: #ffffff;
+    --accent-hover: #e4e4e7;
+    --accent-bg: rgba(255, 255, 255, 0.08);
+    --accent-glow: rgba(255, 255, 255, 0.25);
+    --border: #27272a;
+    --toggle-track: #27272a;
+    --toggle-on: #ffffff;
+    --shadow: rgba(0, 0, 0, 0.60);
+    --on-bg: rgba(255, 255, 255, 0.06);
+    --on-border: rgba(255, 255, 255, 0.30);
+    --divider: #27272a;
+    --auth-bg: #09090b;
+    --auth-card: #18181b;
+    --card-shadow: 0 2px 16px rgba(255, 255, 255, 0.02);
     --header-blur: blur(18px);
-    --gold-glow: 0 0 12px rgba(201, 168, 76, 0.20);
-    --btn-text: #0a0800;
+    --gold-glow: 0 0 12px rgba(255, 255, 255, 0.15);
+    --btn-text: #09090b;
+
+    /* Landing Page variables matching Dark Mode */
+    --lp-bg: #18181b;
+    --lp-surface: #18181b;
+    --lp-surface-low: #27272a;
+    --lp-surface-lowest: #09090b;
+    --lp-primary: #ffffff;
+    --lp-primary-container: #ffffff;
+    --lp-on-primary-container: #09090b;
+    --lp-secondary: #e4e4e7;
+    --lp-on-surface: #f4f4f5;
+    --lp-on-surface-variant: #a1a1aa;
+    --lp-outline: #71717a;
+    --lp-outline-variant: #3f3f46;
 }
 
 [data-theme="light"] {
-    --bg: #f7f5f0;
+    --bg: #fafafa;
     --bg-card: #ffffff;
-    --bg-card-alt: #faf8f4;
+    --bg-card-alt: #f4f4f5;
     --bg-input: #ffffff;
-    --bg-header: rgba(255, 255, 255, 0.85);
-    --text: #1a1710;
-    --text-muted: #8c8272;
-    --accent: #a07c2a;
-    --accent-hover: #8b6b1f;
-    --accent-bg: rgba(160, 124, 42, 0.06);
-    --accent-glow: rgba(160, 124, 42, 0.18);
-    --border: #e6e0d4;
-    --toggle-track: #d4cfc4;
-    --toggle-on: #a07c2a;
+    --bg-header: rgba(250, 250, 250, 0.85);
+    --text: #09090b;
+    --text-muted: #71717a;
+    --accent: #09090b;
+    --accent-hover: #27272a;
+    --accent-bg: rgba(0, 0, 0, 0.05);
+    --accent-glow: rgba(0, 0, 0, 0.12);
+    --border: #e4e4e7;
+    --toggle-track: #e4e4e7;
+    --toggle-on: #09090b;
     --shadow: rgba(0, 0, 0, 0.06);
-    --on-bg: rgba(160, 124, 42, 0.06);
-    --on-border: rgba(160, 124, 42, 0.30);
-    --divider: #e6e0d4;
-    --auth-bg: #f7f5f0;
+    --on-bg: rgba(0, 0, 0, 0.04);
+    --on-border: rgba(0, 0, 0, 0.20);
+    --divider: #e4e4e7;
+    --auth-bg: #fafafa;
     --auth-card: #ffffff;
     --card-shadow: 0 2px 14px rgba(0, 0, 0, 0.05);
     --header-blur: blur(18px);
     --gold-glow: none;
     --btn-text: #ffffff;
+
+    /* Landing Page variables matching Light Mode */
+    --lp-bg: #fafafa;
+    --lp-surface: #ffffff;
+    --lp-surface-low: #f4f4f5;
+    --lp-surface-lowest: #e4e4e7;
+    --lp-primary: #09090b;
+    --lp-primary-container: #09090b;
+    --lp-on-primary-container: #ffffff;
+    --lp-secondary: #27272a;
+    --lp-on-surface: #09090b;
+    --lp-on-surface-variant: #71717a;
+    --lp-outline: #a1a1aa;
+    --lp-outline-variant: #e4e4e7;
 }
 
 /* Keyframe definitions */
@@ -143,22 +195,22 @@
 @keyframes glow-pulse {
     0%,
     100% {
-        box-shadow: 0 0 8px rgba(201, 168, 76, 0.15);
+        box-shadow: 0 0 8px var(--accent-glow);
     }
     50% {
-        box-shadow: 0 0 20px rgba(201, 168, 76, 0.30);
+        box-shadow: 0 0 20px var(--accent-glow);
     }
 }
 
 @keyframes pulse-ring {
     0% {
-        box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.35);
+        box-shadow: 0 0 0 0 var(--accent-glow);
     }
     70% {
-        box-shadow: 0 0 0 18px rgba(201, 168, 76, 0);
+        box-shadow: 0 0 0 18px rgba(255, 255, 255, 0);
     }
     100% {
-        box-shadow: 0 0 0 0 rgba(201, 168, 76, 0);
+        box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
     }
 }
 
@@ -176,10 +228,14 @@
 body {
     background: var(--bg);
     color: var(--text);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: 'JetBrains Mono', monospace;
     -webkit-tap-highlight-color: transparent;
     -webkit-font-smoothing: antialiased;
     min-height: 100vh;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Sora', sans-serif;
 }
 
 /* Smooth transitions */
@@ -203,4 +259,68 @@ body,
 ::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: 6px;
+}
+
+/* Scoped Landing Page Utilities */
+.lp-grid-pattern {
+    background-image: linear-gradient(var(--divider) 1px, transparent 1px),
+                      linear-gradient(90deg, var(--divider) 1px, transparent 1px);
+    background-size: 32px 32px;
+    opacity: 0.65;
+}
+.lp-glass-blur {
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+.lp-active-glow {
+    box-shadow: 0 0 15px var(--accent-glow);
+}
+.lp-timeline-node::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2px;
+    height: 100%;
+    background: repeating-linear-gradient(to bottom, var(--border), var(--border) 4px, transparent 4px, transparent 8px);
+    z-index: -1;
+}
+
+/* -------- Light Theme Overrides for Landing Page Aesthetics -------- */
+[data-theme="light"] {
+    /* Override hardcoded text-white elements */
+    .text-white,
+    h1, h2, h3, h4, h5, h6,
+    .font-data-point,
+    nav button,
+    header div {
+        color: var(--text) !important;
+    }
+
+    .text-lp-primary-container {
+        color: var(--accent) !important;
+    }
+
+    /* Override hardcoded dark visualizer container backgrounds */
+    .aspect-square,
+    .aspect-\[4\/3\] {
+        background-color: var(--bg-card-alt) !important;
+        border-color: var(--border) !important;
+    }
+}
+
+/* -------- Premium Dashboard Spacious Container -------- */
+.dashboard-container {
+    margin-left: auto;
+    margin-right: auto;
+    width: min(100% - 48px, 1280px);
+    padding-top: 104px;
+    padding-bottom: 32px;
+}
+
+@media (max-width: 768px) {
+    .dashboard-container {
+        width: min(100% - 24px, 620px);
+        padding-top: 92px;
+    }
 }

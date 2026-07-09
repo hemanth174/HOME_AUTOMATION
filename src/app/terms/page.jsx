@@ -28,7 +28,7 @@ export default function TermsPage() {
   ];
 
   return (
-    <div className="mx-auto w-[min(100%-32px,720px)] pt-[104px] pb-8 animate-fade-up max-md:pt-[92px] max-md:pb-[96px] select-none">
+    <div className="dashboard-container max-w-[800px] animate-fade-up select-none">
       {/* Back Button */}
       <Link 
         href="/" 

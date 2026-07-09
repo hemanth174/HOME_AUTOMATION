@@ -919,7 +919,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       <button
         id="voice-control-mic-btn"
         onClick={toggleListening}
-        className={`fixed bottom-7 right-7 max-md:bottom-20 max-md:right-6 w-14 h-14 rounded-full border-none bg-gradient-to-tr from-accent to-[#e2cc89] text-[#0a0800] cursor-pointer z-[200] shadow-[0_6px_24px_var(--accent-glow)] shadow-gold-glow hover:scale-[1.08] active:scale-100 transition-all duration-300 flex items-center justify-center select-none group`}
+        className={`fixed bottom-7 right-7 max-md:bottom-20 max-md:right-6 w-14 h-14 rounded-full border-none bg-gradient-to-tr from-accent to-[#e2cc89] text-[var(--btn-text)] cursor-pointer z-[200] shadow-[0_6px_24px_var(--accent-glow)] shadow-gold-glow hover:scale-[1.08] active:scale-100 transition-all duration-300 flex items-center justify-center select-none group`}
         title="Voice Control"
       >
         {listening ? (
@@ -930,10 +930,10 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
             <span className="absolute inset-[-12px] rounded-full bg-accent/10 animate-ping [animation-duration:2s]" />
 
             {/* Cross Icon */}
-            <X size={20} className="stroke-[2.5px] relative z-10 animate-pulse text-[#0a0800]" />
+            <X size={20} className="stroke-[2.5px] relative z-10 animate-pulse text-[var(--btn-text)]" />
           </div>
         ) : (
-          <Mic size={20} className="stroke-[2.5px] group-hover:scale-110 transition-transform text-[#0a0800]" />
+          <Mic size={20} className="stroke-[2.5px] group-hover:scale-110 transition-transform text-[var(--btn-text)]" />
         )}
       </button>
     </>

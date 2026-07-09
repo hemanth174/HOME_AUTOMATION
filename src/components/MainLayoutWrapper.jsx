@@ -13,10 +13,9 @@ export default function MainLayoutWrapper({ children }) {
   const VALID_ROUTES = ['/', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms'];
   const is404Page = !VALID_ROUTES.includes(cleanPath);
   const isLoginPage = cleanPath === '/login';
-  const fullWidthPage = isLoginPage || is404Page;
-
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const fullWidthPage = isLoginPage || is404Page || (!user && cleanPath === '/');
 
   // Clear authentication tokens from the URL immediately on mount
   useEffect(() => {
@@ -42,7 +41,7 @@ export default function MainLayoutWrapper({ children }) {
       setAuthChecked(true);
 
       // Route protection redirects
-      if (!currentUser && !isLoginPage) {
+      if (!currentUser && !isLoginPage && cleanPath !== '/') {
         window.location.href = '/login';
       } else if (currentUser && isLoginPage) {
         window.location.href = '/';
@@ -58,7 +57,7 @@ export default function MainLayoutWrapper({ children }) {
       setUser(currentUser);
       setAuthChecked(true);
 
-      if (!currentUser && !isLoginPage) {
+      if (!currentUser && !isLoginPage && cleanPath !== '/') {
         window.location.href = '/login';
       } else if (currentUser && isLoginPage) {
         window.location.href = '/';
@@ -69,7 +68,7 @@ export default function MainLayoutWrapper({ children }) {
       active = false;
       subscription.unsubscribe();
     };
-  }, [isLoginPage]);
+  }, [isLoginPage, cleanPath]);
 
   // Loading screens to prevent UI flashes
   if (!authChecked) {
@@ -77,7 +76,7 @@ export default function MainLayoutWrapper({ children }) {
   }
 
   // Redirecting loading screen if accessing unauthorized areas
-  if (!user && !isLoginPage) {
+  if (!user && !isLoginPage && cleanPath !== '/') {
     return <Loader message="Redirecting to login..." />;
   }
   if (user && isLoginPage) {

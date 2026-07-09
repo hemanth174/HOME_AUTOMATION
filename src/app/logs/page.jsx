@@ -217,7 +217,8 @@ export default function LogsPage() {
   }
 
   return (
-    <div className="mx-auto w-[min(100%-32px,960px)] pt-[104px] pb-8 animate-fade-up max-md:w-[min(100%-24px,620px)] max-md:pt-[92px] max-md:pb-[100px]">
+    <>
+      <div className="dashboard-container animate-fade-up">
       {/* Header */}
       <div className="ml-1 mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-col gap-1">
@@ -313,8 +314,9 @@ export default function LogsPage() {
           </div>
         )}
       </div>
+    </div>
 
-      <Toast message={toast} onClose={() => setToast('')} />
+    <Toast message={toast} onClose={() => setToast('')} />
 
       {showConfirmModal && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md animate-scale-in max-md:items-end max-md:p-0" onClick={() => setShowConfirmModal(false)}>
@@ -354,6 +356,6 @@ export default function LogsPage() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

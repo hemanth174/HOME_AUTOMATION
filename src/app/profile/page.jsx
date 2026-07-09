@@ -308,7 +308,7 @@ export default function ProfilePage() {
   const initials = fullName.substring(0, 2).toUpperCase();
 
   return (
-    <div className="mx-auto w-[min(100%-32px,960px)] pt-[104px] pb-8 animate-fade-up max-md:w-[min(100%-24px,620px)] max-md:pt-[92px]">
+    <div className="dashboard-container animate-fade-up">
       <div className="flex justify-between items-center mb-5">
         <h2 className="text-lg font-extrabold text-text tracking-tight">Account Profile</h2>
       </div>
@@ -416,7 +416,7 @@ export default function ProfilePage() {
             )}
             
             <button
-              className="w-full py-2.5 rounded-lg text-xs font-extrabold bg-accent text-[#0a0800] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow"
+              className="w-full py-2.5 rounded-lg text-xs font-extrabold bg-accent text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow"
               type="submit"
               disabled={updating}
             >
@@ -530,7 +530,7 @@ export default function ProfilePage() {
           <button
             type="submit"
             disabled={savingEnergy}
-            className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg bg-accent px-6 py-2 text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow disabled:opacity-50 disabled:cursor-not-allowed self-start"
+            className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg bg-accent px-6 py-2 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow disabled:opacity-50 disabled:cursor-not-allowed self-start"
           >
             {savingEnergy ? 'Saving...' : 'Save Energy Settings'}
           </button>
@@ -606,7 +606,7 @@ export default function ProfilePage() {
               <button
                 type="submit"
                 disabled={mfaLoading}
-                className="w-full py-3 rounded-lg text-xs font-extrabold bg-accent text-[#0a0800] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow flex items-center justify-center gap-2"
+                className="w-full py-3 rounded-lg text-xs font-extrabold bg-accent text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow flex items-center justify-center gap-2"
               >
                 {mfaLoading ? 'Verifying...' : verifyingCurrentEmail ? 'Confirm Verification' : 'Confirm & Save Changes'}
               </button>

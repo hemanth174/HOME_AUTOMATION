@@ -35,7 +35,7 @@ export default function QuickPresets({
                 <button
                   className={`inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 ${
                     active 
-                      ? 'border-accent bg-accent text-[#0a0800] shadow-gold-glow'
+                      ? 'border-accent bg-accent text-[var(--btn-text)] shadow-gold-glow'
                       : 'border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]'
                   }`}
                   onClick={() => applyPreset(preset, active)}

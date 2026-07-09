@@ -203,11 +203,11 @@ export default function BoardsPage() {
 
   return (
     <>
-      <div className="mx-auto w-[min(100%-32px,960px)] pt-[104px] pb-8 animate-fade-up max-md:w-[min(100%-24px,620px)] max-md:pt-[92px] select-none">
+      <div className="dashboard-container animate-fade-up select-none">
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-lg font-extrabold text-text tracking-tight">Boards</h2>
           <button
-            className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-1 text-xs font-extrabold text-[#0a0800] transition-all duration-250 cursor-pointer hover:bg-accent-hover active:translate-y-0 shadow-gold-glow"
+            className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-1 text-xs font-extrabold text-[var(--btn-text)] transition-all duration-250 cursor-pointer hover:bg-accent-hover active:translate-y-0 shadow-gold-glow"
             onClick={() => setShowModal(true)}
           >
             Add Board
@@ -310,7 +310,7 @@ export default function BoardsPage() {
                 </button>
                 <button
                   type="submit"
-                  className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2 text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow"
+                  className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow"
                 >
                   Add Board
                 </button>

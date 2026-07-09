@@ -236,7 +236,7 @@ function DevicePicker({ devices, selectedDevice, onSelect }) {
                   onClick={() => onSelect(d.id)}
                   className={`w-full text-left px-4 py-2.5 text-xs font-bold border-b border-border last:border-b-0 transition-all cursor-pointer ${
                     selectedDevice === d.id
-                      ? 'bg-accent text-[#0a0800]'
+                      ? 'bg-accent text-[var(--btn-text)]'
                       : 'text-text hover:bg-accent-bg/50'
                   }`}
                 >
@@ -523,7 +523,7 @@ export default function AlarmsPage() {
 
   return (
     <>
-      <div className="mx-auto w-[min(100%-32px,960px)] pt-[104px] pb-8 animate-fade-up max-md:w-[min(100%-24px,620px)] max-md:pt-[92px] select-none">
+      <div className="dashboard-container animate-fade-up select-none">
         {/* Header */}
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-lg font-extrabold text-text tracking-tight">Alarms</h2>
@@ -537,7 +537,7 @@ export default function AlarmsPage() {
               </button>
             )}
             <button
-              className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-1 text-xs font-extrabold text-[#0a0800] transition-all cursor-pointer hover:bg-accent-hover shadow-gold-glow"
+              className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-1 text-xs font-extrabold text-[var(--btn-text)] transition-all cursor-pointer hover:bg-accent-hover shadow-gold-glow"
               onClick={() => setShowModal(true)}
             >
               Add Alarm
@@ -558,7 +558,7 @@ export default function AlarmsPage() {
             </div>
             <button
               onClick={() => setShowModal(true)}
-              className="inline-flex min-h-[36px] items-center justify-center rounded-xl bg-accent px-5 text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer mt-1"
+              className="inline-flex min-h-[36px] items-center justify-center rounded-xl bg-accent px-5 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer mt-1"
             >
               Set New Alarm
             </button>
@@ -680,7 +680,7 @@ export default function AlarmsPage() {
                   className={`self-end px-4 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer border ${
                     confirmed
                       ? 'bg-green-500/20 border-green-500/40 text-green-500'
-                      : 'bg-accent-bg border-accent/40 text-accent hover:bg-accent hover:text-[#0a0800]'
+                      : 'bg-accent-bg border-accent/40 text-accent hover:bg-accent hover:text-[var(--btn-text)]'
                   }`}
                 >
                   {confirmed ? '✓ Confirmed' : 'Confirm Date & Time'}
@@ -711,7 +711,7 @@ export default function AlarmsPage() {
                 <button
                   type="submit"
                   disabled={!!dateError || !confirmed}
-                  className="inline-flex min-h-[36px] items-center justify-center rounded-lg bg-accent px-5 py-2 text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="inline-flex min-h-[36px] items-center justify-center rounded-lg bg-accent px-5 py-2 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {editingAlarm ? 'Save Changes' : 'Create Alarm'}
                 </button>

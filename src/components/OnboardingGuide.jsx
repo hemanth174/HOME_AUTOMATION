@@ -136,7 +136,7 @@ export default function OnboardingGuide({ isOpen, onClose }) {
 
           <button
             onClick={handleNext}
-            className="inline-flex min-h-[32px] items-center gap-1.5 rounded-xl bg-accent px-4 text-xs font-extrabold text-[#0a0800] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer"
+            className="inline-flex min-h-[32px] items-center gap-1.5 rounded-xl bg-accent px-4 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer"
           >
             {step === steps.length - 1 ? 'Get Started' : 'Next'}
             {step !== steps.length - 1 && <ChevronRight size={14} strokeWidth={2.5} />}

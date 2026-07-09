@@ -93,18 +93,18 @@ export default function Toast({ message, onClose }) {
   return (
     <div
       role="alert"
-      className={`fixed top-5 right-5 z-[9999] max-w-[400px] w-[calc(100%-40px)] rounded-2xl border p-4 text-xs font-bold shadow-2xl backdrop-blur-xl animate-slide-down flex items-start justify-between gap-3 select-none ${containerClass} ${borderClass}`}
+      className={`fixed top-5 right-5 z-[9999] max-w-[400px] w-[calc(100%-40px)] rounded-xl border py-2.5 px-4 text-xs font-bold shadow-2xl backdrop-blur-xl animate-slide-down flex items-center justify-between gap-3 select-none ${containerClass} ${borderClass}`}
     >
-      <div className="flex items-start gap-3 min-w-0">
-        <Icon size={16} className={`${iconColor} shrink-0 mt-0.5`} />
-        <span className={`text-[12px] leading-snug font-semibold ${textColor}`}>{displayMessage}</span>
+      <div className="flex items-center gap-2.5 min-w-0">
+        <Icon size={15} className={`${iconColor} shrink-0`} />
+        <span className={`text-[11px] leading-normal font-semibold ${textColor}`}>{displayMessage}</span>
       </div>
       <button
         onClick={onClose}
-        className={`p-1 rounded-lg ${iconColor} hover:opacity-70 transition-all cursor-pointer shrink-0 border-none bg-transparent mt-0.5`}
+        className={`p-1 rounded-lg ${iconColor} hover:opacity-70 transition-all cursor-pointer shrink-0 border-none bg-transparent flex items-center justify-center`}
         title="Dismiss"
       >
-        <X size={14} className="stroke-[2.5px]" />
+        <X size={13} className="stroke-[2.5px]" />
       </button>
     </div>
   );

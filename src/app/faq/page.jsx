@@ -22,13 +22,13 @@ export default function FAQPage() {
     },
     {
       q: "What voice commands can I speak?",
-      a: "Click the gold microphone floating at the bottom right. Try commands like 'turn on fan 2', 'deactivate Party Mode', or 'set alarm for fan 2 at 9 PM'.",
+      a: "Click the green microphone floating at the bottom right. Try commands like 'turn on fan 2', 'deactivate Party Mode', or 'set alarm for fan 2 at 9 PM'.",
       icon: Mic
     }
   ];
 
   return (
-    <div className="mx-auto w-[min(100%-32px,720px)] pt-[104px] pb-8 animate-fade-up max-md:pt-[92px] max-md:pb-[96px] select-none">
+    <div className="dashboard-container max-w-[800px] animate-fade-up select-none">
       {/* Back Button */}
       <Link 
         href="/" 
