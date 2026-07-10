@@ -17,16 +17,34 @@ export default function MainLayoutWrapper({ children }) {
   const [authChecked, setAuthChecked] = useState(false);
   const fullWidthPage = isLoginPage || is404Page || (!user && cleanPath === '/');
 
-  // Clear authentication tokens from the URL immediately on mount
+  // Disable console logs in production mode to protect tokens and output
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const hash = window.location.hash;
-      if (hash.includes('access_token') || hash.includes('refresh_token') || hash.includes('error=')) {
-        // Clear the hash parameters without reloading the page or losing current pathname/search query
-        window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      }
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'production') {
+      console.log = () => {};
+      console.info = () => {};
+      console.debug = () => {};
+      // Keep console.error and console.warn active for critical troubleshooting
     }
   }, []);
+
+  // Clear authentication tokens from the URL immediately and dynamically on all route transitions
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const checkAndClearHash = () => {
+        const hash = window.location.hash;
+        if (hash.includes('access_token') || hash.includes('refresh_token') || hash.includes('error=')) {
+          // Clear the hash parameters without reloading the page or losing current pathname/search query
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+      };
+      
+      // Run immediately
+      checkAndClearHash();
+      // Run on a short delay to ensure Supabase client finishes reading it
+      const timer = setTimeout(checkAndClearHash, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [pathname, user, authChecked]);
 
   // Monitor auth state and enforce route protection centrally
   useEffect(() => {

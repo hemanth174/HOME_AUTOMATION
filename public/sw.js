@@ -27,8 +27,23 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Only intercept GET requests to prevent issues with POST/PUT/OAuth callbacks
+  if (event.request.method !== 'GET') return;
+
   event.respondWith(
     fetch(event.request)
-      .catch(() => caches.match(event.request))
+      .catch(() => {
+        return caches.match(event.request)
+          .then((cachedResponse) => {
+            if (cachedResponse) {
+              return cachedResponse;
+            }
+            // Fallback response instead of returning undefined (which crashes the worker)
+            return new Response('Network error and resource not cached.', {
+              status: 408,
+              headers: { 'Content-Type': 'text/plain' }
+            });
+          });
+      })
   );
 });

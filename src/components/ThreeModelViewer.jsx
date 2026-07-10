@@ -447,7 +447,6 @@ export default function ThreeModelViewer({
       gltfLoader.load(
         modelPath,
         (gltf) => {
-          console.log('GLB loaded:', modelPath);
           gltf.scene.traverse((child) => {
             if (child.isMesh) {
               child.castShadow = true;
@@ -471,19 +470,16 @@ export default function ThreeModelViewer({
         }
       );
     } else if (modelType === 'obj') {
-      console.log('Loading OBJ materials:', mtlPath);
       const mtlLoader = new MTLLoader();
       mtlLoader.load(
         mtlPath,
         (materials) => {
-          console.log('MTL materials loaded successfully:', mtlPath);
           materials.preload();
           const objLoader = new OBJLoader();
           objLoader.setMaterials(materials);
           objLoader.load(
             modelPath,
             (object) => {
-              console.log('OBJ geometry loaded successfully:', modelPath);
               optimizePCBMaterials(object);
               centerAndScaleObject(object);
             },
@@ -509,9 +505,7 @@ export default function ThreeModelViewer({
           return response.text();
         })
         .then((text) => {
-          console.log('DXF loaded:', modelPath);
           const segments = parseDXF(text);
-          console.log(`DXF parsed successfully: ${segments.length / 6} traces.`);
           if (segments.length === 0) {
             throw new Error('No lines found inside DXF.');
           }

@@ -356,13 +356,28 @@ export default function Navbar() {
 
   const overallWifi = getOverallWifiStatus();
 
-  // Load user
+  // Load and synchronize user authentication state
   useEffect(() => {
+    let active = true;
+
     const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (active) {
+        setUser(session?.user || null);
+      }
     };
     fetchUser();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (active) {
+        setUser(session?.user || null);
+      }
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Listen to beforeinstallprompt event for PWA installation
