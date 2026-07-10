@@ -407,7 +407,11 @@ export default function ThreeModelViewer({
       parentGroup.scale.set(scale, scale, scale);
 
       // 3. Set custom starting isometric rotation tilt
-      parentGroup.rotation.set(0.18, -0.5, 0);
+      if (modelType === 'pcb-custom') {
+        parentGroup.rotation.set(0.65, -0.75, 0.15); // Match user screenshot positioning
+      } else {
+        parentGroup.rotation.set(0.18, -0.5, 0);
+      }
 
       // 4. Attach child
       parentGroup.add(object);
@@ -426,7 +430,11 @@ export default function ThreeModelViewer({
       let cameraZ = Math.abs((maxDim * scale) / 2 / Math.tan(fov / 2));
       cameraZ *= 1.35; // margin factor
 
-      camera.position.set(cameraZ * 0.4, cameraZ * 0.4, cameraZ);
+      if (modelType === 'pcb-custom') {
+        camera.position.set(0, cameraZ * 0.65, cameraZ * 1.1); // Centered diagonal perspective
+      } else {
+        camera.position.set(cameraZ * 0.4, cameraZ * 0.4, cameraZ);
+      }
       camera.far = cameraZ * 10;
       camera.updateProjectionMatrix();
 
