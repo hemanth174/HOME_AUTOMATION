@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import ThemeToggle from './ThemeToggle';
 
 // Dynamically import ThreeModelViewer (only in client environment)
@@ -11,6 +11,13 @@ const ThreeModelViewer = dynamic(() => import('./ThreeModelViewer'), { ssr: fals
 export default function LandingPage() {
   const router = useRouter();
   const [activeTab3D, setActiveTab3D] = useState('pcb'); // 'pcb' or 'esp'
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.playbackRate = 2.5; // 1.75x playback speed
+    }
+  }, []);
 
   // Smooth scroll helper
   const handleScroll = (id) => {
@@ -28,12 +35,15 @@ export default function LandingPage() {
         <div className="text-xl font-headline-md font-black tracking-tighter text-white uppercase select-none">
           ELECTRIC WARRIORS
         </div>
-        <nav className="hidden md:flex gap-8 font-label-caps text-[12px] tracking-tight items-center">
+        <nav className="hidden md:flex gap-6 lg:gap-8 font-label-caps text-[12px] tracking-tight items-center">
           <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="text-lp-primary font-bold border-b-2 border-lp-primary-container pb-1 cursor-pointer">
             Home
           </button>
           <button onClick={() => handleScroll('commercial')} className="text-lp-secondary hover:text-lp-primary transition-colors cursor-pointer">
             Commercial
+          </button>
+          <button onClick={() => handleScroll('creator')} className="text-lp-secondary hover:text-lp-primary transition-colors cursor-pointer">
+            Hardware Creator
           </button>
           <button onClick={() => handleScroll('v4')} className="text-lp-secondary hover:text-lp-primary transition-colors cursor-pointer">
             The V4
@@ -200,6 +210,70 @@ export default function LandingPage() {
             </div>
           </div>
         </section>
+
+        {/* Hardware Creator Section */}
+        <section className="py-24 px-6 lg:px-24 bg-lp-surface-low border-t border-lp-outline-variant relative overflow-hidden" id="creator">
+          <div className="absolute bottom-0 left-0 w-1/3 h-1/3 bg-lp-primary-container/5 blur-[120px] rounded-full pointer-events-none"></div>
+          <div className="max-w-6xl mx-auto">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+              {/* Left Column: Creator Image */}
+              <div className="lg:col-span-5 flex justify-center">
+                <div className="relative w-full max-w-[320px] aspect-[3/4] rounded-2xl border border-lp-outline-variant bg-lp-surface p-2 overflow-hidden shadow-2xl group hover:border-lp-primary-container/30 transition-all duration-300">
+                  <img
+                    alt="Custom PCB Hardware Creator"
+                    src="https://res.cloudinary.com/dqtlqvhw5/image/upload/v1783658877/WhatsApp_Image_2026-07-09_at_10.45.05_AM_shk3br.jpg"
+                    className="w-full h-full object-cover rounded-xl opacity-90 group-hover:opacity-100 group-hover:scale-[1.02] transition-all duration-500"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-lp-bg/60 via-transparent to-transparent pointer-events-none"></div>
+                </div>
+              </div>
+
+              {/* Right Column: Information */}
+              <div className="lg:col-span-7 flex flex-col gap-6 text-left">
+                <div>
+                  <div className="inline-block px-3 py-1 mb-4 border border-lp-primary-container/30 bg-lp-primary-container/5 rounded-full">
+                    <span className="font-label-caps text-[9px] text-lp-primary-container tracking-[0.15em] uppercase">Hardware Architect</span>
+                  </div>
+                  <h2 className="font-display-lg text-[36px] font-extrabold text-white leading-tight mb-2">
+                    Custom PCB Switchboard Creator
+                  </h2>
+                  <div className="w-20 h-1 bg-lp-primary-container"></div>
+                </div>
+
+                <p className="font-body-md text-lp-on-surface-variant text-sm leading-relaxed">
+                  Lrv Sai Kausthubh custom designed, routed, and fabricated the V4 Smart Switchboard PCB from scratch for this project. 
+                  He integrated custom-tailored industrial relays, high-voltage galvanic isolations, and real-time power tracking 
+                  architectures to bring this enterprise smart home automation node to life.
+                </p>
+
+                <div className="flex flex-col gap-3 font-body-sm text-xs text-lp-on-surface-variant">
+                  <div className="flex items-center gap-3">
+                    <span className="material-symbols-outlined text-lp-primary-container text-sm">developer_board</span>
+                    <span>Dual-layer copper PCB with trace-width optimized for high current loads.</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="material-symbols-outlined text-lp-primary-container text-sm">security</span>
+                    <span>Built-in physical isolation barriers for mains safety.</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="material-symbols-outlined text-lp-primary-container text-sm">settings_input_component</span>
+                    <span>Seamless header breakout matching ESP32 pinouts directly.</span>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    onClick={() => handleScroll('showcase3d')}
+                    className="px-6 py-3 border border-lp-outline hover:border-lp-primary-container hover:bg-lp-primary-container/10 transition-all text-white font-label-caps text-xs font-bold rounded cursor-pointer"
+                  >
+                    Inspect 3D PCB Traces
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
 
         {/* Hardware Advantage Feature Grid */}
         <section className="py-24 px-6 lg:px-24 bg-lp-surface relative overflow-hidden" id="v4">
@@ -422,11 +496,20 @@ export default function LandingPage() {
             {/* Visual Screen Mockup */}
             <div className="flex-1 w-full relative">
               <div className="relative aspect-video rounded-xl border border-lp-outline-variant bg-lp-slate-gray p-1 overflow-hidden shadow-2xl">
-                <img
-                  alt="Analytics Dashboard interface"
-                  src="/smart_home_ui.png"
-                  className="w-full h-full object-cover rounded opacity-80"
-                />
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  className="w-full h-full object-cover rounded opacity-90"
+                >
+                  <source 
+                    src="https://res.cloudinary.com/dqtlqvhw5/video/upload/v1783658820/Second_video_of_homeAutomation_ihgn4t.mp4" 
+                    type="video/mp4" 
+                  />
+                  Your browser does not support the video tag.
+                </video>
                 <div className="absolute inset-0 bg-gradient-to-tr from-lp-surface/50 via-transparent to-lp-primary-container/5 pointer-events-none"></div>
               </div>
             </div>
