@@ -254,7 +254,7 @@ export default function ThreeModelViewer({
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.enablePan = false;
-    controls.maxPolarAngle = Math.PI / 2 - 0.01; // Avoid going below floor level
+    controls.maxPolarAngle = modelType === 'pcb-custom' ? Math.PI : (Math.PI / 2 - 0.01); // Allow full vertical orbit for custom pcb back textures
     controlsRef.current = controls;
 
     // 6. Dynamic Studio Environment Map Setup
@@ -527,6 +527,56 @@ export default function ThreeModelViewer({
           setError('Failed to parse DXF drawing.');
           setLoading(false);
         });
+    } else if (modelType === 'pcb-custom') {
+      const textureLoader = new THREE.TextureLoader();
+      Promise.all([
+        new Promise((resolve, reject) => textureLoader.load('/models/pcb_custom_front.png', resolve, undefined, reject)),
+        new Promise((resolve, reject) => textureLoader.load('/models/pcb_custom_back.png', resolve, undefined, reject))
+      ]).then(([frontTex, backTex]) => {
+        frontTex.colorSpace = THREE.SRGBColorSpace;
+        backTex.colorSpace = THREE.SRGBColorSpace;
+
+        const sideMaterial = new THREE.MeshStandardMaterial({
+          color: 0x0c1e30, // Deep PCB blue matching the image background
+          roughness: 0.8,
+          metalness: 0.1
+        });
+
+        const topMaterial = new THREE.MeshStandardMaterial({
+          map: frontTex,
+          roughness: 0.35,
+          metalness: 0.25,
+          envMapIntensity: 1.6
+        });
+
+        const bottomMaterial = new THREE.MeshStandardMaterial({
+          map: backTex,
+          roughness: 0.35,
+          metalness: 0.25,
+          envMapIntensity: 1.6
+        });
+
+        const materials = [
+          sideMaterial, // +X (Right)
+          sideMaterial, // -X (Left)
+          topMaterial,    // +Y (Top/Front)
+          bottomMaterial, // -Y (Bottom/Back)
+          sideMaterial, // +Z
+          sideMaterial  // -Z
+        ];
+
+        // Aspect ratio: 1000/422 = ~2.37. Use width=9.5, height=0.12, depth=4.0
+        const geometry = new THREE.BoxGeometry(9.5, 0.12, 4.0);
+        const boardMesh = new THREE.Mesh(geometry, materials);
+        boardMesh.castShadow = true;
+        boardMesh.receiveShadow = true;
+
+        centerAndScaleObject(boardMesh);
+      }).catch((err) => {
+        console.error('Error loading custom PCB textures:', err);
+        setError('Failed to load custom PCB 3D textures.');
+        setLoading(false);
+      });
     }
 
     // 9. Animation Frame loop

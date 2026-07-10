@@ -304,9 +304,9 @@ export default function LandingPage() {
                 {activeTab3D === 'pcb' ? (
                   <ThreeModelViewer
                     key="pcb-viewer"
-                    modelType="obj"
-                    modelPath="/models/pcb_esp.obj"
-                    mtlPath="/models/pcb_esp.mtl"
+                    modelType="pcb-custom"
+                    modelPath="/models/pcb_custom_front.png"
+                    mtlPath="/models/pcb_custom_back.png"
                     glowColor={0x00ff41}
                   />
                 ) : (
