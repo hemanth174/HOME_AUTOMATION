@@ -5,16 +5,15 @@
 #include <time.h>
 
 // ============================================================
-//  DIRECT GPIO SETUP
+//  DIRECT GPIO SETUP (Expanded for 4 Devices)
 // ============================================================
-// OUTPUT: Connect your Relay's 'IN' pin directly to this GPIO
-#define RELAY_PIN 32  
+#define NUM_DEVICES 4
 
-// INPUT: Connect your physical switch between this GPIO and GND
-#define INPUT_PIN 19  
+// OUTPUTS: Connect your Relay 'IN' pins directly to these GPIOs (Active LOW)
+const int RELAY_PINS[NUM_DEVICES] = {32, 33, 25, 26}; 
 
-// INPUT: Connect your AC Detector's output to this GPIO
-#define AC_DETECTOR_PIN 21 
+// INPUTS: Connect physical switches between these GPIOs and GND 
+const int INPUT_PINS[NUM_DEVICES] = {19, 18, 5, 17};  
 
 // ============================================================
 //  CREDENTIALS
@@ -22,32 +21,26 @@
 const char* ssid     = "NxtWave_Te@m";
 const char* password = "Nxtwave@KKH2026";
 
-const char* BOARD_IDENTIFIER = "my_board_1";
+const char* BOARD_IDENTIFIER = "kinda_meeda";
 const char* SUPABASE_BASE = "https://ojuvphlkzbxwjhqzexbt.supabase.co/rest/v1";
 const char* SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qdXZwaGxremJ4d2pocXpleGJ0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTg2Nzk2MiwiZXhwIjoyMDk3NDQzOTYyfQ.SN6g_bR4bpVEIGdIW-GLPTHRlqZBHF5YBUKjHDMWjLU"; 
 
 // ============================================================
-//  VARIABLES & STATE
+//  VARIABLES & STATE (Converted to Arrays for 4 Devices)
 // ============================================================
 String boardUUID = "";
-String deviceUUID = "";
-bool isRelayOn = false;
+String deviceUUIDs[NUM_DEVICES] = {"", "", "", ""};
+bool isRelayOn[NUM_DEVICES] = {false, false, false, false};
 
 // --- Switch Input State Tracking (with standard debounce) ---
-bool lastInputRead = HIGH; 
-bool confirmedInputState = HIGH;
-unsigned long lastDebounceTime = 0;
-const unsigned long DEBOUNCE_DELAY = 50; // 50ms debounce window
-
-// --- AC Detector Input State Tracking (Pulse Detection) ---
-unsigned long lastAcPulseTime = 0;
-bool currentAcState = false;      // True = AC ON, False = AC OFF
-bool lastReportedAcState = false; 
-const unsigned long AC_TIMEOUT = 100; // 100ms without a pulse means AC is OFF
+bool lastInputRead[NUM_DEVICES] = {HIGH, HIGH, HIGH, HIGH}; 
+bool confirmedInputState[NUM_DEVICES] = {HIGH, HIGH, HIGH, HIGH};
+unsigned long lastDebounceTime[NUM_DEVICES] = {0, 0, 0, 0};
+const unsigned long DEBOUNCE_DELAY = 50; 
 
 // --- Live Serial Monitor ---
 unsigned long lastSerialDumpTime = 0;
-const unsigned long SERIAL_DUMP_INTERVAL = 5000; // Print live state every 5 seconds
+const unsigned long SERIAL_DUMP_INTERVAL = 5000; 
 
 WiFiMulti wifiMulti;
 
@@ -55,37 +48,43 @@ WiFiMulti wifiMulti;
 unsigned long lastPollTime = 0;
 const unsigned long POLL_INTERVAL = 1000; 
 
+// --- HEARTBEAT SYSTEM (NEW) ---
+unsigned long lastHeartbeatTime = 0;
+const unsigned long HEARTBEAT_INTERVAL = 20000; // Send heartbeat every 20 seconds (App expects < 45 seconds)
+
 // Edge Cloud Alarms
-struct Alarm { String id; String triggerAt; bool action; bool active; };
-#define MAX_ALARMS 10
+struct Alarm { String id; String triggerAt; bool action; bool active; int deviceIndex; };
+#define MAX_ALARMS 20 // Increased slightly to handle alarms for multiple devices
 Alarm alarms[MAX_ALARMS];
 unsigned long lastAlarmPoll = 0;
 const unsigned long ALARM_POLL_INTERVAL = 30000; 
 
 // Function Prototypes
-void setRelay(bool on);
-void updateDeviceInDB(bool state);
-void updateFeedbackInDB(bool feedback);
-void updateACFeedbackInDB(bool feedback);
+void setRelay(int index, bool on);
+void updateDeviceInDB(int index, bool state);
+void updateFeedbackInDB(int index, bool feedback);
 void markAlarmFiredInDB(String alarmId);
 void pollDatabase();
 void pollAlarms();
-bool resolveBoardAndDevice();
+bool resolveBoardAndDevices();
 void fetchInitialState();
+void sendHeartbeat(); // New prototype
 
 // ============================================================
 //  setRelay – Direct GPIO Control
 // ============================================================
-void setRelay(bool on) {
-  isRelayOn = on;
+void setRelay(int index, bool on) {
+  if (index < 0 || index >= NUM_DEVICES) return;
+  
+  isRelayOn[index] = on;
   
   if (on) {
-    digitalWrite(RELAY_PIN, LOW);  // Turn Relay ON
+    digitalWrite(RELAY_PINS[index], LOW);  // Turn Relay ON (Active-LOW)
   } else {
-    digitalWrite(RELAY_PIN, HIGH); // Turn Relay OFF
+    digitalWrite(RELAY_PINS[index], HIGH); // Turn Relay OFF
   }
   
-  Serial.print(">> RELAY STATE CHANGED TO: ");
+  Serial.print(">> RELAY ["); Serial.print(index); Serial.print("] STATE CHANGED TO: ");
   Serial.println(on ? "ON" : "OFF");
 }
 
@@ -108,22 +107,18 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
   Serial.println("\n\n===========================================");
-  Serial.println("  ESP32 Cloud Relay (GPIO + Switch + AC Detect)");
+  Serial.println("  ESP32 Cloud Relay (4 Devices)");
   Serial.println("===========================================\n");
 
-  // --- Initialize Direct Relay Pin (Output) ---
-  pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, HIGH); // Start with relay OFF (Active-LOW)
-  Serial.println("-> Relay GPIO initialized (Relay OFF)");
-
-  // --- Initialize Direct Input Pin (Feedback) ---
-  pinMode(INPUT_PIN, INPUT_PULLUP);
-  confirmedInputState = digitalRead(INPUT_PIN);
-  Serial.println("-> Switch Input GPIO initialized");
-
-  // --- Initialize AC Detector Pin (Feedback) ---
-  pinMode(AC_DETECTOR_PIN, INPUT);
-  Serial.println("-> AC Detector GPIO initialized");
+  // --- Initialize GPIOs for all 4 devices ---
+  for (int i = 0; i < NUM_DEVICES; i++) {
+    pinMode(RELAY_PINS[i], OUTPUT);
+    digitalWrite(RELAY_PINS[i], HIGH); // Start OFF (Active-LOW)
+    
+    pinMode(INPUT_PINS[i], INPUT_PULLUP);
+    confirmedInputState[i] = digitalRead(INPUT_PINS[i]);
+  }
+  Serial.println("-> Relay & Switch GPIOs initialized");
 
   // --- Wi-Fi Setup ---
   Serial.print("-> Connecting to Wi-Fi: ");
@@ -131,28 +126,8 @@ void setup() {
   WiFi.mode(WIFI_STA);
   wifiMulti.addAP(ssid, password);
   
-  while (wifiMulti.run() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\n✅ Wi-Fi Connected! IP: " + WiFi.localIP().toString());
-
-  // --- Time Sync ---
-  Serial.print("-> Syncing Time with NTP...");
-  configTime(0, 0, "pool.ntp.org");
-  time_t now = time(nullptr);
-  while (now < 100000) { delay(500); Serial.print("."); now = time(nullptr); }
-  Serial.println("\n✅ Time Synced: " + getIsoTime());
-
-  // --- Supabase Link ---
-  Serial.println("-> Linking to Supabase Database...");
-  if (resolveBoardAndDevice()) { 
-    Serial.println("✅ Board and Device verified.");
-    fetchInitialState(); 
-    pollAlarms(); 
-  } else {
-    Serial.println("❌ FAILED to link Board/Device. Check Supabase 'boards' table.");
-  }
+  Serial.println("-> Background Auto-Recovery initialized.");
+  Serial.println("-> Physical switches are active IMMEDIATELY. Wi-Fi, Time, and Cloud will sync in the background.");
   Serial.println("===========================================\n");
 }
 
@@ -161,63 +136,81 @@ void setup() {
 // ============================================================
 void loop() {
   // ----------------------------------------------------------
-  // 1. PHYSICAL SWITCH INPUT READING (Debounced)
+  // 1. PHYSICAL SWITCH INPUT READING (Debounced for all 4)
   // ----------------------------------------------------------
-  bool currentRead = digitalRead(INPUT_PIN);
+  for (int i = 0; i < NUM_DEVICES; i++) {
+    bool currentRead = digitalRead(INPUT_PINS[i]);
 
-  if (currentRead != lastInputRead) {
-    lastDebounceTime = millis();
-  }
-
-  if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY) {
-    if (currentRead != confirmedInputState) {
-      confirmedInputState = currentRead;
-      
-      bool isSwitchOn = (confirmedInputState == LOW);
-      Serial.print("!! PHYSICAL INPUT CHANGED: ");
-      Serial.println(isSwitchOn ? "ON (Switch Closed)" : "OFF (Switch Open)");
-      
-      updateFeedbackInDB(isSwitchOn);
+    if (currentRead != lastInputRead[i]) {
+      lastDebounceTime[i] = millis();
     }
-  }
-  lastInputRead = currentRead;
 
-  // ----------------------------------------------------------
-  // 2. AC DETECTOR MODULE READING (Missing Pulse Logic)
-  // ----------------------------------------------------------
-  bool rawAcRead = digitalRead(AC_DETECTOR_PIN);
-
-  // If the optocoupler pulls the pin LOW, we register a pulse
-  if (rawAcRead == LOW) {
-    lastAcPulseTime = millis();
-    currentAcState = true; // AC is present
-  }
-
-  // If 100ms has passed without a single LOW pulse, AC is off
-  if (millis() - lastAcPulseTime > AC_TIMEOUT) {
-    currentAcState = false; // No AC detected
-  }
-
-  // If the confirmed state changed, push the update
-  if (currentAcState != lastReportedAcState) {
-    lastReportedAcState = currentAcState;
-    
-    Serial.print("!! AC DETECTOR CHANGED: ");
-    Serial.println(currentAcState ? "ON (AC Present)" : "OFF (No AC Detected)");
-    
-    updateACFeedbackInDB(currentAcState);
+    if ((millis() - lastDebounceTime[i]) > DEBOUNCE_DELAY) {
+      if (currentRead != confirmedInputState[i]) {
+        confirmedInputState[i] = currentRead;
+        
+        bool isSwitchOn = (confirmedInputState[i] == LOW);
+        Serial.print("!! PHYSICAL INPUT ["); Serial.print(i); Serial.print("] CHANGED: ");
+        Serial.println(isSwitchOn ? "ON (Switch Closed)" : "OFF (Switch Open)");
+        
+        updateFeedbackInDB(i, isSwitchOn);
+      }
+    }
+    lastInputRead[i] = currentRead;
   }
 
   // ----------------------------------------------------------
-  // 3. LIVE SERIAL MONITORING (Prints every 5 seconds)
+  // 2. LIVE SERIAL MONITORING
   // ----------------------------------------------------------
   if (millis() - lastSerialDumpTime >= SERIAL_DUMP_INTERVAL) {
     lastSerialDumpTime = millis();
     Serial.println("\n--- 📡 LIVE STATE MONITOR ---");
-    Serial.print("🔹 Relay State : "); Serial.println(isRelayOn ? "ON" : "OFF");
-    Serial.print("🔹 Switch State: "); Serial.println(confirmedInputState == LOW ? "ON" : "OFF");
-    Serial.print("🔹 AC Detector : "); Serial.println(currentAcState ? "DETECTED" : "NO CURRENT");
+    for (int i = 0; i < NUM_DEVICES; i++) {
+      Serial.printf("Device %d | Relay: %-3s | Switch: %-3s\n", 
+        i, 
+        isRelayOn[i] ? "ON" : "OFF", 
+        (confirmedInputState[i] == LOW) ? "ON" : "OFF"
+      );
+    }
     Serial.println("-----------------------------\n");
+  }
+
+  // ----------------------------------------------------------
+  // 3. AUTO-RECOVERY (Wi-Fi, Time, Database)
+  // ----------------------------------------------------------
+  static unsigned long lastRecoveryAttempt = 0;
+  
+  if (wifiMulti.run() != WL_CONNECTED) {
+    return; // Skip cloud operations if offline, but keep loop running for physical switches
+  }
+
+  time_t currentNtpTime = time(nullptr);
+  if (currentNtpTime < 100000) {
+    if (millis() - lastRecoveryAttempt > 5000) {
+      Serial.println("-> Re-Syncing Time with NTP...");
+      configTime(0, 0, "pool.ntp.org");
+      lastRecoveryAttempt = millis();
+    }
+    return; // Can't process alarms/cloud without accurate time
+  }
+
+  if (boardUUID == "") {
+    if (millis() - lastRecoveryAttempt > 5000) {
+      Serial.println("-> Attempting to Link to Supabase Database...");
+      if (resolveBoardAndDevices()) { 
+        Serial.println("✅ Board and Devices verified.");
+        fetchInitialState(); 
+        for (int i = 0; i < NUM_DEVICES; i++) {
+          if(deviceUUIDs[i] != "") updateFeedbackInDB(i, confirmedInputState[i] == LOW);
+        }
+        sendHeartbeat();
+        pollAlarms(); 
+      } else {
+        Serial.println("❌ FAILED to link Board/Devices. Retrying...");
+      }
+      lastRecoveryAttempt = millis();
+    }
+    return; // Can't poll cloud without board UUID
   }
 
   // ----------------------------------------------------------
@@ -233,16 +226,26 @@ void loop() {
     pollAlarms();
   }
 
+  // ----------------------------------------------------------
+  // 4. HEARTBEAT SYSTEM (NEW)
+  // ----------------------------------------------------------
+  if (millis() - lastHeartbeatTime >= HEARTBEAT_INTERVAL) {
+    lastHeartbeatTime = millis();
+    sendHeartbeat();
+  }
+
   String nowIso = getIsoTime();
   for (int i = 0; i < MAX_ALARMS; i++) {
     if (alarms[i].active && nowIso >= alarms[i].triggerAt) {
       Serial.println("⏰ ALARM FIRED! ID: " + alarms[i].id);
       
       alarms[i].active = false;
-      isRelayOn = alarms[i].action;
+      int targetDev = alarms[i].deviceIndex;
       
-      setRelay(isRelayOn);          
-      updateDeviceInDB(isRelayOn);
+      if(targetDev >= 0 && targetDev < NUM_DEVICES) {
+        setRelay(targetDev, alarms[i].action);          
+        updateDeviceInDB(targetDev, alarms[i].action);
+      }
       markAlarmFiredInDB(alarms[i].id);
     }
   }
@@ -252,36 +255,41 @@ void loop() {
 //  SUPABASE HTTP FUNCTIONS
 // ============================================================
 void pollDatabase() {
-  if(deviceUUID == "") return;
+  if(boardUUID == "") return;
   
   HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUID + "&select=is_on");
+  // Fetch states for all devices on this board in one go
+  http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=relay_index,is_on");
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
 
   if (http.GET() == 200) {
-    DynamicJsonDocument doc(512);
+    DynamicJsonDocument doc(1024);
     deserializeJson(doc, http.getString());
-    if (doc.size() > 0) {
-      bool dbState = doc[0]["is_on"];
+    
+    for (int i = 0; i < doc.size(); i++) {
+      int rIndex = doc[i]["relay_index"];
+      bool dbState = doc[i]["is_on"];
       
-      if (dbState != isRelayOn) {
-        Serial.print("☁️ CLOUD COMMAND RECEIVED: Turn ");
-        Serial.println(dbState ? "ON" : "OFF");
-        setRelay(dbState);        
+      if (rIndex >= 0 && rIndex < NUM_DEVICES) {
+        if (dbState != isRelayOn[rIndex]) {
+          Serial.print("☁️ CLOUD COMMAND: Turn Device ["); Serial.print(rIndex); Serial.print("] ");
+          Serial.println(dbState ? "ON" : "OFF");
+          setRelay(rIndex, dbState);        
+        }
       }
     }
   }
   http.end();
 }
 
-void updateDeviceInDB(bool state) {
-  if(deviceUUID == "") return;
-  Serial.print("☁️ Pushing Relay State to Cloud: ");
+void updateDeviceInDB(int index, bool state) {
+  if(deviceUUIDs[index] == "") return;
+  Serial.print("☁️ Pushing Relay ["); Serial.print(index); Serial.print("] State to Cloud: ");
   Serial.println(state ? "ON" : "OFF");
 
   HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUID);
+  http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUIDs[index]);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");
@@ -289,13 +297,13 @@ void updateDeviceInDB(bool state) {
   http.end();
 }
 
-void updateFeedbackInDB(bool feedback) {
-  if(deviceUUID == "") return;
-  Serial.print("☁️ Pushing Switch Feedback to Cloud: ");
+void updateFeedbackInDB(int index, bool feedback) {
+  if(deviceUUIDs[index] == "") return;
+  Serial.print("☁️ Pushing Switch Feedback ["); Serial.print(index); Serial.print("] to Cloud: ");
   Serial.println(feedback ? "ON" : "OFF");
 
   HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUID);
+  http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUIDs[index]);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");
@@ -304,23 +312,7 @@ void updateFeedbackInDB(bool feedback) {
   http.end();
 }
 
-void updateACFeedbackInDB(bool feedback) {
-  if(deviceUUID == "") return;
-  Serial.print("☁️ Pushing AC Feedback to Cloud: ");
-  Serial.println(feedback ? "DETECTED" : "NONE");
-
-  HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUID);
-  http.addHeader("apikey", SUPABASE_SERVICE_KEY);
-  http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
-  http.addHeader("Content-Type", "application/json");
-  
-  // Update the 'feedback_on' column in the Supabase 'devices' table
-  http.PATCH("{\"feedback_on\":" + String(feedback ? "true" : "false") + "}");
-  http.end();
-}
-
-bool resolveBoardAndDevice() {
+bool resolveBoardAndDevices() {
   HTTPClient http;
   
   // 1. Find Board UUID
@@ -329,7 +321,7 @@ bool resolveBoardAndDevice() {
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   
   if (http.GET() == 200) {
-    DynamicJsonDocument doc(1024); deserializeJson(doc, http.getString());
+    DynamicJsonDocument doc(512); deserializeJson(doc, http.getString());
     if (doc.size() > 0) {
       boardUUID = doc[0]["id"].as<String>();
       Serial.println("  -> Found Board UUID: " + boardUUID);
@@ -337,60 +329,91 @@ bool resolveBoardAndDevice() {
   }
   http.end();
 
-  // 2. Find Device UUID
+  // 2. Find ALL Device UUIDs for this board
+  bool foundAny = false;
   if(boardUUID != "") {
-    http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&relay_index=eq.0&select=id");
+    http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=id,relay_index");
     http.addHeader("apikey", SUPABASE_SERVICE_KEY);
     http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
     
     if (http.GET() == 200) {
-      DynamicJsonDocument doc(1024); deserializeJson(doc, http.getString());
-      if (doc.size() > 0) {
-        deviceUUID = doc[0]["id"].as<String>();
-        Serial.println("  -> Found Device UUID: " + deviceUUID);
+      DynamicJsonDocument doc(2048); deserializeJson(doc, http.getString());
+      for (int i = 0; i < doc.size(); i++) {
+        int rIndex = doc[i]["relay_index"];
+        if (rIndex >= 0 && rIndex < NUM_DEVICES) {
+          deviceUUIDs[rIndex] = doc[i]["id"].as<String>();
+          Serial.print("  -> Linked Device ["); Serial.print(rIndex); Serial.println("] UUID.");
+          foundAny = true;
+        }
       }
     }
     http.end();
   }
   
-  return (deviceUUID != "");
+  return foundAny;
 }
 
 void fetchInitialState() {
+  if(boardUUID == "") return;
   HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUID + "&select=is_on");
+  http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=relay_index,is_on");
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   
   if (http.GET() == 200) {
-    DynamicJsonDocument doc(512); deserializeJson(doc, http.getString());
-    if (doc.size() > 0) {
-      bool initState = doc[0]["is_on"];
-      Serial.print("  -> Initial State from Cloud: ");
-      Serial.println(initState ? "ON" : "OFF");
-      setRelay(initState);          
+    DynamicJsonDocument doc(1024); deserializeJson(doc, http.getString());
+    for (int i = 0; i < doc.size(); i++) {
+      int rIndex = doc[i]["relay_index"];
+      if (rIndex >= 0 && rIndex < NUM_DEVICES) {
+        bool initState = doc[i]["is_on"];
+        Serial.print("  -> Initial State ["); Serial.print(rIndex); Serial.print("] from Cloud: ");
+        Serial.println(initState ? "ON" : "OFF");
+        setRelay(rIndex, initState);          
+      }
     }
   }
   http.end();
 }
 
 void pollAlarms() {
-  if(deviceUUID == "") return;
+  // Build a query for all active device UUIDs on this board
+  String queryIds = "";
+  for(int i = 0; i < NUM_DEVICES; i++) {
+    if(deviceUUIDs[i] != "") {
+      if(queryIds != "") queryIds += ",";
+      queryIds += "%22" + deviceUUIDs[i] + "%22"; // Wrap ID in quotes (URL encoded as %22)
+    }
+  }
+  if(queryIds == "") return;
+
   HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/alarms?device_id=eq." + deviceUUID + "&fired=eq.false&select=id,trigger_at,action");
+  // Use 'in' filter to get alarms for ANY of the 4 devices
+  http.begin(String(SUPABASE_BASE) + "/alarms?device_id=in.(" + queryIds + ")&fired=eq.false&select=id,trigger_at,action,device_id");
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   
   if (http.GET() == 200) {
     DynamicJsonDocument doc(2048);
     deserializeJson(doc, http.getString());
+    
     for (int i = 0; i < MAX_ALARMS; i++) alarms[i].active = false;
+    
     for (int i = 0; i < doc.size() && i < MAX_ALARMS; i++) {
       alarms[i].id = doc[i]["id"].as<String>();
       String t = doc[i]["trigger_at"].as<String>();
       alarms[i].triggerAt = t.substring(0, 19); 
       alarms[i].action = doc[i]["action"].as<bool>();
-      alarms[i].active = true;
+      
+      // Match the alarm's device_id back to our deviceIndex
+      String aDevId = doc[i]["device_id"].as<String>();
+      alarms[i].deviceIndex = -1;
+      for(int d = 0; d < NUM_DEVICES; d++) {
+        if(deviceUUIDs[d] == aDevId) {
+          alarms[i].deviceIndex = d;
+          break;
+        }
+      }
+      alarms[i].active = (alarms[i].deviceIndex != -1);
     }
   }
   http.end();
@@ -405,4 +428,31 @@ void markAlarmFiredInDB(String alarmId) {
   http.PATCH("{\"fired\":true}");
   http.end();
   Serial.println("☁️ Alarm marked as fired in database.");
+}
+
+// ============================================================
+//  HEARTBEAT IMPLEMENTATION (NEW)
+// ============================================================
+void sendHeartbeat() {
+  if (boardUUID == "") return; // Don't send heartbeat if we haven't resolved the board ID
+  
+  String nowIso = getIsoTime();
+  
+  HTTPClient http;
+  http.begin(String(SUPABASE_BASE) + "/boards?id=eq." + boardUUID);
+  http.addHeader("apikey", SUPABASE_SERVICE_KEY);
+  http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
+  http.addHeader("Content-Type", "application/json");
+  
+  // Patch the last_seen column with the current ISO timestamp
+  String payload = "{\"last_seen\":\"" + nowIso + "\"}";
+  int httpCode = http.PATCH(payload);
+  
+  if(httpCode == 200 || httpCode == 204) {
+     Serial.println("💓 Heartbeat sent to Cloud.");
+  } else {
+     Serial.print("⚠️ Heartbeat failed with code: ");
+     Serial.println(httpCode);
+  }
+  http.end();
 }

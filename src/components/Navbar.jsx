@@ -896,7 +896,7 @@ export default function Navbar() {
 
             {/* Mobile Dropdown Card */}
             {showWifiNetDropdownMobile && (
-              <div className="absolute right-0 top-full mt-2 w-[260px] rounded-2xl border border-border bg-card p-4 shadow-2xl z-50 flex flex-col gap-3 animate-scale-in">
+              <div className="fixed top-[70px] right-4 w-[280px] rounded-2xl border border-border bg-card p-4 shadow-2xl z-50 flex flex-col gap-3 animate-scale-in">
                 <div className="flex items-center justify-between border-b border-border pb-2">
                   <span className="text-[10px] font-black text-text uppercase tracking-wider font-label-caps font-bold">Network Wi-Fi</span>
                   <span className={`text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
@@ -952,7 +952,7 @@ export default function Navbar() {
 
             {/* Mobile Dropdown Card */}
             {showWifiDropdownMobile && (
-              <div className="absolute right-0 top-full mt-2 w-[280px] rounded-2xl border border-border bg-card p-4 shadow-2xl z-50 flex flex-col gap-3 animate-scale-in">
+              <div className="fixed top-[70px] right-4 w-[280px] rounded-2xl border border-border bg-card p-4 shadow-2xl z-50 flex flex-col gap-3 animate-scale-in">
                 <div className="flex items-center justify-between border-b border-border pb-2">
                   <span className="text-[10px] font-black text-text uppercase tracking-wider font-label-caps font-bold">Board Range</span>
                   <span className={`text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
