@@ -15,7 +15,7 @@ export default function LandingPage() {
 
   useEffect(() => {
     if (videoRef.current) {
-      videoRef.current.playbackRate = 2.5; // 1.75x playback speed
+      videoRef.current.playbackRate = 1.0; // 1.75x playback speed
     }
   }, []);
 
@@ -27,12 +27,34 @@ export default function LandingPage() {
     }
   };
 
+  // Social share helper
+  const handleShare = async () => {
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Electric Warriors - Smart Home Automation',
+          text: 'Check out Electric Warriors premium smart home automation switchboards and controllers!',
+          url: typeof window !== 'undefined' ? window.location.origin : ''
+        });
+      } catch (err) {
+        console.warn('Share cancelled or failed:', err);
+      }
+    } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(window.location.origin);
+        alert('Link copied to clipboard!');
+      } catch (err) {
+        console.error('Failed to copy link:', err);
+      }
+    }
+  };
+
   return (
     <div className="bg-lp-bg text-lp-on-surface font-body-md selection:bg-lp-primary-container selection:text-lp-on-primary-container min-h-screen">
 
       {/* Top Navbar */}
-      <header className="fixed top-0 w-full z-50 flex justify-between items-center px-6 py-4 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant">
-        <div className="text-xl font-headline-md font-black tracking-tighter text-white uppercase select-none">
+      <header className="fixed top-0 w-full z-50 flex justify-between items-center px-4 md:px-6 py-3 md:py-4 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant">
+        <div className="text-base md:text-xl font-headline-md font-black tracking-tighter text-white uppercase select-none">
           ELECTRIC WARRIORS
         </div>
         <nav className="hidden md:flex gap-8 font-label-caps text-[12px] tracking-tight items-center">
@@ -55,20 +77,15 @@ export default function LandingPage() {
             Our Journey
           </button>
         </nav>
-        <div className="flex gap-4 items-center">
+        <div className="flex gap-2 md:gap-4 items-center shrink-0">
           <ThemeToggle />
           <button
             onClick={() => router.push('/login')}
-            className="hidden lg:block px-4 py-2 border border-lp-primary-container/40 text-lp-primary font-label-caps text-[12px] hover:bg-lp-primary-container/10 transition-all active:scale-95 cursor-pointer rounded"
+            className="px-3 py-1.5 md:px-4 md:py-2 border border-lp-primary-container/40 text-lp-primary font-label-caps text-[10px] md:text-[12px] hover:bg-lp-primary-container/10 transition-all active:scale-95 cursor-pointer rounded whitespace-nowrap"
           >
             Login
           </button>
-          <button
-            onClick={() => handleScroll('journey')}
-            className="px-5 py-2 bg-lp-primary-container text-lp-on-primary-container font-label-caps text-[12px] font-bold hover:shadow-[0_0_15px_rgba(0,255,65,0.4)] transition-all active:scale-95 cursor-pointer rounded"
-          >
-            Get Started
-          </button>
+         
         </div>
       </header>
 
@@ -426,9 +443,8 @@ export default function LandingPage() {
               </div>
             </div>
 
-            {/* Visual Screen Mockup */}
-            <div className="flex-1 w-full relative">
-              <div className="relative aspect-video rounded-xl border border-lp-outline-variant bg-lp-slate-gray p-1 overflow-hidden shadow-2xl">
+            <div className="flex-1 w-full max-w-2xl relative">
+              <div className="relative rounded-xl bg-lp-slate-gray p-1 overflow-hidden shadow-2xl">
                 <video
                   ref={videoRef}
                   autoPlay
@@ -438,7 +454,7 @@ export default function LandingPage() {
                   className="w-full h-full object-cover rounded opacity-90"
                 >
                   <source 
-                    src="https://res.cloudinary.com/dqtlqvhw5/video/upload/v1783658820/Second_video_of_homeAutomation_ihgn4t.mp4" 
+                    src="https://res.cloudinary.com/dvwvphn8u/video/upload/v1783665250/analytics_demo_f2vdpq.mp4" 
                     type="video/mp4" 
                   />
                   Your browser does not support the video tag.
@@ -506,11 +522,11 @@ export default function LandingPage() {
         </section>
 
         {/* CTA / Partner Section */}
-        <section className="py-24 bg-lp-surface-lowest border-t border-lp-outline-variant relative overflow-hidden">
+        <section className="py-24 bg-lp-surface-lowest border-t border-lp-outline-variant relative overflow-hidden" id="partner">
           <div className="max-w-6xl mx-auto px-6 grid grid-cols-1 lg:grid-cols-2 gap-12 relative z-10">
             <div className="p-12 bg-lp-surface border border-lp-outline-variant flex flex-col justify-between rounded">
               <div>
-                <h2 className="font-headline-md text-3xl mb-6 font-extrabold text-white">Direct Sales &amp; Retrofitting</h2>
+                <div role="heading" aria-level="2" className="font-headline-md text-3xl mb-6 font-extrabold text-lp-on-surface">Direct Sales &amp; Retrofitting</div>
                 <p className="font-body-md text-lp-on-surface-variant text-sm mb-8 leading-relaxed">Ready to upgrade your existing space? Pre-order our 4-device relay modules designed for easy retrofitting into any standard switchboard.</p>
               </div>
               <button
@@ -522,7 +538,7 @@ export default function LandingPage() {
             </div>
             <div className="p-12 bg-lp-primary-container text-lp-on-primary-container flex flex-col justify-between rounded">
               <div>
-                <h2 className="font-headline-md text-3xl mb-6 font-extrabold">Builder Partnerships</h2>
+                <div role="heading" aria-level="2" className="font-headline-md text-3xl mb-6 font-extrabold text-lp-on-primary-container">Builder Partnerships</div>
                 <p className="font-body-md text-lp-on-primary-container/80 text-sm mb-8 leading-relaxed">For real estate developers: Install Electric Warriors tech from the ground up. Offer your clients premium, integrated intelligence and command a higher market value.</p>
               </div>
               <button
@@ -547,18 +563,46 @@ export default function LandingPage() {
             <p className="font-label-caps text-[11px] text-lp-on-surface-variant mt-4 opacity-60 select-none">© 2026 Electric Warriors. Shock, Inspire, Lead.</p>
           </div>
           <div className="flex flex-wrap justify-center gap-8">
-            <a className="font-label-caps text-[11px] text-lp-on-surface hover:text-lp-primary transition-colors" href="#">Privacy Policy</a>
-            <a className="font-label-caps text-[11px] text-lp-on-surface hover:text-lp-primary transition-colors" href="#">Terms of Service</a>
-            <a className="font-label-caps text-[11px] text-lp-on-surface hover:text-lp-primary transition-colors" href="#">Partner Program</a>
-            <a className="font-label-caps text-[11px] text-lp-on-surface hover:text-lp-primary transition-colors" href="#">Contact Sales</a>
+            <button 
+              className="font-label-caps text-[11px] text-lp-on-surface hover:text-lp-primary transition-colors cursor-pointer bg-transparent border-none p-0 outline-none" 
+              onClick={() => router.push('/terms')}
+            >
+              Privacy Policy
+            </button>
+            <button 
+              className="font-label-caps text-[11px] text-lp-on-surface hover:text-lp-primary transition-colors cursor-pointer bg-transparent border-none p-0 outline-none" 
+              onClick={() => router.push('/terms')}
+            >
+              Terms of Service
+            </button>
+            <button 
+              className="font-label-caps text-[11px] text-lp-on-surface hover:text-lp-primary transition-colors cursor-pointer bg-transparent border-none p-0 outline-none" 
+              onClick={() => handleScroll('partner')}
+            >
+              Partner Program
+            </button>
+            <a 
+              className="font-label-caps text-[11px] text-lp-on-surface hover:text-lp-primary transition-colors" 
+              href="mailto:ahemanthramasai@gmail.com?subject=Smart%20Home%20Sales%20Inquiry"
+            >
+              Contact Sales
+            </a>
           </div>
           <div className="flex gap-4">
-            <div className="w-10 h-10 rounded-full border border-lp-outline-variant flex items-center justify-center hover:border-lp-primary transition-colors group cursor-pointer">
+            <button 
+              onClick={handleShare}
+              title="Share Page"
+              className="w-10 h-10 rounded-full border border-lp-outline-variant bg-transparent flex items-center justify-center hover:border-lp-primary transition-colors group cursor-pointer"
+            >
               <span className="material-symbols-outlined text-lp-on-surface-variant group-hover:text-lp-primary-container text-lg">share</span>
-            </div>
-            <div className="w-10 h-10 rounded-full border border-lp-outline-variant flex items-center justify-center hover:border-lp-primary transition-colors group cursor-pointer">
+            </button>
+            <button 
+              onClick={() => handleScroll('showcase3d')}
+              title="Inspect 3D Hardware"
+              className="w-10 h-10 rounded-full border border-lp-outline-variant bg-transparent flex items-center justify-center hover:border-lp-primary transition-colors group cursor-pointer"
+            >
               <span className="material-symbols-outlined text-lp-on-surface-variant group-hover:text-lp-primary-container text-lg">hub</span>
-            </div>
+            </button>
           </div>
         </div>
       </footer>

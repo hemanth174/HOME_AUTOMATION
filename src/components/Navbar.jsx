@@ -752,7 +752,7 @@ export default function Navbar() {
                   ? 'border-border bg-transparent text-text-muted/40 hover:text-text-muted hover:border-border/80'
                   : boards.some(b => !isBoardOnline(b.last_seen))
                   ? 'border-red-500/30 bg-red-500/5 text-red-500 hover:bg-red-500/10 hover:border-red-500/50'
-                  : 'border-border bg-transparent text-text-muted hover:bg-accent-bg hover:border-border/80'
+                  : 'border-[#00ff41]/30 bg-[#00ff41]/5 text-[#00ff41] hover:bg-[#00ff41]/10 hover:border-[#00ff41]/50'
               }`}
               title="Hardware Board Range"
             >
@@ -775,7 +775,7 @@ export default function Navbar() {
                       ? 'bg-border text-text-muted'
                       : boards.some(b => !isBoardOnline(b.last_seen))
                       ? 'bg-red-500/10 text-red-500 border border-red-500/20'
-                      : 'bg-accent-bg text-accent border border-accent/20'
+                      : 'bg-[#00ff41]/10 text-[#00ff41] border border-[#00ff41]/20'
                   }`}>
                     {boards.length === 0
                       ? 'No Hardware'
@@ -940,7 +940,7 @@ export default function Navbar() {
                   ? 'border-border bg-transparent text-text-muted/40'
                   : boards.some(b => !isBoardOnline(b.last_seen))
                   ? 'border-red-500/30 bg-red-500/5 text-red-500 hover:bg-red-500/10 hover:border-red-500/50'
-                  : 'border-border bg-transparent text-text-muted hover:bg-accent-bg hover:border-border/80'
+                  : 'border-[#00ff41]/30 bg-[#00ff41]/5 text-[#00ff41] hover:bg-[#00ff41]/10 hover:border-[#00ff41]/50'
               }`}
             >
               <BoardSignalIcon 
@@ -960,7 +960,7 @@ export default function Navbar() {
                       ? 'bg-border text-text-muted'
                       : boards.some(b => !isBoardOnline(b.last_seen))
                       ? 'bg-red-500/10 text-red-500 border border-red-500/20'
-                      : 'bg-accent-bg text-accent border border-accent/20'
+                      : 'bg-[#00ff41]/10 text-[#00ff41] border border-[#00ff41]/20'
                   }`}>
                     {boards.length === 0 ? 'No HW' : boards.some(b => !isBoardOnline(b.last_seen)) ? 'Alert' : 'Online'}
                   </span>
