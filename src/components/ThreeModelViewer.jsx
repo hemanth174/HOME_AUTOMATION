@@ -227,11 +227,19 @@ export default function ThreeModelViewer({
     camera.position.set(0, 2, 9);
 
     // 4. Renderer setup
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: true,
-      powerPreference: 'high-performance'
-    });
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true,
+        powerPreference: 'high-performance'
+      });
+    } catch (err) {
+      console.error('WebGL Initialization failed:', err);
+      setError('WebGL is not supported or disabled in your browser.');
+      setLoading(false);
+      return;
+    }
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     
