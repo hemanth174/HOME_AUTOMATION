@@ -46,26 +46,39 @@ if (typeof window !== 'undefined' && window.speechSynthesis) {
 }
 
 export const speak = (text) => {
-  if (typeof window === 'undefined' || !window.speechSynthesis) return;
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+      resolve();
+      return;
+    }
 
-  // Cancel any ongoing speech
-  window.speechSynthesis.cancel();
+    // Cancel any ongoing speech
+    window.speechSynthesis.cancel();
 
-  const utterance = new SpeechSynthesisUtterance(text);
-  
-  if (!selectedVoice) {
-    initVoice();
-  }
-  
-  if (selectedVoice) {
-    utterance.voice = selectedVoice;
-  }
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    if (!selectedVoice) {
+      initVoice();
+    }
+    
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+    }
 
-  // Tweak rate and pitch for a premium feel
-  utterance.rate = 1.0;
-  utterance.pitch = 1.0;
+    // Tweak rate and pitch for a premium feel
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
 
-  window.speechSynthesis.speak(utterance);
+    utterance.onend = () => {
+      resolve();
+    };
+
+    utterance.onerror = () => {
+      resolve();
+    };
+
+    window.speechSynthesis.speak(utterance);
+  });
 };
 
 export const stopSpeaking = () => {
