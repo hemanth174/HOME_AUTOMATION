@@ -543,7 +543,7 @@ export default function AnalyticsPage() {
   }
 
   // Calculate actual metrics using device runtime statistics
-  const deviceStats = devices.map(device => {
+  let deviceStats = devices.map(device => {
     const runHours = getDeviceRunHoursToday(device, logs);
     const wattage = getDeviceWattage(device.name);
     const kwh = (wattage * runHours) / 1000;
@@ -555,15 +555,15 @@ export default function AnalyticsPage() {
     };
   });
 
-  const totalKwhToday = deviceStats.reduce((sum, d) => sum + d.kwh, 0);
-  const estimatedCostToday = totalKwhToday * (userSettings.tariff_per_kwh || 8.00); // user-configured tariff
+  let totalKwhToday = deviceStats.reduce((sum, d) => sum + d.kwh, 0);
+  let estimatedCostToday = totalKwhToday * (userSettings.tariff_per_kwh || 8.00); // user-configured tariff
 
   // Current live load (relay ON)
   const activeDevices = devices.filter(d => d.is_on);
-  const currentDraw = activeDevices.reduce((sum, d) => sum + getDeviceWattage(d.name), 0);
+  let currentDraw = activeDevices.reduce((sum, d) => sum + getDeviceWattage(d.name), 0);
 
   // Generate hourly consumption data binned exactly from log timestamps
-  const hourlyData = Array.from({ length: 24 }).map((_, i) => {
+  let hourlyData = Array.from({ length: 24 }).map((_, i) => {
     const targetHourDate = new Date();
     targetHourDate.setHours(new Date().getHours() - (23 - i), 0, 0, 0);
     const nextHourDate = new Date(targetHourDate.getTime() + 60 * 60 * 1000);
@@ -582,7 +582,7 @@ export default function AnalyticsPage() {
   });
 
   // Calculate board usage based on actual runtime
-  const boardData = boards.map(board => {
+  let boardData = boards.map(board => {
     const boardDevices = deviceStats.filter(d => d.board_id === board.id);
     const usage = boardDevices.reduce((sum, d) => sum + d.kwh, 0);
     return {
@@ -592,13 +592,43 @@ export default function AnalyticsPage() {
   });
 
   // Filter device shares to only display running loads
-  const pieData = deviceStats.map(d => {
+  let pieData = deviceStats.map(d => {
     return {
       id: d.id,
       name: d.name,
       value: parseFloat(d.kwh.toFixed(4))
     };
-  }).filter(item => item.value > 0);
+  });
+
+  // Inject hardcoded dummy data for localhost to populate all charts
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost' && user?.email === 'ramasaiahemanth@gmail.com') {
+    deviceStats = [
+      { id: 'd1', name: 'Living Room AC', runHours: 4.5, wattage: 1500, kwh: 6.75 },
+      { id: 'd2', name: 'Kitchen Lights', runHours: 8.2, wattage: 40, kwh: 0.328 },
+      { id: 'd3', name: 'Water Heater', runHours: 2.1, wattage: 2000, kwh: 4.2 },
+      { id: 'd4', name: 'TV', runHours: 3.8, wattage: 150, kwh: 0.57 },
+      { id: 'd5', name: 'Bedroom Fan', runHours: 12.5, wattage: 60, kwh: 0.75 }
+    ];
+    totalKwhToday = 12.598;
+    estimatedCostToday = totalKwhToday * (userSettings.tariff_per_kwh || 8.00);
+    currentDraw = 1560; // Just a dummy value
+
+    hourlyData = Array.from({ length: 24 }).map((_, i) => ({
+      time: `${i.toString().padStart(2, '0')}:00`,
+      Usage: [0,0,0,0,0,0, 0.5,1.2,0.8,0.4, 0.3,0.3, 1.5,1.2, 0.8,0.9, 1.1, 2.5,3.2,4.1, 3.5, 2.0, 1.0, 0.5][i]
+    }));
+
+    boardData = [
+      { name: 'Living Room Board', Usage: 7.32 },
+      { name: 'Kitchen Board', Usage: 0.328 },
+      { name: 'Master Bedroom', Usage: 4.95 }
+    ];
+
+    pieData = deviceStats.map(d => ({ id: d.id, name: d.name, value: d.kwh }));
+  }
+
+  // Ensure pieData only has positive values
+  pieData = pieData.filter(item => item.value > 0);
 
   // ── Shared chart style constants ───────────────────────────────────────────
   const CHART_AXIS_STROKE   = '#6b7280';          // gray-500 — visible on dark bg
