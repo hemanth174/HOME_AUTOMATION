@@ -423,26 +423,8 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       console.warn('AI voice command failed, falling back to local parser:', e);
     }
 
-    // 1. All on / all off
-    const allOnPhrases = ['turn on all', 'all on', 'everything on', 'all lights on', 'all devices on'];
-    const allOffPhrases = ['turn off all', 'all off', 'everything off', 'all lights off', 'all devices off'];
-
-    if (allOnPhrases.some(p => text.includes(p))) {
-      await Promise.all(commandDevices.map(d =>
-        supabase.from('devices').update({ is_on: true, last_changed: new Date().toISOString() }).eq('id', d.id)
-      ));
-      safeToast('All devices turned ON');
-      speak('All devices turned on');
-      return;
-    }
-    if (allOffPhrases.some(p => text.includes(p))) {
-      await Promise.all(commandDevices.map(d =>
-        supabase.from('devices').update({ is_on: false, last_changed: new Date().toISOString() }).eq('id', d.id)
-      ));
-      safeToast('All devices turned OFF');
-      speak('All devices turned off');
-      return;
-    }
+    // Note: Local hardcoded parsing for "All on / All off" has been removed.
+    // We now rely entirely on the AI API for turning devices on and off.
 
     // 2. Clear/Delete All Alarms or Schedules
     if (text === 'delete all alarms' || text === 'clear all alarms') {
@@ -692,136 +674,8 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       return;
     }
 
-    // 7. Parse action (activate/deactivate) and target for presets/boards/devices
-    let isDeactivate = false;
-    let isActivate = false;
-    let target = '';
-
-    const deactPrefixes = [
-      'deactivate preset ', 'deactivate ', 'deactive preset ', 'deactive ',
-      'turn off preset ', 'turn off ', 'switch off ', 'put off ',
-      'disable preset ', 'disable ', 'stop '
-    ];
-
-    const actPrefixes = [
-      'activate preset ', 'activate ', 'turn on preset ', 'turn on ',
-      'switch on ', 'put on ', 'enable preset ', 'enable ', 'start '
-    ];
-
-    for (const prefix of deactPrefixes) {
-      if (text.startsWith(prefix)) {
-        isDeactivate = true;
-        target = text.substring(prefix.length).trim();
-        break;
-      }
-    }
-
-    if (!isDeactivate) {
-      for (const prefix of actPrefixes) {
-        if (text.startsWith(prefix)) {
-          isActivate = true;
-          target = text.substring(prefix.length).trim();
-          break;
-        }
-      }
-    }
-
-    const isOn = isActivate ? true : (isDeactivate ? false : null);
-
-    // If an action is specified (either activate or deactivate)
-    if (isOn !== null) {
-      // A. Try preset matching first
-      const matchedPreset = presetsRef.current.find(p =>
-        normalizeText(p.name).includes(target) || target.includes(normalizeText(p.name))
-      );
-
-      if (matchedPreset) {
-        if (applyPreset) {
-          await applyPreset(matchedPreset, isDeactivate);
-        } else {
-          await Promise.all(
-            matchedPreset.actions.map(action => {
-              const targetState = isDeactivate ? !action.is_on : action.is_on;
-              return supabase.from('devices')
-                .update({ is_on: targetState, last_changed: new Date().toISOString() })
-                .eq('id', action.device_id);
-            })
-          );
-        }
-        safeToast(`${isDeactivate ? 'Deactivated' : 'Activated'} preset: ${matchedPreset.name}`);
-        speak(`${isDeactivate ? 'Deactivated' : 'Activated'} preset ${matchedPreset.name}`);
-        return;
-      }
-
-      // Check DB presets if not found locally
-      try {
-        const { data: dbPresets } = await supabase
-          .from('presets')
-          .select('id, name, actions')
-          .ilike('name', `%${target}%`)
-          .limit(1);
-
-        if (dbPresets?.length) {
-          const preset = dbPresets[0];
-          if (applyPreset) {
-            await applyPreset(preset, isDeactivate);
-          } else {
-            await Promise.all(
-              preset.actions.map(action => {
-                const targetState = isDeactivate ? !action.is_on : action.is_on;
-                return supabase.from('devices')
-                  .update({ is_on: targetState, last_changed: new Date().toISOString() })
-                  .eq('id', action.device_id);
-              })
-            );
-          }
-          safeToast(`${isDeactivate ? 'Deactivated' : 'Activated'} preset: ${preset.name}`);
-          speak(`${isDeactivate ? 'Deactivated' : 'Activated'} preset ${preset.name}`);
-          return;
-        }
-      } catch (err) {
-        console.error('Error fetching preset from DB:', err);
-      }
-
-      // B. Try board name matching next
-      let matchedBoard = null;
-      let bestBoardScore = -1;
-      for (const board of commandBoards) {
-        const score = fuzzyScore(target, normalizeText(board.name));
-        if (score > bestBoardScore) { bestBoardScore = score; matchedBoard = board; }
-      }
-
-      if (bestBoardScore >= 0.6 && matchedBoard) {
-        const boardDevices = commandDevices.filter(d => d.board_id === matchedBoard.id);
-        if (!boardDevices.length) {
-          safeToast(`No devices found on board "${matchedBoard.name}"`);
-          speak(`No devices found on board ${matchedBoard.name}`);
-          return;
-        }
-        await Promise.all(boardDevices.map(d =>
-          supabase.from('devices').update({ is_on: isOn, last_changed: new Date().toISOString() }).eq('id', d.id)
-        ));
-        safeToast(`All devices on "${matchedBoard.name}" turned ${isOn ? 'ON' : 'OFF'}`);
-        speak(`All devices on ${matchedBoard.name} turned ${isOn ? 'on' : 'off'}`);
-        return;
-      }
-
-      // C. Try device name matching last
-      const matchedDevice = findBestDevice(target, commandDevices);
-      if (matchedDevice) {
-        await supabase.from('devices')
-          .update({ is_on: isOn, last_changed: new Date().toISOString() })
-          .eq('id', matchedDevice.id);
-        safeToast(`${matchedDevice.name} turned ${isOn ? 'ON' : 'OFF'}`);
-        speak(`${matchedDevice.name} turned ${isOn ? 'on' : 'off'}`);
-        return;
-      }
-
-      // Not found
-      safeToast(`Could not find preset, board, or device matching "${target}"`);
-      speak(`Could not find any match for ${target}`);
-      return;
-    }
+    // Note: Local hardcoded parsing for turning specific devices/boards/presets on and off has been removed.
+    // We now rely entirely on the AI API for these actions.
 
     // 8. Fallback: If no activation/deactivation prefix, check direct preset name match (assumes activation)
     const matchedPresetDirect = presetsRef.current.find(p => 
@@ -892,13 +746,20 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     }
   };
 
-  const toggleListening = () => {
+  const toggleListening = async () => {
     if (listening) {
       if (recognitionRef.current) {
         try { recognitionRef.current.abort(); } catch (e) { }
       }
       setListening(false);
+      recognitionRef.current = null;
     } else {
+      const hasIntroduced = localStorage.getItem('auraIntroPlayed');
+      if (!hasIntroduced) {
+        localStorage.setItem('auraIntroPlayed', 'true');
+        onToast('Aura is speaking...');
+        await speak("Hello, I am Aura, your Electric Warriors AI assistant. How can I help you?");
+      }
       startListening();
     }
   };
