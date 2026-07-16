@@ -82,66 +82,11 @@ export default function AnalyticsPage() {
           .maybeSingle()
       ]);
 
-      let finalDaily = dailyAnalyticsRes.data || [];
-      let finalWeekly = weeklyAnalyticsRes.data || [];
-      let finalLogs = logsRes.data || [];
-
-      // Inject dummy data for localhost testing ONLY for the specified account
-      if (typeof window !== 'undefined' && window.location.hostname === 'localhost' && user?.email === 'ramasaiahemanth@gmail.com') {
-        const today = new Date();
-        finalDaily = Array.from({ length: 30 }, (_, i) => {
-          const d = new Date(today);
-          d.setDate(d.getDate() - (29 - i));
-          return {
-            date: d.toISOString().split('T')[0],
-            total_kwh: Number((Math.random() * 5 + 1).toFixed(4)),
-            total_cost: Number((Math.random() * 20 + 5).toFixed(2)),
-            avg_on_time: Number((Math.random() * 4 + 1).toFixed(2)),
-            usage_duration: Math.floor(Math.random() * 36000 + 3600),
-            toggle_counts: Math.floor(Math.random() * 50) + 10,
-            peak_hours: { "18": Math.floor(Math.random() * 10), "19": Math.floor(Math.random() * 15), "20": Math.floor(Math.random() * 12) },
-            error_rates: Number((Math.random() * 2).toFixed(2))
-          };
-        });
-
-        finalWeekly = [
-          {
-            week_start: new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0],
-            week_end: new Date().toISOString().split('T')[0],
-            total_kwh: 25.4,
-            total_cost: 102.5,
-            usage_duration: 150000,
-            toggle_counts: 320,
-            peak_hours: { "18": 30, "19": 45, "20": 50 },
-            error_rates: 1.5
-          },
-          {
-            week_start: new Date(Date.now() - 14 * 86400000).toISOString().split('T')[0],
-            week_end: new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0],
-            total_kwh: 22.1,
-            total_cost: 90.2,
-            usage_duration: 135000,
-            toggle_counts: 290,
-            peak_hours: { "18": 25, "19": 40, "20": 42 },
-            error_rates: 2.1
-          }
-        ];
-
-        if (devicesRes.data && devicesRes.data.length > 0) {
-          finalLogs = Array.from({ length: 40 }, (_, i) => ({
-            id: `dummy-log-${i}`,
-            device_id: devicesRes.data[i % devicesRes.data.length].id,
-            action: i % 2 === 0 ? 'ON' : 'OFF',
-            created_at: new Date(Date.now() - Math.random() * 86400000).toISOString()
-          })).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-        }
-      }
-
       if (devicesRes.data) setDevices(devicesRes.data);
       if (boardsRes.data) setBoards(boardsRes.data);
-      setLogs(finalLogs);
-      setDailyAnalytics(finalDaily);
-      setWeeklyAnalytics(finalWeekly);
+      if (logsRes.data) setLogs(logsRes.data);
+      if (dailyAnalyticsRes.data) setDailyAnalytics(dailyAnalyticsRes.data);
+      if (weeklyAnalyticsRes.data) setWeeklyAnalytics(weeklyAnalyticsRes.data);
       if (settingsRes.data) setUserSettings({ tariff_per_kwh: settingsRes.data.tariff_per_kwh, voltage: settingsRes.data.voltage, currency: settingsRes.data.currency });
     } catch (err) {
       console.error('Failed to load analytics data', err);
@@ -543,7 +488,7 @@ export default function AnalyticsPage() {
   }
 
   // Calculate actual metrics using device runtime statistics
-  let deviceStats = devices.map(device => {
+  const deviceStats = devices.map(device => {
     const runHours = getDeviceRunHoursToday(device, logs);
     const wattage = getDeviceWattage(device.name);
     const kwh = (wattage * runHours) / 1000;
@@ -555,15 +500,15 @@ export default function AnalyticsPage() {
     };
   });
 
-  let totalKwhToday = deviceStats.reduce((sum, d) => sum + d.kwh, 0);
-  let estimatedCostToday = totalKwhToday * (userSettings.tariff_per_kwh || 8.00); // user-configured tariff
+  const totalKwhToday = deviceStats.reduce((sum, d) => sum + d.kwh, 0);
+  const estimatedCostToday = totalKwhToday * (userSettings.tariff_per_kwh || 8.00); // user-configured tariff
 
   // Current live load (relay ON)
   const activeDevices = devices.filter(d => d.is_on);
-  let currentDraw = activeDevices.reduce((sum, d) => sum + getDeviceWattage(d.name), 0);
+  const currentDraw = activeDevices.reduce((sum, d) => sum + getDeviceWattage(d.name), 0);
 
   // Generate hourly consumption data binned exactly from log timestamps
-  let hourlyData = Array.from({ length: 24 }).map((_, i) => {
+  const hourlyData = Array.from({ length: 24 }).map((_, i) => {
     const targetHourDate = new Date();
     targetHourDate.setHours(new Date().getHours() - (23 - i), 0, 0, 0);
     const nextHourDate = new Date(targetHourDate.getTime() + 60 * 60 * 1000);
@@ -582,7 +527,7 @@ export default function AnalyticsPage() {
   });
 
   // Calculate board usage based on actual runtime
-  let boardData = boards.map(board => {
+  const boardData = boards.map(board => {
     const boardDevices = deviceStats.filter(d => d.board_id === board.id);
     const usage = boardDevices.reduce((sum, d) => sum + d.kwh, 0);
     return {
@@ -592,43 +537,13 @@ export default function AnalyticsPage() {
   });
 
   // Filter device shares to only display running loads
-  let pieData = deviceStats.map(d => {
+  const pieData = deviceStats.map(d => {
     return {
       id: d.id,
       name: d.name,
       value: parseFloat(d.kwh.toFixed(4))
     };
-  });
-
-  // Inject hardcoded dummy data for localhost to populate all charts
-  if (typeof window !== 'undefined' && window.location.hostname === 'localhost' && user?.email === 'ramasaiahemanth@gmail.com') {
-    deviceStats = [
-      { id: 'd1', name: 'Living Room AC', runHours: 4.5, wattage: 1500, kwh: 6.75 },
-      { id: 'd2', name: 'Kitchen Lights', runHours: 8.2, wattage: 40, kwh: 0.328 },
-      { id: 'd3', name: 'Water Heater', runHours: 2.1, wattage: 2000, kwh: 4.2 },
-      { id: 'd4', name: 'TV', runHours: 3.8, wattage: 150, kwh: 0.57 },
-      { id: 'd5', name: 'Bedroom Fan', runHours: 12.5, wattage: 60, kwh: 0.75 }
-    ];
-    totalKwhToday = 12.598;
-    estimatedCostToday = totalKwhToday * (userSettings.tariff_per_kwh || 8.00);
-    currentDraw = 1560; // Just a dummy value
-
-    hourlyData = Array.from({ length: 24 }).map((_, i) => ({
-      time: `${i.toString().padStart(2, '0')}:00`,
-      Usage: [0,0,0,0,0,0, 0.5,1.2,0.8,0.4, 0.3,0.3, 1.5,1.2, 0.8,0.9, 1.1, 2.5,3.2,4.1, 3.5, 2.0, 1.0, 0.5][i]
-    }));
-
-    boardData = [
-      { name: 'Living Room Board', Usage: 7.32 },
-      { name: 'Kitchen Board', Usage: 0.328 },
-      { name: 'Master Bedroom', Usage: 4.95 }
-    ];
-
-    pieData = deviceStats.map(d => ({ id: d.id, name: d.name, value: d.kwh }));
-  }
-
-  // Ensure pieData only has positive values
-  pieData = pieData.filter(item => item.value > 0);
+  }).filter(item => item.value > 0);
 
   // ── Shared chart style constants ───────────────────────────────────────────
   const CHART_AXIS_STROKE   = '#6b7280';          // gray-500 — visible on dark bg
