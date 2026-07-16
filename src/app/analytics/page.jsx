@@ -82,11 +82,66 @@ export default function AnalyticsPage() {
           .maybeSingle()
       ]);
 
+      let finalDaily = dailyAnalyticsRes.data || [];
+      let finalWeekly = weeklyAnalyticsRes.data || [];
+      let finalLogs = logsRes.data || [];
+
+      // Inject dummy data for localhost testing ONLY for the specified account
+      if (typeof window !== 'undefined' && window.location.hostname === 'localhost' && user?.email === 'ramasaiahemanth@gmail.com') {
+        const today = new Date();
+        finalDaily = Array.from({ length: 30 }, (_, i) => {
+          const d = new Date(today);
+          d.setDate(d.getDate() - (29 - i));
+          return {
+            date: d.toISOString().split('T')[0],
+            total_kwh: Number((Math.random() * 5 + 1).toFixed(4)),
+            total_cost: Number((Math.random() * 20 + 5).toFixed(2)),
+            avg_on_time: Number((Math.random() * 4 + 1).toFixed(2)),
+            usage_duration: Math.floor(Math.random() * 36000 + 3600),
+            toggle_counts: Math.floor(Math.random() * 50) + 10,
+            peak_hours: { "18": Math.floor(Math.random() * 10), "19": Math.floor(Math.random() * 15), "20": Math.floor(Math.random() * 12) },
+            error_rates: Number((Math.random() * 2).toFixed(2))
+          };
+        });
+
+        finalWeekly = [
+          {
+            week_start: new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0],
+            week_end: new Date().toISOString().split('T')[0],
+            total_kwh: 25.4,
+            total_cost: 102.5,
+            usage_duration: 150000,
+            toggle_counts: 320,
+            peak_hours: { "18": 30, "19": 45, "20": 50 },
+            error_rates: 1.5
+          },
+          {
+            week_start: new Date(Date.now() - 14 * 86400000).toISOString().split('T')[0],
+            week_end: new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0],
+            total_kwh: 22.1,
+            total_cost: 90.2,
+            usage_duration: 135000,
+            toggle_counts: 290,
+            peak_hours: { "18": 25, "19": 40, "20": 42 },
+            error_rates: 2.1
+          }
+        ];
+
+        if (devicesRes.data && devicesRes.data.length > 0) {
+          finalLogs = Array.from({ length: 40 }, (_, i) => ({
+            id: `dummy-log-${i}`,
+            device_id: devicesRes.data[i % devicesRes.data.length].id,
+            action: i % 2 === 0 ? 'ON' : 'OFF',
+            created_at: new Date(Date.now() - Math.random() * 86400000).toISOString()
+          })).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        }
+      }
+
       if (devicesRes.data) setDevices(devicesRes.data);
       if (boardsRes.data) setBoards(boardsRes.data);
-      if (logsRes.data) setLogs(logsRes.data);
-      if (dailyAnalyticsRes.data) setDailyAnalytics(dailyAnalyticsRes.data);
-      if (weeklyAnalyticsRes.data) setWeeklyAnalytics(weeklyAnalyticsRes.data);
+      setLogs(finalLogs);
+      setDailyAnalytics(finalDaily);
+      setWeeklyAnalytics(finalWeekly);
       if (settingsRes.data) setUserSettings({ tariff_per_kwh: settingsRes.data.tariff_per_kwh, voltage: settingsRes.data.voltage, currency: settingsRes.data.currency });
     } catch (err) {
       console.error('Failed to load analytics data', err);
