@@ -1,36 +1,107 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Smart Home Intelligence & Analytics Platform
 
-## Getting Started
+[![Next.js](https://img.shields.io/badge/Next.js-16.2.9-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
+[![Supabase](https://img.shields.io/badge/Supabase-Database-emerald?style=for-the-badge&logo=supabase)](https://supabase.com/)
+[![ESP32](https://img.shields.io/badge/ESP32-Firmware-red?style=for-the-badge&logo=espressif)](https://www.espressif.com/)
+[![PWA](https://img.shields.io/badge/PWA-Ready-gradient?style=for-the-badge&logo=pwa)](https://web.dev/explore/progressive-web-apps)
 
-First, run the development server:
+A professional, distributed, offline-resilient, and analytics-driven Smart Home automation system. This platform transforms simple device on/off switches into a **Home Intelligence Platform** suitable for homes, warehouses, and businesses.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+---
+
+## 🛠️ The 6-Month Hardware Journey
+
+This project evolved over 6 months through rigorous prototyping, solving real-world physical constraints:
+
+### Phase 1: The Breadboard Starter
+* **Core:** Arduino Nano + HC-05 Bluetooth module + 4-Relay board.
+* **Limitations:** Very short range, frequent disconnections every 30 minutes, parallel wiring (if the manual wall switch was ON, the relay was useless).
+
+### Phase 2: WiFi Upgrade
+* **Core:** Upgraded to ESP32 for WiFi range.
+* **Limitations:** Inherited parallel wiring overrides. Lack of AC feedback meant no real-time status sync or energy dashboard.
+
+### Phase 3: Hardware Bidirectional Switching (On Paper)
+* **Core:** Designed XOR bidirectional switching, AC mains feedback current detectors, and shift registers.
+* **Limitations:** Centralized hub architecture resulted in excessive wiring length, high costs, and messy wall modifications.
+
+### Phase 4: Distributed Architecture & Fail-Safe Redundancy (Current Production PCB)
+* **Core:** Switched to a **Distributed Node Architecture** where each switchboard has its own ESP32 talking over local WiFi.
+* **Pin Optimization:** Integrated **74HC165** shift registers for live AC current feedback and **74HC595** shift registers for relay controls.
+* **Hardware Independence:** Designed to work with any generic ESP32 version.
+* **Hardware Redundancy & Manual Fail-Safe:** If an ESP32 or shift register fails, the physical switches fallback to standard electrical operation, ensuring the home never stops functioning.
+* **Cost Efficiency:** Slashed manufacturing costs from 1,200 INR to **~600 INR** for a 4-channel board (including PCB, components, feedback circuit, and sensor headers).
+
+---
+
+## ⚡ Smart Hardware & Firmware Optimizations
+
+1. **Leader-Follower Network Protocol:** To prevent overloading the Supabase database with parallel connections from multiple switchboards, a master-node protocol was implemented:
+   * **1 Leader Node:** Solely communicates with the database via WebSockets.
+   * **Follower Nodes:** Communicate directly with the Leader Node over a local network.
+   * **Leader Election:** If the active Leader Node goes offline, followers automatically hold an election and assign a new leader.
+2. **Local Alarms & Timers:** When alarms/schedules are configured, they are synced to the ESP32's local EEPROM. The board runs its own hardware timers, ensuring scheduled events trigger even if the internet is disconnected or the website is closed.
+3. **Modular Expansion Headers:** Includes standard plug-and-play headers for optional rotary encoders, OLED screens, light detectors, motion sensors, and millimeter-wave human presence modules.
+
+---
+
+## 📱 Software Features
+
+* **Multilingual AI Assistant (Aura):** Built-in text-to-speech voice assistant supporting **English, Telugu (తెలుగు), and Hindi (हिन्दी)**. Supports website navigation guides, smart control commands, and terms & conditions summaries while ignoring unrelated prompts to conserve AI credits.
+* **Data Log Compaction (Optimized DB Storage):** Uses a two-tier database strategy to maintain high performance over years:
+  * **Daily Logs Table:** Tracks raw status changes (cleared automatically every 7 days).
+  * **Daily Summary Table:** A background function summarizes usage patterns into exactly 1 consolidated row per user per day (resulting in exactly 365 rows per user per year).
+* **Real-time Synchronization:** Built-in Supabase PostgreSQL Realtime channels sync states across all connected client devices in milliseconds.
+* **PWA Capability:** Fully installable progressive web application with responsive UI styled for mobile and smartwatch layouts.
+* **Smart Analytics & Predictions:** Heatmaps and usage analytics suggest custom schedules based on historic user behavior.
+
+---
+
+## 📂 Project Structure
+
+```
+finalzzz_antigravity/
+├── src/
+│   ├── app/            # Next.js App Router (alarms, analytics, logs, presets, schedules, terms, faq)
+│   ├── components/     # UI Components (Dashboard, 3D PCB Viewer, Aura Voice Control, Navbar)
+│   ├── hooks/          # useDashboardData state controller
+│   ├── lib/            # Supabase database client
+│   └── utils/          # Voice synthesis utilities
+├── public/
+│   ├── models/         # 3D assets (ESP32 Wroom & custom PCB models)
+│   ├── manifest.json   # PWA manifest configurations
+│   └── sw.js           # PWA service worker
+├── esp32.cpp           # C++ Firmware source code for the ESP32 boards
+├── supabase_setup.sql  # Database schema setup, functions, and real-time rules
+├── unused_files/       # [Git Ignored] Archived code snippets and prototype reference assets
+└── package.json        # Project dependencies & configurations
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+## ⚙️ Getting Started
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 1. Database Configuration
+Execute the commands in [supabase_setup.sql](file:///c:/Users/Hemanth%20Atthuluri/OneDrive/Desktop/finalzzz_antigravity/supabase_setup.sql) inside your Supabase SQL editor. This sets up the authentication tables, devices, presets, alarms, schedules, and active logs.
 
-## Learn More
+### 2. Environment Variables Setup
+Create a `.env.local` file at the root of the project with:
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+OPENROUTER_API_KEY=your_openrouter_api_key_for_aura_ai
+OPENROUTER_MODEL=google/gemini-2.5-flash
+```
 
-To learn more about Next.js, take a look at the following resources:
+### 3. Install Dependencies & Run
+```bash
+npm install
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) to view your home dashboard.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 💡 Guidelines & Hardware Disclaimer
+Connecting custom microcontrollers to mains AC voltages carries inherent risks. By using this software with custom-wired ESP32 boards, you accept full liability for your installation. Ensure physical breaker limits match your relay ratings (XOR circuits).
+For questions regarding overrides or bulb failure detection, check the in-app [FAQ Page](file:///c:/Users/Hemanth%20Atthuluri/OneDrive/Desktop/finalzzz_antigravity/src/app/faq/page.jsx).
