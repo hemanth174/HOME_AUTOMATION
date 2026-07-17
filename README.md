@@ -78,27 +78,8 @@ finalzzz_antigravity/
 ```
 
 ---
-
-## ⚙️ Getting Started
-
-### 1. Database Configuration
-Execute the commands in [supabase_setup.sql](file:///c:/Users/Hemanth%20Atthuluri/OneDrive/Desktop/finalzzz_antigravity/supabase_setup.sql) inside your Supabase SQL editor. This sets up the authentication tables, devices, presets, alarms, schedules, and active logs.
-
-### 2. Environment Variables Setup
-Create a `.env.local` file at the root of the project with:
-```env
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-OPENROUTER_API_KEY=your_openrouter_api_key_for_aura_ai
-OPENROUTER_MODEL=google/gemini-2.5-flash
-```
-
-### 3. Install Dependencies & Run
-```bash
-npm install
-npm run dev
-```
-Open [http://localhost:3000](http://localhost:3000) to view your home dashboard.
+Production Link:-
+https://home-automation-mauve-one.vercel.app/
 
 ---
 
