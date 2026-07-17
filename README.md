@@ -47,7 +47,7 @@ This project evolved over 6 months through rigorous prototyping, solving real-wo
 
 ## Software Features
 
-* **Multilingual AI Assistant (Aura):** Built-in text-to-speech voice assistant supporting **English, Telugu (తెలుగు), and Hindi (हिन्दी)**. Supports website navigation guides, smart control commands, and terms & conditions summaries while ignoring unrelated prompts to conserve AI credits.
+* **Multilingual AI Assistant (Aura):** Built-in text-to-speech voice assistant supporting **English**. Supports website navigation guides, smart control commands, and terms & conditions summaries while ignoring unrelated prompts to conserve AI credits.
 * **Data Log Compaction (Optimized DB Storage):** Uses a two-tier database strategy to maintain high performance over years:
   * **Daily Logs Table:** Tracks raw status changes (cleared automatically every 7 days).
   * **Daily Summary Table:** A background function summarizes usage patterns into exactly 1 consolidated row per user per day (resulting in exactly 365 rows per user per year).
