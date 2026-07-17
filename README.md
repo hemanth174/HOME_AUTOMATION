@@ -9,7 +9,7 @@ A professional, distributed, offline-resilient, and analytics-driven Smart Home 
 
 ---
 
-## 🛠️ The 6-Month Hardware Journey
+## The 6-Month Hardware Journey
 
 This project evolved over 6 months through rigorous prototyping, solving real-world physical constraints:
 
@@ -34,7 +34,7 @@ This project evolved over 6 months through rigorous prototyping, solving real-wo
 
 ---
 
-## ⚡ Smart Hardware & Firmware Optimizations
+## Smart Hardware & Firmware Optimizations
 
 1. **Leader-Follower Network Protocol:** To prevent overloading the Supabase database with parallel connections from multiple switchboards, a master-node protocol was implemented:
    * **1 Leader Node:** Solely communicates with the database via WebSockets.
@@ -45,7 +45,7 @@ This project evolved over 6 months through rigorous prototyping, solving real-wo
 
 ---
 
-## 📱 Software Features
+## Software Features
 
 * **Multilingual AI Assistant (Aura):** Built-in text-to-speech voice assistant supporting **English, Telugu (తెలుగు), and Hindi (हिन्दी)**. Supports website navigation guides, smart control commands, and terms & conditions summaries while ignoring unrelated prompts to conserve AI credits.
 * **Data Log Compaction (Optimized DB Storage):** Uses a two-tier database strategy to maintain high performance over years:
@@ -57,7 +57,7 @@ This project evolved over 6 months through rigorous prototyping, solving real-wo
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 finalzzz_antigravity/
@@ -82,7 +82,3 @@ Production Link:-
 https://home-automation-mauve-one.vercel.app/
 
 ---
-
-## 💡 Guidelines & Hardware Disclaimer
-Connecting custom microcontrollers to mains AC voltages carries inherent risks. By using this software with custom-wired ESP32 boards, you accept full liability for your installation. Ensure physical breaker limits match your relay ratings (XOR circuits).
-For questions regarding overrides or bulb failure detection, check the in-app [FAQ Page](file:///c:/Users/Hemanth%20Atthuluri/OneDrive/Desktop/finalzzz_antigravity/src/app/faq/page.jsx).
