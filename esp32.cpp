@@ -22,8 +22,8 @@ const char* ssid     = "NxtWave_Te@m";
 const char* password = "Nxtwave@KKH2026";
 
 const char* BOARD_IDENTIFIER = "kinda_meeda";
-const char* SUPABASE_BASE = "https://ojuvphlkzbxwjhqzexbt.supabase.co/rest/v1";
-const char* SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qdXZwaGxremJ4d2pocXpleGJ0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTg2Nzk2MiwiZXhwIjoyMDk3NDQzOTYyfQ.SN6g_bR4bpVEIGdIW-GLPTHRlqZBHF5YBUKjHDMWjLU"; 
+const char* SUPABASE_BASE = "you_api_key_here";
+const char* SUPABASE_SERVICE_KEY = "you_key_here"; 
 
 // ============================================================
 //  VARIABLES & STATE (Converted to Arrays for 4 Devices)
