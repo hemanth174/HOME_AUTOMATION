@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Mic, X, LayoutGrid, List } from 'lucide-react';
 import { speak } from '@/utils/voice';
@@ -89,6 +90,8 @@ const parseTime = (timeStr) => {
 
 // ---------------------------------------------------------------------------
 export default function VoiceControl({ devices: propDevices, boards: propBoards, presets: propPresets, applyPreset, onToast }) {
+  const router = useRouter();
+  const [selectedLang, setSelectedLang] = useState('en-US');
   const [listening, setListening] = useState(false);
 
   // Mutable refs so WS callbacks always see latest data without re-subscribing
@@ -186,16 +189,22 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
 
   // Execute structured action returned by the LLM
   const executeLLMAction = useCallback(async (result, safeToast) => {
-    const { actionType, deviceId, isOn, deviceName, presetId, presetName, triggerAt, time, days } = result;
+    const { actionType, deviceId, isOn, deviceName, presetId, presetName, triggerAt, time, days, message, language } = result;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+
+    const provideFeedback = (fallbackMsg) => {
+      const msg = message || fallbackMsg;
+      safeToast(msg);
+      speak(msg, language || 'en-US');
+    };
 
     switch (actionType) {
       case 'TOGGLE_DEVICE': {
         await supabase.from('devices')
           .update({ is_on: isOn, last_changed: new Date().toISOString() })
           .eq('id', deviceId);
-        
+
         await supabase.from('activity_logs').insert({
           user_id: user.id,
           device_id: deviceId,
@@ -203,10 +212,8 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           action: isOn ? 'turned ON' : 'turned OFF',
           triggered_by: 'Voice Command (AI)'
         });
-        
-        const feedbackMsg = `${deviceName} turned ${isOn ? 'on' : 'off'}`;
-        safeToast(feedbackMsg);
-        speak(feedbackMsg);
+
+        provideFeedback(`${deviceName} turned ${isOn ? 'on' : 'off'}`);
         break;
       }
 
@@ -217,7 +224,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           await supabase.from('devices')
             .update({ is_on: isOn, last_changed: new Date().toISOString() })
             .eq('user_id', user.id);
-          
+
           await Promise.all(devicesToUpdate.map(async (d) => {
             await supabase.from('activity_logs').insert({
               user_id: user.id,
@@ -228,9 +235,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
             });
           }));
         }
-        const feedbackMsg = `All devices turned ${isOn ? 'on' : 'off'}`;
-        safeToast(feedbackMsg);
-        speak(feedbackMsg);
+        provideFeedback(`All devices turned ${isOn ? 'on' : 'off'}`);
         break;
       }
 
@@ -238,9 +243,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         const preset = presetsRef.current.find(p => p.id === presetId);
         if (preset) {
           await applyPreset(preset, result.deactivate || false);
-          const feedbackMsg = `${result.deactivate ? 'Deactivated' : 'Activated'} preset: ${presetName}`;
-          safeToast(feedbackMsg);
-          speak(feedbackMsg);
+          provideFeedback(`${result.deactivate ? 'Deactivated' : 'Activated'} preset: ${presetName}`);
         }
         break;
       }
@@ -252,16 +255,14 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           // ── Guard 1: Reject past timestamps immediately ──────────────────
           const triggerDate = new Date(triggerAt);
           if (isNaN(triggerDate.getTime()) || triggerDate.getTime() <= Date.now()) {
-            const pastMsg = `Cannot set an alarm in the past. Please provide a future date and time.`;
-            safeToast(`⚠ ${pastMsg}`);
-            speak(pastMsg);
+            provideFeedback(`Cannot set an alarm in the past. Please provide a future date and time.`);
             break;
           }
 
           // ── Guard 2: Deduplication — unfired alarm within 1-minute window ─
-          const triggerMs   = triggerDate.getTime();
-          const windowMs    = 60 * 1000;
-          const actionBool  = isOn === true || isOn === 'true';
+          const triggerMs = triggerDate.getTime();
+          const windowMs = 60 * 1000;
+          const actionBool = isOn === true || isOn === 'true';
           const { data: existingAlarms } = await supabase
             .from('alarms')
             .select('id, trigger_at, action')
@@ -277,9 +278,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           if (duplicate) {
             const displayTime = new Date(duplicate.trigger_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
             const displayDate = new Date(duplicate.trigger_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-            const msg = `${device.name} already has an alarm at ${displayTime} on ${displayDate}. Duplicate not created.`;
-            safeToast(msg);
-            speak(`Duplicate alarm skipped for ${device.name}`);
+            provideFeedback(`${device.name} already has an alarm at ${displayTime} on ${displayDate}. Duplicate not created.`);
           } else {
             const { error } = await supabase.from('alarms').insert({
               user_id: user.id,
@@ -289,15 +288,11 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
               fired: false
             });
             if (error) {
-              const msg = `Could not create alarm for ${device.name}. Please try again.`;
-              safeToast(`⚠ ${msg}`);
-              speak(msg);
+              provideFeedback(`Could not create alarm for ${device.name}. Please try again.`);
             } else {
               const displayTime = triggerDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
               const displayDate = triggerDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-              const feedbackMsg = `✅ Alarm set for ${device.name} to turn ${actionBool ? 'on' : 'off'} at ${displayTime} on ${displayDate}`;
-              safeToast(feedbackMsg);
-              speak(`Alarm set for ${device.name} at ${displayTime}`);
+              provideFeedback(`✅ Alarm set for ${device.name} to turn ${actionBool ? 'on' : 'off'} at ${displayTime} on ${displayDate}`);
             }
           }
         }
@@ -309,7 +304,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         const device = latestDevices.find(d => d.id === deviceId);
         if (device) {
           // Normalise: take first 5 chars of time (HH:MM) to handle DB storing HH:MM:SS
-          const normTime   = (time || '').trim().slice(0, 5);
+          const normTime = (time || '').trim().slice(0, 5);
           const actionBool = isOn === true || isOn === 'true';
 
           // Deduplication: same device + same HH:MM + same action — filter by user_id too
@@ -324,9 +319,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           );
 
           if (duplicate) {
-            const msg = `${device.name} already has a schedule to turn ${actionBool ? 'on' : 'off'} at ${normTime}. Duplicate not created.`;
-            safeToast(msg);
-            speak(`Duplicate schedule skipped for ${device.name}`);
+            provideFeedback(`${device.name} already has a schedule to turn ${actionBool ? 'on' : 'off'} at ${normTime}. Duplicate not created.`);
           } else {
             const { error } = await supabase.from('schedules').insert({
               user_id: user.id,
@@ -337,17 +330,13 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
               enabled: true
             });
             if (error) {
-              const msg = `Could not create schedule for ${device.name}. Please try again.`;
-              safeToast(`⚠ ${msg}`);
-              speak(msg);
+              provideFeedback(`Could not create schedule for ${device.name}. Please try again.`);
             } else {
               const [hh, mm] = normTime.split(':').map(Number);
               const h12 = hh % 12 || 12;
               const ampm = hh >= 12 ? 'PM' : 'AM';
               const timeDisplay = `${h12}:${String(mm).padStart(2, '0')} ${ampm}`;
-              const feedbackMsg = `✅ Schedule created for ${device.name} at ${timeDisplay}`;
-              safeToast(feedbackMsg);
-              speak(`Schedule created for ${device.name} at ${timeDisplay}`);
+              provideFeedback(`✅ Schedule created for ${device.name} at ${timeDisplay}`);
             }
           }
         }
@@ -356,24 +345,28 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
 
       case 'DELETE_ALL_ALARMS': {
         await supabase.from('alarms').delete().eq('user_id', user.id);
-        const feedbackMsg = 'All alarms cleared';
-        safeToast(feedbackMsg);
-        speak(feedbackMsg);
+        provideFeedback('All alarms cleared');
         break;
       }
 
       case 'DELETE_ALL_SCHEDULES': {
         await supabase.from('schedules').delete().eq('user_id', user.id);
-        const feedbackMsg = 'All schedules cleared';
-        safeToast(feedbackMsg);
-        speak(feedbackMsg);
+        provideFeedback('All schedules cleared');
+        break;
+      }
+
+      case 'GUIDANCE': {
+        provideFeedback('Guiding user');
+        if (result.redirectTo) {
+          router.push(result.redirectTo);
+        }
         break;
       }
 
       default:
         break;
     }
-  }, [getLatestDevices, applyPreset]);
+  }, [getLatestDevices, applyPreset, router]);
 
   // Main command processor
   const processCommand = useCallback(async (transcript) => {
@@ -412,7 +405,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           console.log('OpenRouter returned UNKNOWN action:', result.message);
           const clarifyMsg = result.message || 'Could not understand voice command.';
           safeToast(clarifyMsg);
-          speak(clarifyMsg);
+          speak(clarifyMsg, result.language || 'en-US');
           return;
         }
       } else {
@@ -678,7 +671,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     // We now rely entirely on the AI API for these actions.
 
     // 8. Fallback: If no activation/deactivation prefix, check direct preset name match (assumes activation)
-    const matchedPresetDirect = presetsRef.current.find(p => 
+    const matchedPresetDirect = presetsRef.current.find(p =>
       normalizeText(p.name) === text || fuzzyScore(text, normalizeText(p.name)) >= 0.8
     );
     if (matchedPresetDirect) {
@@ -720,7 +713,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
 
     recognition.continuous = false;
     recognition.interimResults = false;
-    recognition.lang = 'en-US';
+    recognition.lang = selectedLang;
     recognition.onstart = () => setListening(true);
     recognition.onend = () => {
       setListening(false);
@@ -746,6 +739,69 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     }
   };
 
+  const startSarvamListening = async () => {
+
+    try {
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true
+      });
+
+      setListening(true);
+
+      const recorder = new MediaRecorder(stream);
+
+      const chunks = [];
+
+      recorder.ondataavailable = (e) => {
+
+        chunks.push(e.data);
+
+      };
+
+      recorder.onstop = async () => {
+
+        setListening(false);
+
+        stream.getTracks().forEach(track => track.stop());
+
+        const audioBlob = new Blob(chunks, {
+          type: "audio/webm"
+        });
+        const formData = new FormData();
+
+        formData.append("audio", audioBlob, "voice.webm");
+
+        const response = await fetch("/api/sarvam/stt", {
+          method: "POST",
+          body: formData
+        });
+
+        const data = await response.json();
+
+        await processCommand(data.transcript);
+
+      };
+
+      recorder.start();
+
+      setTimeout(() => {
+
+        recorder.stop();
+
+      }, 5000);
+
+    } catch (err) {
+
+      console.error(err);
+
+      setListening(false);
+
+      onToast("Microphone permission denied");
+
+    }
+
+  }
   const toggleListening = async () => {
     if (listening) {
       if (recognitionRef.current) {
@@ -757,23 +813,62 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       const hasIntroduced = localStorage.getItem('auraIntroPlayed');
       if (!hasIntroduced) {
         localStorage.setItem('auraIntroPlayed', 'true');
-        onToast('Aura is speaking...');
-        await speak("Hello, I am Aura, your Electric Warriors AI assistant. How can I help you?");
+        onToast(selectedLang === 'te-IN' ? 'ఆరా మాట్లాడుతోంది...' : selectedLang === 'hi-IN' ? 'ऑरा बोल रही है...' : 'Aura is speaking...');
+        let introText = "Hello, I am Aura, your Electric Warriors AI assistant. How can I help you?";
+        if (selectedLang === 'te-IN') introText = "నమస్కారం, నేను ఆరా, మీ సహాయకురాలిని. మీకు ఎలా సహాయపడగలను?";
+        else if (selectedLang === 'hi-IN') introText = "नमस्ते, मैं ऑरा हूँ, आपकी स्मार्ट होम सहायक। मैं आपकी क्या मदद कर सकती हूँ?";
+        await speak(introText, selectedLang);
+      } if (selectedLang === "te-IN") {
+
+        await startSarvamListening();
+
+      } else {
+
+        startListening();
+
       }
-      startListening();
+
     }
   };
 
   return (
     <>
+      {/* Language Selector Pill */}
+      <div className="fixed bottom-[92px] right-7 max-md:bottom-[148px] max-md:right-6 bg-card/85 backdrop-blur-md px-2 py-1 rounded-full border border-border shadow-[0_4px_16px_rgba(0,0,0,0.3)] z-[200] flex gap-1 items-center select-none font-bold text-[10px] tracking-wider transition-all duration-300">
+        <button
+          onClick={() => setSelectedLang('en-US')}
+          className={`px-2 py-0.5 rounded-full border-none cursor-pointer transition-colors ${selectedLang === 'en-US' ? 'bg-accent text-black dark:text-white' : 'dark:text-white hover:text-text bg-transparent'}`}
+        >
+          EN
+        </button>
+        <div className="w-[1px] h-3 bg-border" />
+        <button
+          onClick={() => setSelectedLang('te-IN')}
+          className={`px-2 py-0.5 rounded-full border-none cursor-pointer transition-colors ${selectedLang === 'te-IN' ? 'bg-accent text-accent-fg' : 'text-text-muted hover:text-text bg-transparent'}`}
+        >
+          తె
+        </button>
+        <div className="w-[1px] h-3 bg-border" />
+        <button
+          onClick={() => setSelectedLang('hi-IN')}
+          className={`px-2 py-0.5 rounded-full border-none cursor-pointer transition-colors ${selectedLang === 'hi-IN' ? 'bg-accent text-accent-fg' : 'text-text-muted hover:text-text bg-transparent'}`}
+        >
+          हि
+        </button>
+      </div>
+
       {listening && (
         <div className="fixed bottom-36 max-md:bottom-36 right-7 bg-card/90 backdrop-blur-md px-5 py-3.5 rounded-xl border border-border shadow-[0_8px_32px_rgba(0,0,0,0.5)] shadow-gold-glow z-[200] max-w-[300px] animate-scale-in flex flex-col gap-1.5 select-none">
           <strong className="text-sm text-text font-bold flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            Listening...
+            {selectedLang === 'te-IN' ? 'వింటున్నాను...' : selectedLang === 'hi-IN' ? 'सुन रहा हूँ...' : 'Listening...'}
           </strong>
           <span className="text-[11px] leading-snug text-text-muted">
-            Try: "turn on fan 2" · "turn off living room" · "activate party mode" · "all off"
+            {selectedLang === 'te-IN'
+              ? 'ప్రయత్నించండి: "ఫ్యాన్ 2 ఆన్ చేయి" · "రూమ్ ఆఫ్ చేయి" · "సహాయం చేయి"'
+              : selectedLang === 'hi-IN'
+                ? 'कोशिश करें: "पंख 2 चालू करें" · "लिविंग रूम बंद करें" · "मदद करें"'
+                : 'Try: "turn on fan 2" · "turn off living room" · "activate party mode"'}
           </span>
         </div>
       )}

@@ -45,42 +45,91 @@ if (typeof window !== 'undefined' && window.speechSynthesis) {
   };
 }
 
-export const speak = (text) => {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) {
-      resolve();
-      return;
+export const speak = async (text, lang = "en-US") => {
+
+    if(lang === "te-IN"){
+
+        return await sarvamSpeak(text);
+
     }
 
-    // Cancel any ongoing speech
-    window.speechSynthesis.cancel();
+    return new Promise((resolve)=>{
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    
-    if (!selectedVoice) {
-      initVoice();
+        if(typeof window==="undefined" || !window.speechSynthesis){
+            resolve();
+            return;
+        }
+
+        window.speechSynthesis.cancel();
+
+        const utterance = new SpeechSynthesisUtterance(text);
+
+        utterance.lang = lang;
+
+        const voices = window.speechSynthesis.getVoices();
+
+        const targetPrefix = lang.split("-")[0].toLowerCase();
+
+        let voice = voices.find(v =>
+            v.lang.toLowerCase().startsWith(targetPrefix)
+        );
+
+        if(voice){
+            utterance.voice = voice;
+        }else{
+            if(!selectedVoice){
+                initVoice();
+            }
+            if(selectedVoice){
+                utterance.voice = selectedVoice;
+            }
+        }
+
+        utterance.rate = 1;
+        utterance.pitch = 1;
+
+        utterance.onend = ()=>resolve();
+        utterance.onerror = ()=>resolve();
+
+        window.speechSynthesis.speak(utterance);
+
+    });
+
+}
+
+async function sarvamSpeak(text) {
+
+    const response = await fetch("/api/sarvam/tts", {
+
+        method: "POST",
+
+        headers: {
+            "Content-Type": "application/json"
+        },
+
+        body: JSON.stringify({
+            text,
+            language: "te-IN"
+        })
+
+    });
+
+    if (!response.ok) {
+        console.error("Sarvam TTS failed");
+        return;
     }
-    
-    if (selectedVoice) {
-      utterance.voice = selectedVoice;
-    }
 
-    // Tweak rate and pitch for a premium feel
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
+    const data = await response.json();
 
-    utterance.onend = () => {
-      resolve();
-    };
+    const audioBase64 = data.audios[0];
 
-    utterance.onerror = () => {
-      resolve();
-    };
+    const audio = new Audio(
+        `data:audio/wav;base64,${audioBase64}`
+    );
 
-    window.speechSynthesis.speak(utterance);
-  });
-};
+    await audio.play();
 
+}
 export const stopSpeaking = () => {
   if (typeof window !== 'undefined' && window.speechSynthesis) {
     window.speechSynthesis.cancel();
