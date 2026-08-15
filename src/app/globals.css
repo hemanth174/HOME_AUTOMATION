@@ -314,3 +314,198 @@ body,
         padding-top: 92px;
     }
 }
+
+/* -------- Prevent horizontal overflow & theme the scrollbar globally -------- */
+html {
+    scroll-behavior: smooth;
+    overflow-x: hidden;
+}
+body {
+    overflow-x: hidden;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(0, 255, 65, 0.35), rgba(0, 255, 65, 0.12));
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, rgba(0, 255, 65, 0.65), rgba(0, 255, 65, 0.3));
+    background-clip: padding-box;
+}
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 255, 65, 0.35) transparent;
+}
+
+/* -------- Cursor Animations (landing theme) -------- */
+.lp-cursor-glow {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 520px;
+    height: 520px;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 30;
+    background: radial-gradient(circle, rgba(0, 255, 65, 0.07) 0%, rgba(0, 255, 65, 0.02) 40%, transparent 70%);
+    transform: translate(calc(var(--cursor-x, -9999px) - 260px), calc(var(--cursor-y, -9999px) - 260px));
+    transition: transform 0.25s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.4s ease;
+    will-change: transform;
+}
+.lp-cursor-dot {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 45;
+    background: var(--lp-primary-container);
+    box-shadow: 0 0 10px var(--lp-primary-container), 0 0 22px rgba(0, 255, 65, 0.5);
+    transform: translate(calc(var(--cursor-x, -9999px) - 5px), calc(var(--cursor-y, -9999px) - 5px));
+    transition: transform 0.06s linear, width 0.2s ease, height 0.2s ease, background 0.2s ease;
+    will-change: transform;
+}
+.lp-cursor-dot.lp-cursor-active {
+    width: 26px;
+    height: 26px;
+    transform: translate(calc(var(--cursor-x, -9999px) - 13px), calc(var(--cursor-y, -9999px) - 13px));
+    background: transparent;
+    border: 2px solid var(--lp-primary-container);
+    box-shadow: 0 0 14px rgba(0, 255, 65, 0.35);
+}
+@media (pointer: coarse) {
+    .lp-cursor-glow,
+    .lp-cursor-dot {
+        display: none;
+    }
+}
+
+/* -------- Cart Animations -------- */
+.lp-map-marker {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #00ff41;
+    filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.5));
+    pointer-events: none;
+    transform: translateY(-2px);
+}
+.lp-map-marker .material-symbols-outlined {
+    font-size: 40px;
+    font-variation-settings: 'FILL' 1;
+    -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.95);
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+}
+
+/* Uber/Google-style precise location dot */
+.lp-map-live-dot {
+    position: relative;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #4285f4;
+    border: 2.5px solid #ffffff;
+    box-shadow: 0 0 10px rgba(66, 133, 244, 0.9);
+    pointer-events: none;
+}
+.lp-map-live-dot::after {
+    content: '';
+    position: absolute;
+    inset: -9px;
+    border-radius: 50%;
+    border: 2px solid rgba(66, 133, 244, 0.45);
+    animation: lp-live-dot-pulse 1.8s ease infinite;
+}
+@keyframes lp-live-dot-pulse {
+    0% { transform: scale(0.55); opacity: 1; }
+    100% { transform: scale(1.6); opacity: 0; }
+}
+
+/* GPS accuracy confidence circle */
+.lp-map-accuracy-ring {
+    position: relative;
+    border-radius: 50%;
+    background: rgba(66, 133, 244, 0.12);
+    border: 1.5px solid rgba(66, 133, 244, 0.55);
+    pointer-events: none;
+    box-shadow: inset 0 0 20px rgba(66, 133, 244, 0.08);
+}
+.lp-map-accuracy-ring::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: rgba(66, 133, 244, 0.9);
+    transform: translate(-50%, -50%);
+}
+
+@keyframes lp-cart-pop {
+    0% { transform: scale(0.3); }
+    60% { transform: scale(1.5); }
+    100% { transform: scale(1); }
+}
+.lp-cart-pop {
+    animation: lp-cart-pop 0.45s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@keyframes lp-cart-shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-4px) rotate(-8deg); }
+    40% { transform: translateX(4px) rotate(8deg); }
+    60% { transform: translateX(-3px) rotate(-5deg); }
+    80% { transform: translateX(3px) rotate(5deg); }
+}
+.lp-cart-shake {
+    animation: lp-cart-shake 0.5s ease;
+}
+
+@keyframes lp-fly-to-cart {
+    0% {
+        transform: translate(var(--fx, 0px), var(--fy, 0px)) scale(1);
+        opacity: 1;
+    }
+    60% {
+        opacity: 1;
+    }
+    100% {
+        transform: translate(var(--tx, 0px), var(--ty, 0px)) scale(0.25);
+        opacity: 0;
+    }
+}
+.lp-fly-item {
+    position: fixed;
+    z-index: 100;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--lp-primary-container);
+    box-shadow: 0 0 14px rgba(0, 255, 65, 0.8), 0 0 30px rgba(0, 255, 65, 0.4);
+    pointer-events: none;
+    animation: lp-fly-to-cart 0.7s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+    will-change: transform, opacity;
+}
+
+@keyframes lp-glow-pulse {
+    0%, 100% { box-shadow: 0 0 12px rgba(0, 255, 65, 0.25); }
+    50% { box-shadow: 0 0 26px rgba(0, 255, 65, 0.6); }
+}
+.lp-btn-glow {
+    animation: lp-glow-pulse 2.2s ease infinite;
+}

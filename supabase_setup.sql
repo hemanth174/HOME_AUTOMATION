@@ -774,3 +774,36 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+
+-- ============================================================
+-- ORDER TRACKING (n8n Sales Pipeline)
+-- ============================================================
+-- Filled by the n8n "Electric Warriors Order Pipeline" workflow.
+-- The public tracking page reads rows by order_id (no auth needed).
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS order_trackings (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id        text UNIQUE NOT NULL,
+    full_name       text NOT NULL,
+    email           text NOT NULL,
+    phone           text,
+    category        text NOT NULL,               -- home | commercial | builder | retrofit
+    details         jsonb NOT NULL DEFAULT '{}'::jsonb,
+    address         text,
+    lat             double precision,
+    lng             double precision,
+    status          text NOT NULL DEFAULT 'Received',
+    status_history  jsonb NOT NULL DEFAULT '[]'::jsonb,
+    created_at      timestamptz DEFAULT now(),
+    updated_at      timestamptz DEFAULT now()
+);
+
+ALTER TABLE order_trackings ENABLE ROW LEVEL SECURITY;
+
+-- Anyone with the unique order link can view its tracking status
+CREATE POLICY "Public read order trackings by order_id"
+    ON order_trackings FOR SELECT
+    USING (true);
+
+-- Insert/update is done by n8n with the service_role key (bypasses RLS)

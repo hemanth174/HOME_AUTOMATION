@@ -10,12 +10,15 @@ import Loader from './Loader';
 export default function MainLayoutWrapper({ children }) {
   const pathname = usePathname();
   const cleanPath = (pathname || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '') || '/';
-  const VALID_ROUTES = ['/', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms'];
-  const is404Page = !VALID_ROUTES.includes(cleanPath);
+  const VALID_ROUTES = ['/', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales'];
+  const PUBLIC_ROUTES = ['/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/terms'];
+  const isTrackPage = cleanPath.startsWith('/track/');
+  const isPublicPage = PUBLIC_ROUTES.includes(cleanPath) || isTrackPage;
+  const is404Page = !VALID_ROUTES.includes(cleanPath) && !isTrackPage;
   const isLoginPage = cleanPath === '/login';
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const fullWidthPage = isLoginPage || is404Page || (!user && cleanPath === '/');
+  const fullWidthPage = isLoginPage || is404Page || isPublicPage || (!user && cleanPath === '/');
 
   // Disable console logs in production mode to protect tokens and output
   useEffect(() => {
@@ -59,7 +62,7 @@ export default function MainLayoutWrapper({ children }) {
       setAuthChecked(true);
 
       // Route protection redirects
-      if (!currentUser && !isLoginPage && cleanPath !== '/') {
+      if (!currentUser && !isLoginPage && !isPublicPage && cleanPath !== '/') {
         window.location.href = '/login';
       } else if (currentUser && isLoginPage) {
         window.location.href = '/';
@@ -75,7 +78,7 @@ export default function MainLayoutWrapper({ children }) {
       setUser(currentUser);
       setAuthChecked(true);
 
-      if (!currentUser && !isLoginPage && cleanPath !== '/') {
+      if (!currentUser && !isLoginPage && !isPublicPage && cleanPath !== '/') {
         window.location.href = '/login';
       } else if (currentUser && isLoginPage) {
         window.location.href = '/';
@@ -94,7 +97,7 @@ export default function MainLayoutWrapper({ children }) {
   }
 
   // Redirecting loading screen if accessing unauthorized areas
-  if (!user && !isLoginPage && cleanPath !== '/') {
+  if (!user && !isLoginPage && !isPublicPage && cleanPath !== '/') {
     return <Loader message="Redirecting to login..." />;
   }
   if (user && isLoginPage) {

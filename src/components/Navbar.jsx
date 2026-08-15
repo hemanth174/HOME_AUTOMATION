@@ -421,8 +421,11 @@ export default function Navbar() {
   };
 
   const cleanPath = (pathname || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '') || '/';
-  const VALID_ROUTES = ['/', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms'];
-  const is404Page = !VALID_ROUTES.includes(cleanPath);
+  const VALID_ROUTES = ['/', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales'];
+  const PUBLIC_ROUTES = ['/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/terms'];
+  const isTrackPage = cleanPath.startsWith('/track/');
+  const is404Page = !VALID_ROUTES.includes(cleanPath) && !isTrackPage;
+  const isPublicPage = PUBLIC_ROUTES.includes(cleanPath) || isTrackPage;
   const isLoginPage = cleanPath === '/login';
 
   const links = [
@@ -483,8 +486,8 @@ export default function Navbar() {
     setCurrentY(0);
   };
 
-  // If on login page, 404 page, or not authenticated, hide navigation completely
-  if (isLoginPage || is404Page || !user) {
+  // If on login page, 404 page, public info page, or not authenticated, hide navigation completely
+  if (isLoginPage || is404Page || isPublicPage || !user) {
     return null;
   }
 

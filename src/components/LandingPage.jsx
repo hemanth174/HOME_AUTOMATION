@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useState, useRef, useEffect } from 'react';
 import ThemeToggle from './ThemeToggle';
+import CursorGlow from './CursorGlow';
 
 // Dynamically import ThreeModelViewer (only in client environment)
 const ThreeModelViewer = dynamic(() => import('./ThreeModelViewer'), { ssr: false });
@@ -12,6 +13,28 @@ export default function LandingPage() {
   const router = useRouter();
   const [activeTab3D, setActiveTab3D] = useState('pcb'); // 'pcb' or 'esp'
   const videoRef = useRef(null);
+  const cartRef = useRef(null);
+  const [cartCount, setCartCount] = useState(0);
+  const [cartPop, setCartPop] = useState(false);
+  const [cartShake, setCartShake] = useState(false);
+  const [flyItem, setFlyItem] = useState(null);
+
+  // Cart add-to-cart handler with fly-to-cart animation
+  const handleAddToCart = (e, navigateTo) => {
+    const rect = cartRef.current?.getBoundingClientRect();
+    const toX = rect ? rect.left + rect.width / 2 : (typeof window !== 'undefined' ? window.innerWidth - 48 : 0);
+    const toY = rect ? rect.top + rect.height / 2 : 48;
+    setFlyItem({ id: Date.now(), fromX: e.clientX, fromY: e.clientY, toX, toY });
+    setCartCount((c) => c + 1);
+    setCartPop(false);
+    setCartShake(false);
+    requestAnimationFrame(() => {
+      setCartPop(true);
+      setCartShake(true);
+    });
+    setTimeout(() => setFlyItem(null), 750);
+    setTimeout(() => router.push(navigateTo), 700);
+  };
 
   useEffect(() => {
     if (videoRef.current) {
@@ -80,6 +103,22 @@ export default function LandingPage() {
         <div className="flex gap-2 md:gap-4 items-center shrink-0">
           <ThemeToggle />
           <button
+            ref={cartRef}
+            onClick={() => router.push('/contact-sales')}
+            title="Pre-Order Cart"
+            className={`relative w-10 h-10 md:w-11 md:h-11 rounded-full border border-lp-primary-container/40 bg-lp-surface-lowest/60 flex items-center justify-center hover:bg-lp-primary-container/10 hover:shadow-[0_0_15px_rgba(0,255,65,0.25)] transition-all active:scale-90 cursor-pointer ${cartShake ? 'lp-cart-shake' : ''}`}
+          >
+            <span className="material-symbols-outlined text-lp-primary-container text-lg">shopping_cart</span>
+            {cartCount > 0 && (
+              <span
+                key={cartCount}
+                className={`absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-lp-primary-container text-lp-on-primary-container text-[9px] font-label-caps font-bold flex items-center justify-center ${cartPop ? 'lp-cart-pop' : ''}`}
+              >
+                {cartCount}
+              </span>
+            )}
+          </button>
+          <button
             onClick={() => router.push('/login')}
             className="px-3 py-1.5 md:px-4 md:py-2 border border-lp-primary-container/40 text-lp-primary font-label-caps text-[10px] md:text-[12px] hover:bg-lp-primary-container/10 transition-all active:scale-95 cursor-pointer rounded whitespace-nowrap"
           >
@@ -88,6 +127,20 @@ export default function LandingPage() {
          
         </div>
       </header>
+
+      {flyItem && (
+        <span
+          key={flyItem.id}
+          className="lp-fly-item"
+          style={{
+            '--fx': `${flyItem.fromX}px`,
+            '--fy': `${flyItem.fromY}px`,
+            '--tx': `${flyItem.toX - flyItem.fromX}px`,
+            '--ty': `${flyItem.toY - flyItem.fromY}px`,
+          }}
+        />
+      )}
+      <CursorGlow />
 
       <main className="pt-20">
 
@@ -120,53 +173,6 @@ export default function LandingPage() {
               >
                 Explore 3D Models
               </button>
-            </div>
-          </div>
-
-          {/* About Us Section */}
-          <div className="relative z-10 mt-16 w-full max-w-4xl mx-auto rounded-xl border border-lp-outline-variant bg-lp-surface-low shadow-2xl overflow-hidden mb-12">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 p-6 md:p-10 items-center">
-              {/* Left Column: Team Photo */}
-              <div className="relative aspect-[3/4] md:aspect-[4/5] rounded-lg border border-lp-outline-variant overflow-hidden shadow-lg group">
-                <img 
-                  alt="Electric Warriors Engineering Team"
-                  src="/team_photo.jpg"
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-90 group-hover:opacity-100"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-lp-bg/40 via-transparent to-transparent pointer-events-none"></div>
-              </div>
-              
-              {/* Right Column: About Us Content */}
-              <div className="flex flex-col gap-5 text-left">
-                <div>
-                  <span className="text-xs font-label-caps text-lp-primary-container uppercase tracking-wider block mb-1">About Us</span>
-                  <h3 className="text-2xl font-headline-sm font-bold text-white leading-tight">
-                    The Team Behind the Hardware
-                  </h3>
-                </div>
-                <p className="text-sm font-body-md text-lp-on-surface-variant leading-relaxed">
-                  We are a passionate team of engineering students and developers dedicated to creating robust, high-performance, and affordable home automation solutions. Together, we designed and built the Electric Warriors smart node control dashboard and V4 switchboard architecture.
-                </p>
-                
-                {/* Team Members List */}
-                <div className="mt-2 flex flex-col gap-3">
-                  <span className="text-[10px] font-label-caps text-lp-secondary uppercase tracking-widest block mb-1">Engineering Members</span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
-                    {[
-                      "Lrv Sai Kausthubh",
-                      "Akshitha K",
-                      "Hemanth Atthuluri",
-                      "Indira M",
-                      "Jalaluddin S"
-                    ].map((name, idx) => (
-                      <div key={idx} className="flex items-center gap-2.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-lp-primary-container"></span>
-                        <span className="text-xs font-semibold text-white font-body-sm">{name}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </section>
@@ -230,7 +236,8 @@ export default function LandingPage() {
           <div className="absolute top-0 right-0 w-1/3 h-1/3 bg-lp-primary-container/5 blur-[120px] rounded-full pointer-events-none"></div>
           <div className="mb-20">
             <h2 className="font-headline-md text-4xl mb-4 font-extrabold text-white">The V4 Hardware Advantage</h2>
-            <div className="w-24 h-1 bg-lp-primary-container"></div>
+            <p className="font-body-md text-lp-on-surface-variant text-sm max-w-2xl leading-relaxed">What you get with every Electric Warriors switchboard — engineered hardware, truthful feedback, and automation that never sleeps.</p>
+            <div className="w-24 h-1 bg-lp-primary-container mt-4"></div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {/* Distributed Architecture */}
@@ -267,6 +274,30 @@ export default function LandingPage() {
                   ₹600 <span className="text-xs opacity-60">/ unit</span>
                 </div>
               </div>
+            </div>
+            {/* Bi-Directional Control */}
+            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
+              <span className="material-symbols-outlined text-lp-primary-container text-4xl mb-6 block">sync_alt</span>
+              <h3 className="font-label-caps text-sm mb-4 tracking-wider uppercase text-white font-bold">Bi-Directional Control</h3>
+              <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">Flip the physical wall switch and the app updates instantly. Toggle the app and the switch follows. True two-way sync with zero confusion.</p>
+            </div>
+            {/* AC Current Feedback */}
+            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
+              <span className="material-symbols-outlined text-lp-primary-container text-4xl mb-6 block">electric_bolt</span>
+              <h3 className="font-label-caps text-sm mb-4 tracking-wider uppercase text-white font-bold">AC Current Feedback</h3>
+              <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">Onboard current-sensing circuits confirm the real load state — so the dashboard always shows the truth, even if a device is unplugged or the relay fails.</p>
+            </div>
+            {/* Real-Time Dashboard */}
+            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
+              <span className="material-symbols-outlined text-lp-primary-container text-4xl mb-6 block">dashboard_customize</span>
+              <h3 className="font-label-caps text-sm mb-4 tracking-wider uppercase text-white font-bold">Real-Time Web Dashboard</h3>
+              <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">Control every node from any browser via low-latency WebSockets. Watch state changes propagate live, from phone, tablet, or desktop.</p>
+            </div>
+            {/* Offline Smart Schedules */}
+            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
+              <span className="material-symbols-outlined text-lp-primary-container text-4xl mb-6 block">schedule</span>
+              <h3 className="font-label-caps text-sm mb-4 tracking-wider uppercase text-white font-bold">Offline Smart Schedules</h3>
+              <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">Presets and timers are saved locally on each node. Your automation keeps running exactly on time — even through a full internet outage.</p>
             </div>
           </div>
         </section>
@@ -530,10 +561,13 @@ export default function LandingPage() {
                 <p className="font-body-md text-lp-on-surface-variant text-sm mb-8 leading-relaxed">Ready to upgrade your existing space? Pre-order our 4-device relay modules designed for easy retrofitting into any standard switchboard.</p>
               </div>
               <button
-                onClick={() => router.push('/login')}
-                className="w-fit px-8 py-4 border-2 border-lp-primary-container text-lp-primary-container font-label-caps font-bold text-sm hover:bg-lp-primary-container/10 transition-all cursor-pointer rounded"
+                onClick={(e) => handleAddToCart(e, '/contact-sales')}
+                className="w-fit px-8 py-4 border-2 border-lp-primary-container text-lp-primary-container font-label-caps font-bold text-sm hover:bg-lp-primary-container/10 hover:shadow-[0_0_20px_rgba(0,255,65,0.3)] transition-all active:scale-95 cursor-pointer rounded"
               >
-                Pre-Order Modules
+                <span className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-sm">add_shopping_cart</span>
+                  Pre-Order Modules
+                </span>
               </button>
             </div>
             <div className="p-12 bg-lp-primary-container text-lp-on-primary-container flex flex-col justify-between rounded">
@@ -542,8 +576,8 @@ export default function LandingPage() {
                 <p className="font-body-md text-lp-on-primary-container/80 text-sm mb-8 leading-relaxed">For real estate developers: Install Electric Warriors tech from the ground up. Offer your clients premium, integrated intelligence and command a higher market value.</p>
               </div>
               <button
-                onClick={() => handleScroll('commercial')}
-                className="w-fit px-8 py-4 bg-lp-on-primary-container text-lp-primary-container font-label-caps font-bold text-sm hover:shadow-xl transition-all cursor-pointer rounded"
+                onClick={() => router.push('/partner-program')}
+                className="w-fit px-8 py-4 bg-lp-on-primary-container text-lp-primary-container font-label-caps font-bold text-sm hover:shadow-xl hover:scale-[1.03] transition-all active:scale-95 cursor-pointer rounded"
               >
                 Partner With Us
               </button>
@@ -565,28 +599,28 @@ export default function LandingPage() {
           <div className="flex flex-wrap justify-center gap-8">
             <button 
               className="font-label-caps text-[11px] text-lp-on-surface hover:text-lp-primary transition-colors cursor-pointer bg-transparent border-none p-0 outline-none" 
-              onClick={() => router.push('/terms')}
+              onClick={() => router.push('/privacy-policy')}
             >
               Privacy Policy
             </button>
             <button 
               className="font-label-caps text-[11px] text-lp-on-surface hover:text-lp-primary transition-colors cursor-pointer bg-transparent border-none p-0 outline-none" 
-              onClick={() => router.push('/terms')}
+              onClick={() => router.push('/terms-of-service')}
             >
               Terms of Service
             </button>
             <button 
               className="font-label-caps text-[11px] text-lp-on-surface hover:text-lp-primary transition-colors cursor-pointer bg-transparent border-none p-0 outline-none" 
-              onClick={() => handleScroll('partner')}
+              onClick={() => router.push('/partner-program')}
             >
               Partner Program
             </button>
-            <a 
-              className="font-label-caps text-[11px] text-lp-on-surface hover:text-lp-primary transition-colors" 
-              href="mailto:ahemanthramasai@gmail.com?subject=Smart%20Home%20Sales%20Inquiry"
+            <button 
+              className="font-label-caps text-[11px] text-lp-on-surface hover:text-lp-primary transition-colors cursor-pointer bg-transparent border-none p-0 outline-none" 
+              onClick={() => router.push('/contact-sales')}
             >
               Contact Sales
-            </a>
+            </button>
           </div>
           <div className="flex gap-4">
             <button 
