@@ -18,10 +18,10 @@ const int INPUT_PINS[NUM_DEVICES] = {19, 18, 5, 17};
 // ============================================================
 //  CREDENTIALS
 // ============================================================
-const char* ssid     = "NxtWave_Te@m";
-const char* password = "Nxtwave@KKH2026";
+const char* ssid     = "You-wifi_anme";
+const char* password = "you_Password";
 
-const char* BOARD_IDENTIFIER = "kinda_meeda";
+const char* BOARD_IDENTIFIER = "you_board_identifier";
 const char* SUPABASE_BASE = "you_api_key_here";
 const char* SUPABASE_SERVICE_KEY = "you_key_here"; 
 
