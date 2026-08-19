@@ -1,13 +1,13 @@
-const CACHE_NAME = 'smart-home-v1';
-const urlsToCache = [
+const CACHE_NAME = 'smart-home-offline-v3';
+const STATIC_ASSETS = [
   '/',
+  '/manifest.json',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/smart_home_ui.png'
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(urlsToCache))
-  );
   self.skipWaiting();
 });
 
@@ -27,23 +27,47 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Only intercept GET requests to prevent issues with POST/PUT/OAuth callbacks
-  if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
 
+  // CRITICAL: Completely bypass service worker for dev server, localhost, Next.js HMR, Turbopack, and APIs
+  if (
+    url.hostname === 'localhost' ||
+    url.hostname === '127.0.0.1' ||
+    url.pathname.startsWith('/_next') ||
+    url.pathname.includes('webpack') ||
+    url.pathname.includes('turbopack') ||
+    url.pathname.startsWith('/api/') ||
+    url.hostname.includes('supabase.co') ||
+    event.request.method !== 'GET'
+  ) {
+    return;
+  }
+
+  // Only apply offline caching in production deployments for static shell assets
   event.respondWith(
-    fetch(event.request)
-      .catch(() => {
-        return caches.match(event.request)
-          .then((cachedResponse) => {
-            if (cachedResponse) {
-              return cachedResponse;
-            }
-            // Fallback response instead of returning undefined (which crashes the worker)
-            return new Response('Network error and resource not cached.', {
-              status: 408,
-              headers: { 'Content-Type': 'text/plain' }
-            });
+    caches.match(event.request).then((cachedResponse) => {
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+      return fetch(event.request).then((networkResponse) => {
+        if (
+          networkResponse &&
+          networkResponse.status === 200 &&
+          networkResponse.type === 'basic' &&
+          STATIC_ASSETS.includes(url.pathname)
+        ) {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
           });
-      })
+        }
+        return networkResponse;
+      }).catch(() => {
+        if (event.request.mode === 'navigate') {
+          return caches.match('/');
+        }
+        return new Response('Offline mode active.', { status: 503 });
+      });
+    })
   );
 });

@@ -1,14 +1,17 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import AlarmExecutor from './AlarmExecutor';
 import GlobalToast from './GlobalToast';
 import Loader from './Loader';
+import LocalModeBanner from './LocalModeBanner';
+import useLocalConnection from '@/hooks/useLocalConnection';
 
 export default function MainLayoutWrapper({ children }) {
   const pathname = usePathname();
+  const router = useRouter();
   const cleanPath = (pathname || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '') || '/';
   const VALID_ROUTES = ['/', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales'];
   const PUBLIC_ROUTES = ['/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/terms'];
@@ -18,7 +21,23 @@ export default function MainLayoutWrapper({ children }) {
   const isLoginPage = cleanPath === '/login';
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [isClientOnline, setIsClientOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const { isLocalConnected, localUrl } = useLocalConnection();
+
   const fullWidthPage = isLoginPage || is404Page || isPublicPage || (!user && cleanPath === '/');
+
+  // Monitor client online/offline status
+  useEffect(() => {
+    const handleOnline = () => setIsClientOnline(true);
+    const handleOffline = () => setIsClientOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Disable console logs in production mode to protect tokens and output
   useEffect(() => {
@@ -26,62 +45,56 @@ export default function MainLayoutWrapper({ children }) {
       console.log = () => {};
       console.info = () => {};
       console.debug = () => {};
-      // Keep console.error and console.warn active for critical troubleshooting
     }
   }, []);
 
-  // Clear authentication tokens from the URL immediately and dynamically on all route transitions
+  // Clear authentication tokens from URL
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const checkAndClearHash = () => {
-        const hash = window.location.hash;
-        if (hash.includes('access_token') || hash.includes('refresh_token') || hash.includes('error=')) {
-          // Clear the hash parameters without reloading the page or losing current pathname/search query
-          window.history.replaceState(null, '', window.location.pathname + window.location.search);
-        }
-      };
-      
-      // Run immediately
-      checkAndClearHash();
-      // Run on a short delay to ensure Supabase client finishes reading it
-      const timer = setTimeout(checkAndClearHash, 100);
-      return () => clearTimeout(timer);
+      const hash = window.location.hash;
+      if (hash.includes('access_token') || hash.includes('refresh_token') || hash.includes('error=')) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
     }
-  }, [pathname, user, authChecked]);
+  }, [pathname]);
 
   // Monitor auth state and enforce route protection centrally
   useEffect(() => {
     let active = true;
 
     const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!active) return;
-      
-      const currentUser = session?.user || null;
-      setUser(currentUser);
-      setAuthChecked(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!active) return;
+        
+        const currentUser = session?.user || null;
+        setUser(currentUser);
+        setAuthChecked(true);
 
-      // Route protection redirects
-      if (!currentUser && !isLoginPage && !isPublicPage && cleanPath !== '/') {
-        window.location.href = '/login';
-      } else if (currentUser && isLoginPage) {
-        window.location.href = '/';
+        // Route protection redirects (only if online and not in local mode)
+        if (!currentUser && !isLoginPage && !isPublicPage && cleanPath !== '/' && navigator.onLine) {
+          router.push('/login');
+        } else if (currentUser && isLoginPage) {
+          router.push('/');
+        }
+      } catch (err) {
+        if (!active) return;
+        setAuthChecked(true);
       }
     };
 
     checkSession();
 
-    // Subscribe to real-time auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!active) return;
       const currentUser = session?.user || null;
       setUser(currentUser);
       setAuthChecked(true);
 
-      if (!currentUser && !isLoginPage && !isPublicPage && cleanPath !== '/') {
-        window.location.href = '/login';
+      if (!currentUser && !isLoginPage && !isPublicPage && cleanPath !== '/' && navigator.onLine) {
+        router.push('/login');
       } else if (currentUser && isLoginPage) {
-        window.location.href = '/';
+        router.push('/');
       }
     });
 
@@ -89,15 +102,15 @@ export default function MainLayoutWrapper({ children }) {
       active = false;
       subscription.unsubscribe();
     };
-  }, [isLoginPage, cleanPath]);
+  }, [isLoginPage, cleanPath, router]);
 
   // Loading screens to prevent UI flashes
   if (!authChecked) {
     return <Loader message="Verifying authentication..." />;
   }
 
-  // Redirecting loading screen if accessing unauthorized areas
-  if (!user && !isLoginPage && !isPublicPage && cleanPath !== '/') {
+  // Redirecting loading screen if accessing unauthorized areas while online
+  if (!user && !isLoginPage && !isPublicPage && cleanPath !== '/' && isClientOnline && !isLocalConnected) {
     return <Loader message="Redirecting to login..." />;
   }
   if (user && isLoginPage) {
@@ -106,6 +119,13 @@ export default function MainLayoutWrapper({ children }) {
 
   return (
     <div className={fullWidthPage ? "w-full min-h-screen" : "w-full min-h-screen md:pl-64 pb-20 md:pb-8 transition-all duration-300"}>
+      {!fullWidthPage && (
+        <LocalModeBanner
+          isClientOnline={isClientOnline}
+          isLocalConnected={isLocalConnected}
+          localUrl={localUrl}
+        />
+      )}
       {children}
       {!fullWidthPage && <AlarmExecutor />}
       <GlobalToast />

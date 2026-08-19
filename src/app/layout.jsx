@@ -48,9 +48,17 @@ function ThemeInit() {
           } catch(e) {}
         })();
         if ('serviceWorker' in navigator) {
-          window.addEventListener('load', function() {
-            navigator.serviceWorker.register('/sw.js');
-          });
+          if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            navigator.serviceWorker.getRegistrations().then(function(registrations) {
+              for (var reg of registrations) {
+                reg.unregister();
+              }
+            });
+          } else {
+            window.addEventListener('load', function() {
+              navigator.serviceWorker.register('/sw.js');
+            });
+          }
         }
       `}
     </Script>
