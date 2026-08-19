@@ -14,42 +14,76 @@ export async function POST(request) {
       );
     }
 
-    const systemPrompt = `You parse smart home voice commands and guide queries. Detect if transcript language is English, Hindi, or Telugu, and output "language" ("en-US", "hi-IN", or "te-IN") and "message" in that language.
-Input JSON: { transcript, devices, presets, currentTime }.
+    if (!transcript || transcript.trim() === '') {
+      return NextResponse.json(
+        { actionType: 'UNKNOWN', message: 'No transcript provided' },
+        { status: 400 }
+      );
+    }
 
-Return JSON only (no markdown):
-1. Toggle Device:
-{"actionType":"TOGGLE_DEVICE", "deviceId":"UUID", "isOn":bool, "deviceName":"name", "message":"...", "language":"..."}
-2. Toggle All:
-{"actionType":"TOGGLE_ALL", "isOn":bool, "message":"...", "language":"..."}
-3. Apply Preset:
-{"actionType":"APPLY_PRESET", "presetId":"UUID", "presetName":"name", "deactivate":bool, "message":"...", "language":"..."}
-4. Create Alarm (relative to currentTime local offset):
-{"actionType":"CREATE_ALARM", "deviceId":"UUID", "isOn":bool, "triggerAt":"ISO timestamp in future same offset", "message":"...", "language":"..."}
-5. Create Schedule (days: 0-Sun to 6-Sat):
-{"actionType":"CREATE_SCHEDULE", "deviceId":"UUID", "isOn":bool, "time":"HH:MM", "days":Array, "message":"...", "language":"..."}
-6. Clear Alarms/Schedules:
-{"actionType":"DELETE_ALL_ALARMS"|"DELETE_ALL_SCHEDULES", "message":"...", "language":"..."}
-7. Website Guidance/T&C/FAQs:
-{"actionType":"GUIDANCE", "message":"Localized spoken guide response", "language":"...", "redirectTo":"/faq|/terms|/schedules|/alarms|/analytics|/logs|/profile|/boards|/presets|/"}
-8. Unknown/Out-of-scope (General knowledge, math, chat etc. DO NOT answer these, return UNKNOWN):
-{"actionType":"UNKNOWN", "message":"Polite refusal saying you only handle website guidelines, terms, and home control", "language":"..."}
+    const deviceList = (devices || []).map(d => ({ id: d.id, name: d.name, board_id: d.board_id }));
+    const presetList = (presets || []).map(p => ({ id: p.id, name: p.name }));
+
+    const systemPrompt = `You are a smart home voice command parser. Your ONLY job is to parse the user transcript and return a single valid JSON object. Do NOT add any explanation, markdown, or extra text — ONLY raw JSON.
+
+Devices available: ${JSON.stringify(deviceList)}
+Presets available: ${JSON.stringify(presetList)}
+Current local time: ${currentTime}
+
+Language detection: Detect if transcript is English → "en-US", Hindi → "hi-IN", or Telugu → "te-IN".
+Reply "message" field must be in the same detected language, short and spoken-friendly (max 15 words).
+
+Return EXACTLY one of these JSON shapes:
+
+1. Toggle single device ON or OFF:
+{"actionType":"TOGGLE_DEVICE","deviceId":"<exact UUID from devices>","isOn":true|false,"deviceName":"<name>","message":"<short spoken feedback>","language":"en-US|hi-IN|te-IN"}
+
+2. Toggle ALL devices ON or OFF:
+{"actionType":"TOGGLE_ALL","isOn":true|false,"message":"<short>","language":"en-US|hi-IN|te-IN"}
+
+3. Apply or deactivate a preset:
+{"actionType":"APPLY_PRESET","presetId":"<UUID>","presetName":"<name>","deactivate":false|true,"message":"<short>","language":"en-US|hi-IN|te-IN"}
+
+4. Create a one-time alarm (triggerAt must be a FUTURE ISO timestamp with timezone offset from currentTime):
+{"actionType":"CREATE_ALARM","deviceId":"<UUID>","isOn":true|false,"triggerAt":"<ISO 8601 with offset>","message":"<short>","language":"en-US|hi-IN|te-IN"}
+
+5. Create a recurring schedule (time as HH:MM, days array 0=Sun..6=Sat):
+{"actionType":"CREATE_SCHEDULE","deviceId":"<UUID>","isOn":true|false,"time":"HH:MM","days":[0,1,2,3,4,5,6],"message":"<short>","language":"en-US|hi-IN|te-IN"}
+
+6. Delete all alarms:
+{"actionType":"DELETE_ALL_ALARMS","message":"<short>","language":"en-US|hi-IN|te-IN"}
+
+7. Delete all schedules:
+{"actionType":"DELETE_ALL_SCHEDULES","message":"<short>","language":"en-US|hi-IN|te-IN"}
+
+8. Website navigation / guidance (FAQs, Terms, how-to):
+{"actionType":"GUIDANCE","message":"<spoken guide answer>","language":"en-US|hi-IN|te-IN","redirectTo":"/faq|/terms|/schedules|/alarms|/analytics|/logs|/profile|/boards|/presets|/"}
+
+9. Out-of-scope (general knowledge, math, chat — refuse politely):
+{"actionType":"UNKNOWN","message":"I only handle smart home controls and website guidance.","language":"en-US|hi-IN|te-IN"}
 
 Rules:
-- Guide user using these guidelines/FAQ/Terms:
-  * XOR Override: flipping wall switch or relay toggles light. AC detection updates status.
-  * Bulb Error: Relay is ON but no current flow (burnt bulb or tripped breaker).
-  * Terms: User accepts liability for wiring/ESP32 installation. Cloud sync needs internet. Logs deleted after 7 days.
-  * Schedules/Alarms: Created from Schedules page or Alarms page.
-  * Redirection: Set "redirectTo" to the relevant route (e.g. "/terms", "/faq", "/schedules", "/alarms", "/analytics", "/logs", "/presets", "/boards", "/profile") if they ask to view or go to that page.
-- Keep output "message" extremely short, spoken-friendly, and accurate.`;
+- Match device names using fuzzy/partial matching — "fan" matches "Fan 2", "bedroom fan" etc.
+- For TOGGLE_DEVICE you MUST use the exact UUID from the devices list.
+- For CREATE_ALARM, derive triggerAt from currentTime — if time has already passed today, set it for tomorrow.
+- ONLY return one JSON object. No arrays, no extra fields, no markdown.`;
 
-    const userMessage = JSON.stringify({
-      transcript,
-      devices: (devices || []).map(d => ({ id: d.id, name: d.name, board_id: d.board_id })),
-      presets: (presets || []).map(p => ({ id: p.id, name: p.name })),
-      currentTime
-    });
+    const requestBody = {
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Voice command: "${transcript}"` }
+      ],
+      temperature: 0.1,
+      max_tokens: 400,
+    };
+
+    // Only add response_format for models that support it (OpenAI-compatible)
+    // Gemini on OpenRouter supports it; skip for Llama-family models
+    const supportsJsonMode = !model.includes('llama') && !model.includes('mistral') && !model.includes('qwen');
+    if (supportsJsonMode) {
+      requestBody.response_format = { type: 'json_object' };
+    }
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -59,37 +93,62 @@ Rules:
         'HTTP-Referer': 'https://smart-home-automation.org',
         'X-Title': 'Smart Home Voice Assistant'
       },
-      body: JSON.stringify({
-        model: model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage }
-        ],
-        temperature: 0.1,
-        max_tokens: 300,
-        response_format: { type: 'json_object' }
-      })
+      body: JSON.stringify(requestBody)
     });
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('OpenRouter API error:', errorText);
       return NextResponse.json(
-        { actionType: 'UNKNOWN', message: `OpenRouter API error: ${errorText}` },
+        { actionType: 'UNKNOWN', message: 'AI service temporarily unavailable. Please try again.' },
         { status: 500 }
       );
     }
 
     const data = await response.json();
     let reply = data.choices?.[0]?.message?.content || '';
-    
-    // Clean up markdown block wrapping if the LLM overrides JSON mode formats
-    reply = reply.replace(/```json/g, '').replace(/```/g, '').trim();
 
-    const parsedAction = JSON.parse(reply);
+    if (!reply.trim()) {
+      return NextResponse.json(
+        { actionType: 'UNKNOWN', message: 'Empty response from AI. Please try again.' },
+        { status: 500 }
+      );
+    }
+
+    // Strip markdown code fences if model ignored json_object mode
+    reply = reply
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/```$/i, '')
+      .trim();
+
+    // Extract the first JSON object in case model added extra text
+    const jsonMatch = reply.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error('No JSON found in AI reply:', reply);
+      return NextResponse.json(
+        { actionType: 'UNKNOWN', message: 'Could not parse AI response. Please try again.' },
+        { status: 500 }
+      );
+    }
+
+    const parsedAction = JSON.parse(jsonMatch[0]);
+
+    // Validate required fields
+    if (!parsedAction.actionType) {
+      return NextResponse.json(
+        { actionType: 'UNKNOWN', message: 'Invalid AI response format.' },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json(parsedAction);
 
   } catch (error) {
     console.error('Error processing voice command:', error);
-    return NextResponse.json({ actionType: 'UNKNOWN', message: error.message }, { status: 500 });
+    return NextResponse.json(
+      { actionType: 'UNKNOWN', message: 'Something went wrong. Please try again.' },
+      { status: 500 }
+    );
   }
 }

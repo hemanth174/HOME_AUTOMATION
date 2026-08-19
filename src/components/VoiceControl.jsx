@@ -356,9 +356,11 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       }
 
       case 'GUIDANCE': {
-        provideFeedback('Guiding user');
+        const guidanceMsg = message || 'Here you go.';
+        safeToast(guidanceMsg);
+        speak(guidanceMsg, language || 'en-US');
         if (result.redirectTo) {
-          router.push(result.redirectTo);
+          setTimeout(() => router.push(result.redirectTo), 1200);
         }
         break;
       }
@@ -691,9 +693,9 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       return;
     }
 
-    safeToast('Command not recognised. Try: "turn on fan 2", "turn off living room", "activate party mode", or "all off"');
-    speak('Command not recognized');
-  }, [getLatestDevices, onToast, speak, applyPreset]);
+    safeToast('Command not recognised. Try: "turn on fan 2", "turn off living room", "all off", or "show schedules"');
+    speak('Command not recognized. Please try again.', 'en-US');
+  }, [getLatestDevices, onToast, applyPreset]);
 
   // Speech Recognition
   const startListening = () => {
