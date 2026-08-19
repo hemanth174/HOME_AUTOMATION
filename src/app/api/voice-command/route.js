@@ -1,154 +1,218 @@
 import { NextResponse } from 'next/server';
 
+// Robust helper to extract and clean JSON from any LLM response
+function extractJsonFromText(rawText) {
+  if (!rawText || typeof rawText !== 'string') return null;
+
+  // 1. Remove thinking tokens from reasoning models (e.g. DeepSeek / Gemini thinking)
+  let text = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+  // 2. Remove markdown code fences
+  text = text.replace(/^```json\s*/im, '')
+             .replace(/^```\s*/im, '')
+             .replace(/```$/m, '')
+             .trim();
+
+  // 3. Find the outermost JSON object
+  const startIdx = text.indexOf('{');
+  const endIdx = text.lastIndexOf('}');
+
+  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
+    return null;
+  }
+
+  const jsonSubstring = text.slice(startIdx, endIdx + 1);
+
+  try {
+    return JSON.parse(jsonSubstring);
+  } catch {
+    // Try cleaning trailing commas or invalid control characters
+    try {
+      const sanitized = jsonSubstring
+        .replace(/,\s*([\]}])/g, '$1')
+        .replace(/[\u0000-\u001F]+/g, ' ');
+      return JSON.parse(sanitized);
+    } catch {
+      return null;
+    }
+  }
+}
+
+// Fallback rule-based parser in case the external AI API is slow or returns unexpected text
+function fallbackParseCommand(transcript, devices = [], presets = []) {
+  const norm = (transcript || '').toLowerCase().trim();
+  const isOn = norm.includes('turn on') || norm.includes('switch on') || norm.includes('activate') || norm.includes('on');
+  const isOff = norm.includes('turn off') || norm.includes('switch off') || norm.includes('deactivate') || norm.includes('off');
+
+  // 1. Toggle All
+  if (norm.includes('all on') || norm.includes('turn on all') || norm.includes('all off') || norm.includes('turn off all') || norm.includes('sab on') || norm.includes('sab bandh')) {
+    const targetState = !isOff;
+    return {
+      actionType: 'TOGGLE_ALL',
+      isOn: targetState,
+      message: `Turning all devices ${targetState ? 'on' : 'off'}`,
+      language: 'en-US'
+    };
+  }
+
+  // 2. Navigation & Guidance
+  if (norm.includes('schedule') || norm.includes('timer')) {
+    return { actionType: 'GUIDANCE', message: 'Opening schedules page', language: 'en-US', redirectTo: '/schedules' };
+  }
+  if (norm.includes('alarm')) {
+    return { actionType: 'GUIDANCE', message: 'Opening alarms page', language: 'en-US', redirectTo: '/alarms' };
+  }
+  if (norm.includes('faq') || norm.includes('help')) {
+    return { actionType: 'GUIDANCE', message: 'Opening FAQ section', language: 'en-US', redirectTo: '/faq' };
+  }
+  if (norm.includes('analytics') || norm.includes('power') || norm.includes('energy')) {
+    return { actionType: 'GUIDANCE', message: 'Opening analytics', language: 'en-US', redirectTo: '/analytics' };
+  }
+  if (norm.includes('terms')) {
+    return { actionType: 'GUIDANCE', message: 'Opening terms and conditions', language: 'en-US', redirectTo: '/terms' };
+  }
+
+  // 3. Preset match
+  for (const p of presets) {
+    if (norm.includes(p.name.toLowerCase())) {
+      return {
+        actionType: 'APPLY_PRESET',
+        presetId: p.id,
+        presetName: p.name,
+        deactivate: isOff,
+        message: `${isOff ? 'Deactivating' : 'Activating'} preset ${p.name}`,
+        language: 'en-US'
+      };
+    }
+  }
+
+  // 4. Single device match
+  for (const d of devices) {
+    const dName = (d.name || '').toLowerCase();
+    if (norm.includes(dName) || dName.split(' ').some(word => word.length > 2 && norm.includes(word))) {
+      const targetState = !isOff;
+      return {
+        actionType: 'TOGGLE_DEVICE',
+        deviceId: d.id,
+        isOn: targetState,
+        deviceName: d.name,
+        message: `Turning ${targetState ? 'on' : 'off'} ${d.name}`,
+        language: 'en-US'
+      };
+    }
+  }
+
+  return {
+    actionType: 'UNKNOWN',
+    message: 'Could not recognize command. Please try saying "turn on fan" or "all off".',
+    language: 'en-US'
+  };
+}
+
 export async function POST(request) {
   try {
-    const { transcript, devices, presets, currentTime } = await request.json();
+    const { transcript, devices = [], presets = [], currentTime } = await request.json();
 
     const apiKey = process.env.OPENROUTER_API_KEY;
     const model = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
 
-    if (!apiKey || apiKey.trim() === '') {
-      return NextResponse.json(
-        { actionType: 'UNKNOWN', message: 'No OpenRouter API key configured' },
-        { status: 400 }
-      );
-    }
-
     if (!transcript || transcript.trim() === '') {
       return NextResponse.json(
-        { actionType: 'UNKNOWN', message: 'No transcript provided' },
+        { actionType: 'UNKNOWN', message: 'No speech transcript received.' },
         { status: 400 }
       );
     }
 
-    const deviceList = (devices || []).map(d => ({ id: d.id, name: d.name, board_id: d.board_id }));
-    const presetList = (presets || []).map(p => ({ id: p.id, name: p.name }));
+    const deviceList = devices.map(d => ({ id: d.id, name: d.name, board_id: d.board_id }));
+    const presetList = presets.map(p => ({ id: p.id, name: p.name }));
 
-    const systemPrompt = `You are a smart home voice command parser. Your ONLY job is to parse the user transcript and return a single valid JSON object. Do NOT add any explanation, markdown, or extra text — ONLY raw JSON.
-
-Devices available: ${JSON.stringify(deviceList)}
-Presets available: ${JSON.stringify(presetList)}
-Current local time: ${currentTime}
-
-Language detection: Detect if transcript is English → "en-US", Hindi → "hi-IN", or Telugu → "te-IN".
-Reply "message" field must be in the same detected language, short and spoken-friendly (max 15 words).
-
-Return EXACTLY one of these JSON shapes:
-
-1. Toggle single device ON or OFF:
-{"actionType":"TOGGLE_DEVICE","deviceId":"<exact UUID from devices>","isOn":true|false,"deviceName":"<name>","message":"<short spoken feedback>","language":"en-US|hi-IN|te-IN"}
-
-2. Toggle ALL devices ON or OFF:
-{"actionType":"TOGGLE_ALL","isOn":true|false,"message":"<short>","language":"en-US|hi-IN|te-IN"}
-
-3. Apply or deactivate a preset:
-{"actionType":"APPLY_PRESET","presetId":"<UUID>","presetName":"<name>","deactivate":false|true,"message":"<short>","language":"en-US|hi-IN|te-IN"}
-
-4. Create a one-time alarm (triggerAt must be a FUTURE ISO timestamp with timezone offset from currentTime):
-{"actionType":"CREATE_ALARM","deviceId":"<UUID>","isOn":true|false,"triggerAt":"<ISO 8601 with offset>","message":"<short>","language":"en-US|hi-IN|te-IN"}
-
-5. Create a recurring schedule (time as HH:MM, days array 0=Sun..6=Sat):
-{"actionType":"CREATE_SCHEDULE","deviceId":"<UUID>","isOn":true|false,"time":"HH:MM","days":[0,1,2,3,4,5,6],"message":"<short>","language":"en-US|hi-IN|te-IN"}
-
-6. Delete all alarms:
-{"actionType":"DELETE_ALL_ALARMS","message":"<short>","language":"en-US|hi-IN|te-IN"}
-
-7. Delete all schedules:
-{"actionType":"DELETE_ALL_SCHEDULES","message":"<short>","language":"en-US|hi-IN|te-IN"}
-
-8. Website navigation / guidance (FAQs, Terms, how-to):
-{"actionType":"GUIDANCE","message":"<spoken guide answer>","language":"en-US|hi-IN|te-IN","redirectTo":"/faq|/terms|/schedules|/alarms|/analytics|/logs|/profile|/boards|/presets|/"}
-
-9. Out-of-scope (general knowledge, math, chat — refuse politely):
-{"actionType":"UNKNOWN","message":"I only handle smart home controls and website guidance.","language":"en-US|hi-IN|te-IN"}
-
-Rules:
-- Match device names using fuzzy/partial matching — "fan" matches "Fan 2", "bedroom fan" etc.
-- For TOGGLE_DEVICE you MUST use the exact UUID from the devices list.
-- For CREATE_ALARM, derive triggerAt from currentTime — if time has already passed today, set it for tomorrow.
-- ONLY return one JSON object. No arrays, no extra fields, no markdown.`;
-
-    const requestBody = {
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Voice command: "${transcript}"` }
-      ],
-      temperature: 0.1,
-      max_tokens: 400,
-    };
-
-    // Only add response_format for models that support it (OpenAI-compatible)
-    // Gemini on OpenRouter supports it; skip for Llama-family models
-    const supportsJsonMode = !model.includes('llama') && !model.includes('mistral') && !model.includes('qwen');
-    if (supportsJsonMode) {
-      requestBody.response_format = { type: 'json_object' };
+    // If no API key configured, use intelligent local fallback
+    if (!apiKey || apiKey.trim() === '') {
+      const localResult = fallbackParseCommand(transcript, deviceList, presetList);
+      return NextResponse.json(localResult);
     }
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://smart-home-automation.org',
-        'X-Title': 'Smart Home Voice Assistant'
-      },
-      body: JSON.stringify(requestBody)
-    });
+    const systemPrompt = `You parse smart home voice commands and return ONLY a valid JSON object. Do not include markdown, thoughts, or explanations.
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('OpenRouter API error:', errorText);
-      return NextResponse.json(
-        { actionType: 'UNKNOWN', message: 'AI service temporarily unavailable. Please try again.' },
-        { status: 500 }
-      );
+Available Devices: ${JSON.stringify(deviceList)}
+Available Presets: ${JSON.stringify(presetList)}
+Current Local Time: ${currentTime || new Date().toISOString()}
+
+Detect language: English -> "en-US", Hindi -> "hi-IN", Telugu -> "te-IN". Keep output "message" short (under 10 words) in that language.
+
+Return EXACTLY ONE of these JSON formats:
+1. Toggle Single Device:
+{"actionType":"TOGGLE_DEVICE","deviceId":"<UUID>","isOn":true|false,"deviceName":"<name>","message":"...","language":"..."}
+
+2. Toggle All Devices:
+{"actionType":"TOGGLE_ALL","isOn":true|false,"message":"...","language":"..."}
+
+3. Apply Preset:
+{"actionType":"APPLY_PRESET","presetId":"<UUID>","presetName":"<name>","deactivate":false|true,"message":"...","language":"..."}
+
+4. Create Alarm (relative to Current Local Time):
+{"actionType":"CREATE_ALARM","deviceId":"<UUID>","isOn":true|false,"triggerAt":"<future ISO timestamp>","message":"...","language":"..."}
+
+5. Create Schedule:
+{"actionType":"CREATE_SCHEDULE","deviceId":"<UUID>","isOn":true|false,"time":"HH:MM","days":[0,1,2,3,4,5,6],"message":"...","language":"..."}
+
+6. Delete All Alarms:
+{"actionType":"DELETE_ALL_ALARMS","message":"...","language":"..."}
+
+7. Delete All Schedules:
+{"actionType":"DELETE_ALL_SCHEDULES","message":"...","language":"..."}
+
+8. Navigation & Guidance (FAQ, Terms, Analytics, Schedules, Alarms, Boards, Profile):
+{"actionType":"GUIDANCE","message":"...","language":"...","redirectTo":"/faq|/terms|/schedules|/alarms|/analytics|/logs|/profile|/boards|/presets|/"}
+
+9. Unrecognized / Out of scope:
+{"actionType":"UNKNOWN","message":"...","language":"..."}`;
+
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://smart-home-automation.org',
+          'X-Title': 'Smart Home Voice Assistant'
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: `Parse this voice command: "${transcript}"` }
+          ],
+          temperature: 0.1,
+          max_tokens: 500
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const choice = data.choices?.[0];
+        const rawContent = choice?.message?.content || choice?.text || choice?.message?.reasoning || '';
+        
+        const extracted = extractJsonFromText(rawContent);
+        if (extracted && extracted.actionType) {
+          return NextResponse.json(extracted);
+        }
+      }
+    } catch (aiErr) {
+      console.warn('OpenRouter fetch failed, using fallback:', aiErr);
     }
 
-    const data = await response.json();
-    let reply = data.choices?.[0]?.message?.content || '';
-
-    if (!reply.trim()) {
-      return NextResponse.json(
-        { actionType: 'UNKNOWN', message: 'Empty response from AI. Please try again.' },
-        { status: 500 }
-      );
-    }
-
-    // Strip markdown code fences if model ignored json_object mode
-    reply = reply
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
-      .replace(/```$/i, '')
-      .trim();
-
-    // Extract the first JSON object in case model added extra text
-    const jsonMatch = reply.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error('No JSON found in AI reply:', reply);
-      return NextResponse.json(
-        { actionType: 'UNKNOWN', message: 'Could not parse AI response. Please try again.' },
-        { status: 500 }
-      );
-    }
-
-    const parsedAction = JSON.parse(jsonMatch[0]);
-
-    // Validate required fields
-    if (!parsedAction.actionType) {
-      return NextResponse.json(
-        { actionType: 'UNKNOWN', message: 'Invalid AI response format.' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json(parsedAction);
+    // If AI fails or returns non-parseable response, run reliable fallback parser
+    const fallbackResult = fallbackParseCommand(transcript, deviceList, presetList);
+    return NextResponse.json(fallbackResult);
 
   } catch (error) {
-    console.error('Error processing voice command:', error);
-    return NextResponse.json(
-      { actionType: 'UNKNOWN', message: 'Something went wrong. Please try again.' },
-      { status: 500 }
-    );
+    console.error('Error in voice-command route:', error);
+    // Even on error, return 200 with fallback so frontend never breaks with 500
+    return NextResponse.json({
+      actionType: 'UNKNOWN',
+      message: 'Could not process voice command. Please try again.',
+      language: 'en-US'
+    });
   }
 }

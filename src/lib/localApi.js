@@ -25,9 +25,22 @@ export function setLocalBaseUrl(url) {
  * Helper to execute fetch with timeout
  */
 async function localFetch(endpoint, options = {}, timeoutMs = 900) {
+  const baseUrl = getLocalBaseUrl();
+
+  // Browsers strictly block HTTP fetches from HTTPS origin (Mixed Content).
+  // If on HTTPS, return null immediately without triggering browser security console warnings.
+  if (
+    typeof window !== 'undefined' &&
+    window.location.protocol === 'https:' &&
+    baseUrl.startsWith('http://') &&
+    !baseUrl.includes('localhost') &&
+    !baseUrl.includes('127.0.0.1')
+  ) {
+    throw new Error('Local direct fetch disabled on HTTPS to prevent Mixed Content. Use direct AP link.');
+  }
+
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
-  const baseUrl = getLocalBaseUrl();
 
   try {
     const response = await fetch(`${baseUrl}${endpoint}`, {
