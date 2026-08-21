@@ -26,7 +26,7 @@ import {
   Wifi,
   WifiOff,
   Zap,
-
+  ExternalLink,
 } from "lucide-react";
 
 import useLocalConnection from '@/hooks/useLocalConnection';
@@ -569,7 +569,6 @@ export default function Navbar() {
 
   const links = [
     { href: "/", label: "Dashboard", icon: LayoutGrid },
-    { href: "/local", label: "Local Control", icon: Zap },
     { href: "/presets", label: "Presets", icon: SlidersHorizontal },
     { href: "/boards", label: "Boards", icon: Cpu },
     { href: "/schedules", label: "Schedules", icon: CalendarDays },
@@ -691,33 +690,26 @@ export default function Navbar() {
             <span>LOCAL MESH</span>
             <span className={`w-1.5 h-1.5 rounded-full ${isLocalConnected ? 'bg-emerald-400 animate-pulse' : 'bg-red-500/70'}`} />
           </span>
-          <a
-            href={isLocalConnected ? localUrl : undefined}
-            onClick={(e) => {
-              if (!isLocalConnected) {
-                e.preventDefault();
-              }
-            }}
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            href="/local"
             className={`rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all duration-200 flex items-center justify-between group ${
               isLocalConnected
-                ? 'text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.1)]'
-                : 'text-text-muted/60 bg-card-alt/30 border border-border/50 hover:border-red-500/30 hover:bg-red-500/5 cursor-not-allowed'
-            }`}
+                ? 'text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.1)]'
+                : 'text-text-muted/60 bg-card-alt/30 border border-border/50 hover:border-red-500/30 hover:bg-red-500/5'
+            } ${pathname === '/local' ? 'bg-emerald-500/20 text-emerald-300' : ''}`}
           >
             <div className="flex items-center gap-3">
               <Zap size={16} className={`stroke-[2.5px] ${isLocalConnected ? 'text-emerald-400 fill-emerald-400/20' : 'text-text-muted/40'}`} />
               <span>Local Control</span>
             </div>
             {isLocalConnected ? (
-              <ExternalLink size={13} className="text-emerald-400/70 group-hover:text-emerald-300 transition-colors" />
+              <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-400 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 animate-pulse">Live</span>
             ) : (
               <span className="text-[9px] font-bold uppercase tracking-wider text-red-400/80 px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20">
                 Offline
               </span>
             )}
-          </a>
+          </Link>
 
           {/* Sidebar Local Mesh Hover Popover Card */}
           {sidebarLocalHover && (
