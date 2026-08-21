@@ -14,7 +14,7 @@ export default function LocalModeBanner({ isClientOnline, isLocalConnected, loca
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
             </span>
             <div className="flex items-center gap-1.5 font-medium">
-              <Zap className="w-4 h-4 text-amber-400" />
+              <Zap className="w-4 h-4 text-amber-400 " />
               <span>Local Autonomous Mode:</span>
             </div>
             <span className="text-amber-300/80 hidden sm:inline">
