@@ -14,7 +14,7 @@
     "driver.js": "^1.6.0",
     "lucide-react": "^1.21.0",
     "maplibre-gl": "^6.3.0",
-    "next": "^15.2.1",
+    "next": "^15.3.9",
     "nodemailer": "^9.0.1",
     "postcss": "^8.5.15",
     "react": "19.2.4",
@@ -25,7 +25,8 @@
     "three": "^0.185.1"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.6",
     "eslint": "^9",
-    "eslint-config-next": "^15.2.1"
+    "eslint-config-next": "^15.3.9"
   }
 }

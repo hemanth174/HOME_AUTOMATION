@@ -23,7 +23,7 @@ export default function useLocalConnection() {
       }
     } catch {
       consecutiveFailures.current += 1;
-      // Require 2 consecutive failures before flipping to disconnected to prevent jitter
+      // Require 2 consecutive failures before flipping to disconnected (prevents jitter)
       if (consecutiveFailures.current >= 2) {
         setIsLocalConnected(false);
         setLeaderNode(null);
@@ -35,16 +35,8 @@ export default function useLocalConnection() {
   }, []);
 
   useEffect(() => {
-<<<<<<< HEAD
     checkConnection();
     const interval = setInterval(checkConnection, 5000);
-=======
-    // Initial probe
-    checkConnection();
-
-    // Probe every 6 seconds in background
-    const interval = setInterval(checkConnection, 6000);
->>>>>>> 21b6d4f91f39143be1c452e38bd4eb943f7a0728
     return () => clearInterval(interval);
   }, [checkConnection]);
 
@@ -54,6 +46,6 @@ export default function useLocalConnection() {
     localUrl: getLocalBaseUrl(),
     isProbing,
     lastChecked,
-    checkConnection
+    checkConnection,
   };
 }
