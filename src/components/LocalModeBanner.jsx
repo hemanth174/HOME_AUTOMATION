@@ -1,9 +1,15 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Zap, ShieldCheck, WifiOff } from 'lucide-react';
 
 export default function LocalModeBanner({ isClientOnline, isLocalConnected }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  // Prevent hydration mismatch — don't render until client is ready
+  if (!mounted) return null;
   // Scenario 1: No Internet, but connected to ESP32 SoftAP (HOME-AUTO-LEADER)
   if (!isClientOnline && isLocalConnected) {
     return (

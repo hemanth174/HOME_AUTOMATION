@@ -29,8 +29,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 
-import useLocalConnection from '@/hooks/useLocalConnection';
-
+import useLocalConnection from "@/hooks/useLocalConnection";
 
 // A custom sub-component for pixel-perfect dynamic Wi-Fi bars
 // signalColor: '#00ff41' (green) | '#f59e0b' (yellow) | '#ef4444' (red)
@@ -183,10 +182,24 @@ export default function Navbar() {
   // Local ESP32 Server & Mesh Connection
   const { isLocalConnected, leaderNode, localUrl } = useLocalConnection();
   const [showLocalMeshDropdown, setShowLocalMeshDropdown] = useState(false);
-  const [showLocalMeshDropdownMobile, setShowLocalMeshDropdownMobile] = useState(false);
+  const [showLocalMeshDropdownMobile, setShowLocalMeshDropdownMobile] =
+    useState(false);
   const [sidebarLocalHover, setSidebarLocalHover] = useState(false);
   const localMeshDropdownRef = useRef(null);
   const localMeshDropdownRefMobile = useRef(null);
+
+  // Offline toast notification state
+  const [offlineToast, setOfflineToast] = useState(null);
+
+  const handleOfflineLinkClick = (e, link) => {
+    if (!isClientOnline && link.href !== "/local") {
+      e.preventDefault();
+      setOfflineToast(
+        `⚠️ ${link.label} is unavailable offline. Use Local Control tab for offline switching.`,
+      );
+      setTimeout(() => setOfflineToast(null), 3500);
+    }
+  };
 
   // Monitor client network state + Network Information API for real-time signal quality
   const [clientNetQuality, setClientNetQuality] = useState({
@@ -370,10 +383,16 @@ export default function Navbar() {
         setShowWifiDropdownMobile(false);
       }
       // Local ESP32 mesh dropdowns
-      if (localMeshDropdownRef.current && !localMeshDropdownRef.current.contains(e.target)) {
+      if (
+        localMeshDropdownRef.current &&
+        !localMeshDropdownRef.current.contains(e.target)
+      ) {
         setShowLocalMeshDropdown(false);
       }
-      if (localMeshDropdownRefMobile.current && !localMeshDropdownRefMobile.current.contains(e.target)) {
+      if (
+        localMeshDropdownRefMobile.current &&
+        !localMeshDropdownRefMobile.current.contains(e.target)
+      ) {
         setShowLocalMeshDropdownMobile(false);
       }
       // Router Wi-Fi dropdowns
@@ -554,6 +573,7 @@ export default function Navbar() {
     "/terms-of-service",
     "/partner-program",
     "/contact-sales",
+    "/local",
   ];
   const PUBLIC_ROUTES = [
     "/privacy-policy",
@@ -664,18 +684,30 @@ export default function Navbar() {
           {links.map((link) => {
             const active = pathname === link.href;
             const Icon = link.icon;
+            const isCloudDisabled = !isClientOnline && link.href !== "/local";
+
             return (
               <Link
                 key={link.href}
                 href={link.href}
-                className={`rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all duration-200 ease-out hover:-translate-y-px hover:bg-accent-bg hover:text-accent flex items-center gap-3 ${
-                  active
-                    ? "bg-accent-bg text-accent"
-                    : "text-text-muted bg-transparent"
+                onClick={(e) => handleOfflineLinkClick(e, link)}
+                className={`rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all duration-200 ease-out flex items-center justify-between ${
+                  isCloudDisabled
+                    ? "opacity-40 cursor-not-allowed text-text-muted/60 bg-transparent hover:bg-transparent"
+                    : active
+                      ? "bg-accent-bg text-accent"
+                      : "text-text-muted bg-transparent hover:-translate-y-px hover:bg-accent-bg hover:text-accent"
                 }`}
               >
-                <Icon size={16} className="stroke-[2.5px]" />
-                <span>{link.label}</span>
+                <div className="flex items-center gap-3">
+                  <Icon size={16} className="stroke-[2.5px]" />
+                  <span>{link.label}</span>
+                </div>
+                {isCloudDisabled && (
+                  <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                    Offline
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -778,7 +810,6 @@ export default function Navbar() {
 
         {/* Right: Theme Toggle, Notifications, Logout */}
         <div className="flex items-center gap-3">
-
           {/* Wi-Fi Client/Internet Network Status Indicator */}
           <div
             className="relative flex items-center"
@@ -1107,8 +1138,8 @@ export default function Navbar() {
           </div>
 
           {/* ESP32 Local Mesh / Server Status Indicator */}
-          <div 
-            className="relative flex items-center" 
+          <div
+            className="relative flex items-center"
             ref={localMeshDropdownRef}
             onMouseLeave={() => setShowLocalMeshDropdown(false)}
           >
@@ -1125,12 +1156,15 @@ export default function Navbar() {
               }}
               className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-center relative ${
                 isLocalConnected
-                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/60 shadow-[0_0_12px_rgba(16,185,129,0.15)]'
-                  : 'border-border bg-transparent text-text-muted/40 hover:text-text-muted hover:border-border/80'
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/60 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
+                  : "border-border bg-transparent text-text-muted/40 hover:text-text-muted hover:border-border/80"
               }`}
               title="ESP32 Local Mesh Server (192.168.4.1)"
             >
-              <Zap size={15} className={`transition-transform duration-300 ${isLocalConnected ? 'fill-emerald-400 text-emerald-400' : ''}`} />
+              <Zap
+                size={15}
+                className={`transition-transform duration-300 ${isLocalConnected ? "fill-emerald-400 text-emerald-400" : ""}`}
+              />
               {isLocalConnected && (
                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full border border-card bg-emerald-400 animate-pulse" />
               )}
@@ -1138,20 +1172,29 @@ export default function Navbar() {
 
             {/* Local Mesh Dropdown Card */}
             {showLocalMeshDropdown && (
-              <div 
-                className="absolute right-0 top-full mt-2.5 w-80 rounded-2xl border border-border bg-card p-4 shadow-2xl z-50 flex flex-col gap-3 animate-scale-in"
-              >
+              <div className="absolute right-0 top-full mt-2.5 w-80 rounded-2xl border border-border bg-card p-4 shadow-2xl z-50 flex flex-col gap-3 animate-scale-in">
                 <div className="flex items-center justify-between border-b border-border pb-2">
                   <div className="flex items-center gap-1.5">
-                    <Zap size={14} className={isLocalConnected ? "text-emerald-400" : "text-text-muted"} />
-                    <span className="text-[10px] font-black text-text uppercase tracking-wider font-label-caps">ESP32 Local Server</span>
+                    <Zap
+                      size={14}
+                      className={
+                        isLocalConnected
+                          ? "text-emerald-400"
+                          : "text-text-muted"
+                      }
+                    />
+                    <span className="text-[10px] font-black text-text uppercase tracking-wider font-label-caps">
+                      ESP32 Local Server
+                    </span>
                   </div>
-                  <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md ${
-                    isLocalConnected
-                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                      : 'bg-border text-text-muted'
-                  }`}>
-                    {isLocalConnected ? 'AP Active' : 'Off Mesh'}
+                  <span
+                    className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md ${
+                      isLocalConnected
+                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                        : "bg-border text-text-muted"
+                    }`}
+                  >
+                    {isLocalConnected ? "AP Active" : "Off Mesh"}
                   </span>
                 </div>
 
@@ -1160,18 +1203,25 @@ export default function Navbar() {
                     <div className="flex flex-col gap-2 text-[11px] text-text-muted">
                       <div className="flex justify-between">
                         <span>Gateway Address:</span>
-                        <span className="text-emerald-400 font-mono font-bold">{localUrl}</span>
+                        <span className="text-emerald-400 font-mono font-bold">
+                          {localUrl}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span>Mesh Role:</span>
-                        <span className="text-text font-bold uppercase">{leaderNode?.role || 'Leader Node'}</span>
+                        <span className="text-text font-bold uppercase">
+                          {leaderNode?.role || "Leader Node"}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span>Local Latency:</span>
-                        <span className="text-emerald-400 font-bold">&lt; 8 ms (Direct RF)</span>
+                        <span className="text-emerald-400 font-bold">
+                          &lt; 8 ms (Direct RF)
+                        </span>
                       </div>
                       <div className="p-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-[10px] text-emerald-300">
-                        ⚡ Autonomous sub-100ms hardware control active. No cloud or router required.
+                        ⚡ Autonomous sub-100ms hardware control active. No
+                        cloud or router required.
                       </div>
                       <Link
                         href="/local"
@@ -1184,9 +1234,16 @@ export default function Navbar() {
                     </div>
                   ) : (
                     <div className="flex flex-col gap-2 text-[10px] text-text-muted leading-relaxed">
-                      <p className="font-bold text-text">Not connected to ESP32 SoftAP</p>
+                      <p className="font-bold text-text">
+                        Not connected to ESP32 SoftAP
+                      </p>
                       <p className="text-[9px]">
-                        To control devices without internet, connect your device to the <strong className="text-text font-mono">HOME-AUTO-XXXX</strong> Wi-Fi network.
+                        To control devices without internet, connect your device
+                        to the{" "}
+                        <strong className="text-text font-mono">
+                          HOME-AUTO-XXXX
+                        </strong>{" "}
+                        Wi-Fi network.
                       </p>
                     </div>
                   )}
@@ -1223,7 +1280,6 @@ export default function Navbar() {
           <span className="whitespace-nowrap font-black">Smart Home</span>
         </Link>
         <div className="flex items-center gap-2">
-
           {/* Wi-Fi Client/Internet Network Status Indicator (Mobile) */}
           <div
             className="relative flex items-center"
@@ -1413,7 +1469,10 @@ export default function Navbar() {
           </div>
 
           {/* Switchboard ESP32 Local Server Status Indicator (Mobile) */}
-          <div className="relative flex items-center" ref={localMeshDropdownRefMobile}>
+          <div
+            className="relative flex items-center"
+            ref={localMeshDropdownRefMobile}
+          >
             <button
               onClick={() => {
                 setShowLocalMeshDropdownMobile(!showLocalMeshDropdownMobile);
@@ -1422,22 +1481,33 @@ export default function Navbar() {
               }}
               className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-center ${
                 isLocalConnected
-                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-                  : 'border-border bg-transparent text-text-muted/40'
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+                  : "border-border bg-transparent text-text-muted/40"
               }`}
             >
-              <Zap size={14} className={isLocalConnected ? 'fill-emerald-400 text-emerald-400' : ''} />
+              <Zap
+                size={14}
+                className={
+                  isLocalConnected ? "fill-emerald-400 text-emerald-400" : ""
+                }
+              />
             </button>
 
             {/* Mobile Dropdown Card */}
             {showLocalMeshDropdownMobile && (
               <div className="fixed top-[70px] right-4 w-[280px] rounded-2xl border border-border bg-card p-4 shadow-2xl z-50 flex flex-col gap-3 animate-scale-in">
                 <div className="flex items-center justify-between border-b border-border pb-2">
-                  <span className="text-[10px] font-black text-text uppercase tracking-wider font-label-caps font-bold">ESP32 Local Mesh</span>
-                  <span className={`text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
-                    isLocalConnected ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-border text-text-muted'
-                  }`}>
-                    {isLocalConnected ? 'Connected' : 'Disconnected'}
+                  <span className="text-[10px] font-black text-text uppercase tracking-wider font-label-caps font-bold">
+                    ESP32 Local Mesh
+                  </span>
+                  <span
+                    className={`text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
+                      isLocalConnected
+                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                        : "bg-border text-text-muted"
+                    }`}
+                  >
+                    {isLocalConnected ? "Connected" : "Disconnected"}
                   </span>
                 </div>
                 <div className="flex flex-col gap-2 text-[10px] text-text-muted font-semibold select-none">
@@ -1445,11 +1515,15 @@ export default function Navbar() {
                     <>
                       <div className="flex justify-between">
                         <span>Gateway IP:</span>
-                        <span className="text-emerald-400 font-mono font-bold">{localUrl}</span>
+                        <span className="text-emerald-400 font-mono font-bold">
+                          {localUrl}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span>Mesh Mode:</span>
-                        <span className="text-text font-bold uppercase">{leaderNode?.role || 'Leader Node'}</span>
+                        <span className="text-text font-bold uppercase">
+                          {leaderNode?.role || "Leader Node"}
+                        </span>
                       </div>
                       <a
                         href={localUrl}
@@ -1464,7 +1538,10 @@ export default function Navbar() {
                   ) : (
                     <div className="flex flex-col gap-1 text-[9px] leading-relaxed text-text-muted">
                       <p className="font-bold text-text">Not on ESP32 SoftAP</p>
-                      <p>Connect Wi-Fi to HOME-AUTO-XXXX for offline direct control.</p>
+                      <p>
+                        Connect Wi-Fi to HOME-AUTO-XXXX for offline direct
+                        control.
+                      </p>
                     </div>
                   )}
                 </div>
@@ -1481,18 +1558,31 @@ export default function Navbar() {
         {bottomBarLinks.map((link) => {
           const active = pathname === link.href && !mobileOpen;
           const Icon = link.icon;
+          const isCloudDisabled = !isClientOnline && link.href !== "/local";
+
           return (
             <Link
               key={link.href}
               href={link.href}
-              onClick={() => setMobileOpen(false)}
+              onClick={(e) => {
+                handleOfflineLinkClick(e, link);
+                setMobileOpen(false);
+              }}
               className={`flex flex-col items-center justify-center gap-1 flex-1 py-1 transition-all ${
-                active ? "text-accent" : "text-text-muted"
+                isCloudDisabled
+                  ? "opacity-35 cursor-not-allowed text-text-muted/40"
+                  : active
+                    ? "text-accent"
+                    : "text-text-muted"
               }`}
             >
               <Icon size={18} className="stroke-[2.5px]" />
               <span className="text-[9px] font-black tracking-tight truncate px-0.5">
-                {link.href === '/' ? 'Home' : link.href === '/local' ? 'Local' : link.label}
+                {link.href === "/"
+                  ? "Home"
+                  : link.href === "/local"
+                    ? "Local"
+                    : link.label}
               </span>
             </Link>
           );
@@ -1552,22 +1642,34 @@ export default function Navbar() {
             {sheetLinks.map((link) => {
               const active = pathname === link.href;
               const Icon = link.icon;
+              const isCloudDisabled = !isClientOnline && link.href !== "/local";
+
               return (
                 <Link
                   key={link.href}
                   href={link.href}
-                  onClick={() => {
+                  onClick={(e) => {
+                    handleOfflineLinkClick(e, link);
                     setMobileOpen(false);
                     setCurrentY(0);
                   }}
-                  className={`rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all flex items-center gap-3 ${
-                    active
-                      ? "bg-accent-bg text-accent"
-                      : "text-text hover:bg-accent-bg/30"
+                  className={`rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all flex items-center justify-between ${
+                    isCloudDisabled
+                      ? "opacity-40 cursor-not-allowed text-text-muted/60"
+                      : active
+                        ? "bg-accent-bg text-accent"
+                        : "text-text hover:bg-accent-bg/30"
                   }`}
                 >
-                  <Icon size={16} className="stroke-[2.5px]" />
-                  <span>{link.label}</span>
+                  <div className="flex items-center gap-3">
+                    <Icon size={16} className="stroke-[2.5px]" />
+                    <span>{link.label}</span>
+                  </div>
+                  {isCloudDisabled && (
+                    <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                      Offline
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -1709,6 +1811,15 @@ export default function Navbar() {
                 Log Out
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {offlineToast && (
+        <div className="fixed top-16 sm:top-20 right-3 left-3 sm:left-auto sm:right-6 z-[10001] bg-card border border-amber-500/50 text-text px-4 py-3 rounded-xl shadow-2xl animate-scale-in text-xs font-bold flex items-center justify-between sm:justify-start gap-2 max-w-md">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-amber-400 animate-pulse shrink-0" />
+            <span className="leading-snug">{offlineToast}</span>
           </div>
         </div>
       )}

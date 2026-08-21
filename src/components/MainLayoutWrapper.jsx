@@ -14,30 +14,43 @@ export default function MainLayoutWrapper({ children }) {
   const router = useRouter();
   const cleanPath = (pathname || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '') || '/';
   const VALID_ROUTES = ['/', '/local', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales'];
-  const PUBLIC_ROUTES = ['/local', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/terms'];
+  const PUBLIC_ROUTES = ['/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/terms'];
   const isTrackPage = cleanPath.startsWith('/track/');
   const isPublicPage = PUBLIC_ROUTES.includes(cleanPath) || isTrackPage;
   const is404Page = !VALID_ROUTES.includes(cleanPath) && !isTrackPage;
   const isLoginPage = cleanPath === '/login';
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(true);
-  const [isClientOnline, setIsClientOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [isClientOnline, setIsClientOnline] = useState(true); // Always true initially to match SSR
   const { isLocalConnected, localUrl } = useLocalConnection();
 
   const fullWidthPage = isLoginPage || is404Page || isPublicPage || (!user && cleanPath === '/');
 
-  // Monitor client online/offline status
+  // Monitor client online/offline status & auto-redirect to /local when offline
   useEffect(() => {
+    // Sync real online state after mount (server always assumed true)
+    const realOnline = navigator.onLine;
+    setIsClientOnline(realOnline);
+    if (!realOnline && cleanPath !== '/local') {
+      router.push('/local');
+    }
+
     const handleOnline = () => setIsClientOnline(true);
-    const handleOffline = () => setIsClientOnline(false);
+    const handleOffline = () => {
+      setIsClientOnline(false);
+      if (cleanPath !== '/local') {
+        router.push('/local');
+      }
+    };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [cleanPath, router]);
 
   // Disable console logs in production mode
   useEffect(() => {
@@ -98,7 +111,7 @@ export default function MainLayoutWrapper({ children }) {
 
   // Loading screens to prevent UI flashes
   // Redirecting loading screen if accessing unauthorized areas while online
-  if (!user && !isLoginPage && !isPublicPage && cleanPath !== '/' && isClientOnline && !isLocalConnected) {
+  if (!user && !isLoginPage && !isPublicPage && cleanPath !== '/' && cleanPath !== '/local' && isClientOnline && !isLocalConnected) {
     return <Loader message="Redirecting to login..." />;
   }
   if (user && isLoginPage) {
