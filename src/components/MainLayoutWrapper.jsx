@@ -20,7 +20,7 @@ export default function MainLayoutWrapper({ children }) {
   const is404Page = !VALID_ROUTES.includes(cleanPath) && !isTrackPage;
   const isLoginPage = cleanPath === '/login';
   const [user, setUser] = useState(null);
-  const [authChecked, setAuthChecked] = useState(false);
+  const [authChecked, setAuthChecked] = useState(true);
   const [isClientOnline, setIsClientOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const { isLocalConnected, localUrl } = useLocalConnection();
 
@@ -39,7 +39,7 @@ export default function MainLayoutWrapper({ children }) {
     };
   }, []);
 
-  // Disable console logs in production mode to protect tokens and output
+  // Disable console logs in production mode
   useEffect(() => {
     if (typeof window !== 'undefined' && process.env.NODE_ENV === 'production') {
       console.log = () => {};
@@ -58,38 +58,19 @@ export default function MainLayoutWrapper({ children }) {
     }
   }, [pathname]);
 
-  // Monitor auth state and enforce route protection centrally with fast offline fallback
+  // Non-blocking background auth session check
   useEffect(() => {
     let active = true;
 
-    // Safety timeout: Never hang on "Verifying authentication..." for more than 1 second if offline / on ESP32 AP
-    const fallbackTimer = setTimeout(() => {
-      if (active && !authChecked) {
-        setAuthChecked(true);
-      }
-    }, 1000);
-
     const checkSession = async () => {
       try {
-        // Immediate bypass for local route or offline mode
-        if (cleanPath === '/local' || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-          if (active) {
-            setAuthChecked(true);
-            clearTimeout(fallbackTimer);
-          }
-          return;
-        }
+        if (cleanPath === '/local') return;
 
-        const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise((res) => setTimeout(() => res(null), 1200));
-
-        const res = await Promise.race([sessionPromise, timeoutPromise]);
+        const { data: { session } } = await supabase.auth.getSession();
         if (!active) return;
-        clearTimeout(fallbackTimer);
 
-        const currentUser = res?.data?.session?.user || null;
+        const currentUser = session?.user || null;
         setUser(currentUser);
-        setAuthChecked(true);
 
         if (!currentUser && !isLoginPage && !isPublicPage && cleanPath !== '/' && navigator.onLine) {
           router.push('/login');
@@ -97,9 +78,7 @@ export default function MainLayoutWrapper({ children }) {
           router.push('/');
         }
       } catch (err) {
-        if (!active) return;
-        clearTimeout(fallbackTimer);
-        setAuthChecked(true);
+        // Silent catch for offline / AP mode
       }
     };
 
@@ -109,21 +88,15 @@ export default function MainLayoutWrapper({ children }) {
       if (!active) return;
       const currentUser = session?.user || null;
       setUser(currentUser);
-      setAuthChecked(true);
     });
 
     return () => {
       active = false;
-      clearTimeout(fallbackTimer);
       subscription.unsubscribe();
     };
   }, [isLoginPage, cleanPath, router, isPublicPage]);
 
   // Loading screens to prevent UI flashes
-  if (!authChecked) {
-    return <Loader message="Verifying authentication..." />;
-  }
-
   // Redirecting loading screen if accessing unauthorized areas while online
   if (!user && !isLoginPage && !isPublicPage && cleanPath !== '/' && isClientOnline && !isLocalConnected) {
     return <Loader message="Redirecting to login..." />;
