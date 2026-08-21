@@ -25,7 +25,10 @@ export default function Dashboard() {
     expandedBoards,
     setExpandedBoards,
     loading,
-    setLoading
+    setLoading,
+    controlDevice,
+    controlAll,
+    isLocalConnected
   } = useDashboardData();
 
   const [toast, setToast] = useState('');
@@ -159,25 +162,9 @@ export default function Dashboard() {
   }, []);
 
   const toggleDevice = useCallback(async (device) => {
-    if (!user) return;
-    const newState = !device.is_on;
-    await supabase
-      .from('devices')
-      .update({ is_on: newState, last_changed: new Date().toISOString() })
-      .eq('id', device.id);
-
-    try {
-      await supabase.from('activity_logs').insert({
-        user_id: user.id,
-        device_id: device.id,
-        device_name: device.name,
-        action: newState ? 'turned ON' : 'turned OFF',
-        triggered_by: 'Manual Web Dashboard'
-      });
-    } catch (e) {
-      console.warn(e);
-    }
-  }, [user]);
+    if (!device) return;
+    await controlDevice(device, !device.is_on, 'Manual Dashboard Switch');
+  }, [controlDevice]);
 
   const isPresetActive = useCallback((preset) => {
     let actions = preset.actions;
@@ -192,164 +179,67 @@ export default function Dashboard() {
   }, [devices]);
 
   const applyPreset = useCallback(async (preset, deactivate = false) => {
-    if (!user) return;
     let actions = preset.actions;
     if (typeof actions === 'string') {
       try { actions = JSON.parse(actions); } catch(e) { actions = []; }
     }
     for (const action of actions || []) {
       const targetState = deactivate ? !action.is_on : action.is_on;
-      await supabase
-        .from('devices')
-        .update({ is_on: targetState, last_changed: new Date().toISOString() })
-        .eq('id', action.device_id);
-
       const device = devices.find(d => d.id === action.device_id);
       if (device) {
-        try {
-          await supabase.from('activity_logs').insert({
-            user_id: user.id,
-            device_id: device.id,
-            device_name: device.name,
-            action: targetState ? 'turned ON' : 'turned OFF',
-            triggered_by: `Preset: ${preset.name}`
-          });
-        } catch (e) {
-          console.warn(e);
-        }
+        await controlDevice(device, targetState, `Preset: ${preset.name}`);
       }
     }
     showToast(`${deactivate ? 'Deactivated' : 'Activated'}: ${preset.name}`);
-  }, [devices, user, showToast]);
+  }, [devices, controlDevice, showToast]);
 
   const deletePreset = useCallback(async (presetId) => {
     await supabase.from('presets').delete().eq('id', presetId);
     setPresets(prev => prev.filter(p => p.id !== presetId));
     showToast('Preset deleted');
-  }, [showToast]);
-
+  }, [showToast, setPresets]);
 
   const turnAllDevicesOn = useCallback(async () => {
-    if (!user) return;
     if (devices.length === 0) {
       showToast('No devices available to turn ON. Please add a board first.');
       return;
     }
-    const devicesToTurnOn = devices.filter(d => !d.is_on);
-    if (devicesToTurnOn.length === 0) {
-      showToast('All devices are already ON');
-      return;
-    }
-    
-    setDevices(prev => prev.map(d => ({ ...d, is_on: true })));
-    
-    await Promise.all(devicesToTurnOn.map(async (device) => {
-      await supabase.from('devices').update({ is_on: true, last_changed: new Date().toISOString() }).eq('id', device.id);
-      try {
-        await supabase.from('activity_logs').insert({
-          user_id: user.id,
-          device_id: device.id,
-          device_name: device.name,
-          action: 'turned ON',
-          triggered_by: 'Global All ON'
-        });
-      } catch (e) {
-        console.warn(e);
-      }
-    }));
+    await controlAll('on', 'Global Dashboard');
     showToast('All devices turned ON');
-  }, [devices, user, showToast]);
+  }, [devices, controlAll, showToast]);
 
   const turnAllDevicesOff = useCallback(async () => {
-    if (!user) return;
     if (devices.length === 0) {
       showToast('No devices available to turn OFF. Please add a board first.');
       return;
     }
-    const devicesToTurnOff = devices.filter(d => d.is_on);
-    if (devicesToTurnOff.length === 0) {
-      showToast('All devices are already OFF');
-      return;
-    }
-    
-    setDevices(prev => prev.map(d => ({ ...d, is_on: false })));
-    
-    await Promise.all(devicesToTurnOff.map(async (device) => {
-      await supabase.from('devices').update({ is_on: false, last_changed: new Date().toISOString() }).eq('id', device.id);
-      try {
-        await supabase.from('activity_logs').insert({
-          user_id: user.id,
-          device_id: device.id,
-          device_name: device.name,
-          action: 'turned OFF',
-          triggered_by: 'Global All OFF'
-        });
-      } catch (e) {
-        console.warn(e);
-      }
-    }));
+    await controlAll('off', 'Global Dashboard');
     showToast('All devices turned OFF');
-  }, [devices, user, showToast]);
+  }, [devices, controlAll, showToast]);
 
   const getDevicesForBoard = useCallback((boardId) => {
     return devices.filter(d => d.board_id === boardId);
   }, [devices]);
 
   const turnBoardDevicesOn = useCallback(async (boardId, boardName) => {
-    if (!user) return;
     const boardDevices = getDevicesForBoard(boardId);
-    const devicesToTurnOn = boardDevices.filter(d => !d.is_on);
-    if (devicesToTurnOn.length === 0) {
-      showToast(`All devices on ${boardName} are already ON`);
+    if (boardDevices.length === 0) {
+      showToast(`No devices found on ${boardName}`);
       return;
     }
-    
-    setDevices(prev => prev.map(d => d.board_id === boardId ? { ...d, is_on: true } : d));
-    
-    await Promise.all(devicesToTurnOn.map(async (device) => {
-      await supabase.from('devices').update({ is_on: true, last_changed: new Date().toISOString() }).eq('id', device.id);
-      try {
-        await supabase.from('activity_logs').insert({
-          user_id: user.id,
-          device_id: device.id,
-          device_name: device.name,
-          action: 'turned ON',
-          triggered_by: `Board All ON: ${boardName}`
-        });
-      } catch (e) {
-        console.warn(e);
-      }
-    }));
+    await Promise.all(boardDevices.map(d => controlDevice(d, true, `Board All ON: ${boardName}`)));
     showToast(`All devices on ${boardName} turned ON`);
-  }, [getDevicesForBoard, user, showToast]);
+  }, [getDevicesForBoard, controlDevice, showToast]);
 
   const turnBoardDevicesOff = useCallback(async (boardId, boardName) => {
-    if (!user) return;
     const boardDevices = getDevicesForBoard(boardId);
-    const devicesToTurnOff = boardDevices.filter(d => d.is_on);
-    if (devicesToTurnOff.length === 0) {
-      showToast(`All devices on ${boardName} are already OFF`);
+    if (boardDevices.length === 0) {
+      showToast(`No devices found on ${boardName}`);
       return;
     }
-    
-    setDevices(prev => prev.map(d => d.board_id === boardId ? { ...d, is_on: false } : d));
-    
-    await Promise.all(devicesToTurnOff.map(async (device) => {
-      await supabase.from('devices').update({ is_on: false, last_changed: new Date().toISOString() }).eq('id', device.id);
-      try {
-        await supabase.from('activity_logs').insert({
-          user_id: user.id,
-          device_id: device.id,
-          device_name: device.name,
-          action: 'turned OFF',
-          triggered_by: `Board All OFF: ${boardName}`
-        });
-      } catch (e) {
-        console.warn(e);
-      }
-    }));
+    await Promise.all(boardDevices.map(d => controlDevice(d, false, `Board All OFF: ${boardName}`)));
     showToast(`All devices on ${boardName} turned OFF`);
-  }, [getDevicesForBoard, user, showToast]);
+  }, [getDevicesForBoard, controlDevice, showToast]);
 
   const addBoard = useCallback(async (e) => {
     e.preventDefault();

@@ -21,6 +21,7 @@ const int INPUT_PINS[NUM_DEVICES] = {19, 18, 5, 17};
 // ============================================================
 //  CREDENTIALS & CONFIGURATION
 // ============================================================
+<<<<<<< HEAD
 const char* ssid     = "V2029";
 const char* password = "";
 
@@ -34,6 +35,14 @@ const char* AP_PASS = "12345678"; // Min 8 chars for WPA2
 IPAddress AP_IP(192, 168, 4, 1);
 IPAddress AP_GATEWAY(192, 168, 4, 1);
 IPAddress AP_SUBNET(255, 255, 255, 0);
+=======
+const char* ssid     = "You-wifi_anme";
+const char* password = "you_Password";
+
+const char* BOARD_IDENTIFIER = "you_board_identifier";
+const char* SUPABASE_BASE = "you_api_key_here";
+const char* SUPABASE_SERVICE_KEY = "you_key_here"; 
+>>>>>>> 21b6d4f91f39143be1c452e38bd4eb943f7a0728
 
 // ============================================================
 //  VARIABLES & STATE

@@ -26,7 +26,14 @@ import {
   Wifi,
   WifiOff,
   Zap,
+<<<<<<< HEAD
 } from "lucide-react";
+=======
+  Radio,
+  ExternalLink
+} from 'lucide-react';
+import useLocalConnection from '@/hooks/useLocalConnection';
+>>>>>>> 21b6d4f91f39143be1c452e38bd4eb943f7a0728
 
 // A custom sub-component for pixel-perfect dynamic Wi-Fi bars
 // signalColor: '#00ff41' (green) | '#f59e0b' (yellow) | '#ef4444' (red)
@@ -175,6 +182,14 @@ export default function Navbar() {
     useState(false);
   const wifiNetDropdownRef = useRef(null);
   const wifiNetDropdownRefMobile = useRef(null);
+
+  // Local ESP32 Server & Mesh Connection
+  const { isLocalConnected, leaderNode, localUrl } = useLocalConnection();
+  const [showLocalMeshDropdown, setShowLocalMeshDropdown] = useState(false);
+  const [showLocalMeshDropdownMobile, setShowLocalMeshDropdownMobile] = useState(false);
+  const [sidebarLocalHover, setSidebarLocalHover] = useState(false);
+  const localMeshDropdownRef = useRef(null);
+  const localMeshDropdownRefMobile = useRef(null);
 
   // Monitor client network state + Network Information API for real-time signal quality
   const [clientNetQuality, setClientNetQuality] = useState({
@@ -356,6 +371,13 @@ export default function Navbar() {
         !wifiDropdownRefMobile.current.contains(e.target)
       ) {
         setShowWifiDropdownMobile(false);
+      }
+      // Local ESP32 mesh dropdowns
+      if (localMeshDropdownRef.current && !localMeshDropdownRef.current.contains(e.target)) {
+        setShowLocalMeshDropdown(false);
+      }
+      if (localMeshDropdownRefMobile.current && !localMeshDropdownRefMobile.current.contains(e.target)) {
+        setShowLocalMeshDropdownMobile(false);
       }
       // Router Wi-Fi dropdowns
       if (
@@ -661,6 +683,120 @@ export default function Navbar() {
             );
           })}
         </nav>
+
+        {/* Local Autonomy Section */}
+        <div 
+          className="flex flex-col gap-1.5 mt-2 relative"
+          onMouseEnter={() => setSidebarLocalHover(true)}
+          onMouseLeave={() => setSidebarLocalHover(false)}
+        >
+          <span className="text-[9px] font-extrabold uppercase tracking-widest text-text-muted px-2 mb-1 flex items-center justify-between">
+            <span>LOCAL MESH</span>
+            <span className={`w-1.5 h-1.5 rounded-full ${isLocalConnected ? 'bg-emerald-400 animate-pulse' : 'bg-red-500/70'}`} />
+          </span>
+          <a
+            href={isLocalConnected ? localUrl : undefined}
+            onClick={(e) => {
+              if (!isLocalConnected) {
+                e.preventDefault();
+              }
+            }}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all duration-200 flex items-center justify-between group ${
+              isLocalConnected
+                ? 'text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.1)]'
+                : 'text-text-muted/60 bg-card-alt/30 border border-border/50 hover:border-red-500/30 hover:bg-red-500/5 cursor-not-allowed'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Zap size={16} className={`stroke-[2.5px] ${isLocalConnected ? 'text-emerald-400 fill-emerald-400/20' : 'text-text-muted/40'}`} />
+              <span>Local Control</span>
+            </div>
+            {isLocalConnected ? (
+              <ExternalLink size={13} className="text-emerald-400/70 group-hover:text-emerald-300 transition-colors" />
+            ) : (
+              <span className="text-[9px] font-bold uppercase tracking-wider text-red-400/80 px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20">
+                Offline
+              </span>
+            )}
+          </a>
+
+          {/* Sidebar Local Mesh Hover Popover Card */}
+          {sidebarLocalHover && (
+            <div 
+              className="absolute left-full top-0 ml-3 w-80 rounded-2xl border border-border bg-card p-4 shadow-2xl z-50 flex flex-col gap-3 animate-scale-in select-none"
+            >
+              <div className="flex items-center justify-between border-b border-border pb-2">
+                <div className="flex items-center gap-1.5">
+                  <Zap size={14} className={isLocalConnected ? "text-emerald-400" : "text-red-400"} />
+                  <span className="text-[10px] font-black text-text uppercase tracking-wider font-label-caps">ESP32 Local Mesh</span>
+                </div>
+                <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md ${
+                  isLocalConnected
+                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                    : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                }`}>
+                  {isLocalConnected ? 'AP Active' : 'Offline / Off Mesh'}
+                </span>
+              </div>
+
+              <div className="flex flex-col gap-2 text-xs font-semibold select-none">
+                {isLocalConnected ? (
+                  <div className="flex flex-col gap-2 text-[11px] text-text-muted">
+                    <div className="flex justify-between">
+                      <span>Gateway Address:</span>
+                      <span className="text-emerald-400 font-mono font-bold">{localUrl}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Mesh Role:</span>
+                      <span className="text-text font-bold uppercase">{leaderNode?.role || 'Leader Node'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Response Latency:</span>
+                      <span className="text-emerald-400 font-bold">&lt; 8 ms (Direct RF)</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-[10px] text-emerald-300">
+                      ⚡ Autonomous sub-100ms hardware control active. No router or internet required.
+                    </div>
+                    <a
+                      href={localUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 flex items-center justify-center gap-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 py-2 px-3 rounded-xl border border-emerald-500/30 text-xs font-bold transition-colors"
+                    >
+                      <span>Open Direct AP Panel</span>
+                      <ExternalLink size={13} />
+                    </a>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2 text-[10px] text-text-muted leading-relaxed">
+                    <div className="flex items-start gap-2 p-2 rounded-lg bg-red-500/8 border border-red-500/20 text-red-400">
+                      <span className="text-sm">⚠️</span>
+                      <div>
+                        <p className="font-bold text-[10px]">ESP32 SoftAP Not Detected</p>
+                        <p className="text-[9px] text-text-muted leading-tight mt-0.5">
+                          Direct local control is unavailable until connected to the ESP32 Wi-Fi mesh.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex justify-between text-[10px]">
+                      <span>Target Network:</span>
+                      <span className="text-text font-mono font-bold">HOME-AUTO-LEADER</span>
+                    </div>
+                    <div className="flex justify-between text-[10px]">
+                      <span>Default Gateway:</span>
+                      <span className="text-text font-mono font-bold">192.168.4.1</span>
+                    </div>
+                    <p className="text-[9px] text-text-muted/80 pt-1">
+                      💡 Tip: Connect your phone or PC Wi-Fi to <strong>HOME-AUTO-LEADER</strong> to control all switches offline.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Support & Legal Section */}
         <div className="flex flex-col gap-1.5 mt-2">
@@ -1096,6 +1232,96 @@ export default function Navbar() {
             )}
           </div>
 
+          {/* ESP32 Local Mesh / Server Status Indicator */}
+          <div 
+            className="relative flex items-center" 
+            ref={localMeshDropdownRef}
+            onMouseLeave={() => setShowLocalMeshDropdown(false)}
+          >
+            <button
+              onClick={() => {
+                setShowLocalMeshDropdown(!showLocalMeshDropdown);
+                setShowWifiDropdown(false);
+                setShowWifiNetDropdown(false);
+              }}
+              onMouseEnter={() => {
+                setShowLocalMeshDropdown(true);
+                setShowWifiDropdown(false);
+                setShowWifiNetDropdown(false);
+              }}
+              className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-center relative ${
+                isLocalConnected
+                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/60 shadow-[0_0_12px_rgba(16,185,129,0.15)]'
+                  : 'border-border bg-transparent text-text-muted/40 hover:text-text-muted hover:border-border/80'
+              }`}
+              title="ESP32 Local Mesh Server (192.168.4.1)"
+            >
+              <Zap size={15} className={`transition-transform duration-300 ${isLocalConnected ? 'fill-emerald-400 text-emerald-400' : ''}`} />
+              {isLocalConnected && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full border border-card bg-emerald-400 animate-pulse" />
+              )}
+            </button>
+
+            {/* Local Mesh Dropdown Card */}
+            {showLocalMeshDropdown && (
+              <div 
+                className="absolute right-0 top-full mt-2.5 w-80 rounded-2xl border border-border bg-card p-4 shadow-2xl z-50 flex flex-col gap-3 animate-scale-in"
+              >
+                <div className="flex items-center justify-between border-b border-border pb-2">
+                  <div className="flex items-center gap-1.5">
+                    <Zap size={14} className={isLocalConnected ? "text-emerald-400" : "text-text-muted"} />
+                    <span className="text-[10px] font-black text-text uppercase tracking-wider font-label-caps">ESP32 Local Server</span>
+                  </div>
+                  <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md ${
+                    isLocalConnected
+                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                      : 'bg-border text-text-muted'
+                  }`}>
+                    {isLocalConnected ? 'AP Active' : 'Off Mesh'}
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-2 text-xs font-semibold select-none">
+                  {isLocalConnected ? (
+                    <div className="flex flex-col gap-2 text-[11px] text-text-muted">
+                      <div className="flex justify-between">
+                        <span>Gateway Address:</span>
+                        <span className="text-emerald-400 font-mono font-bold">{localUrl}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Mesh Role:</span>
+                        <span className="text-text font-bold uppercase">{leaderNode?.role || 'Leader Node'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Local Latency:</span>
+                        <span className="text-emerald-400 font-bold">&lt; 8 ms (Direct RF)</span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-[10px] text-emerald-300">
+                        ⚡ Autonomous sub-100ms hardware control active. No cloud or router required.
+                      </div>
+                      <a
+                        href={localUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 flex items-center justify-center gap-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 py-2 px-3 rounded-xl border border-emerald-500/30 text-xs font-bold transition-colors"
+                      >
+                        <span>Open Direct AP Panel</span>
+                        <ExternalLink size={13} />
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2 text-[10px] text-text-muted leading-relaxed">
+                      <p className="font-bold text-text">Not connected to ESP32 SoftAP</p>
+                      <p className="text-[9px]">
+                        To control devices without internet, connect your device to the <strong className="text-text font-mono">HOME-AUTO-XXXX</strong> Wi-Fi network.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           <ThemeToggle size={15} />
 
           <button
@@ -1316,6 +1542,66 @@ export default function Navbar() {
                         </div>
                       );
                     })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Switchboard ESP32 Local Server Status Indicator (Mobile) */}
+          <div className="relative flex items-center" ref={localMeshDropdownRefMobile}>
+            <button
+              onClick={() => {
+                setShowLocalMeshDropdownMobile(!showLocalMeshDropdownMobile);
+                setShowWifiDropdownMobile(false);
+                setShowWifiNetDropdownMobile(false);
+              }}
+              className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-center ${
+                isLocalConnected
+                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                  : 'border-border bg-transparent text-text-muted/40'
+              }`}
+            >
+              <Zap size={14} className={isLocalConnected ? 'fill-emerald-400 text-emerald-400' : ''} />
+            </button>
+
+            {/* Mobile Dropdown Card */}
+            {showLocalMeshDropdownMobile && (
+              <div className="fixed top-[70px] right-4 w-[280px] rounded-2xl border border-border bg-card p-4 shadow-2xl z-50 flex flex-col gap-3 animate-scale-in">
+                <div className="flex items-center justify-between border-b border-border pb-2">
+                  <span className="text-[10px] font-black text-text uppercase tracking-wider font-label-caps font-bold">ESP32 Local Mesh</span>
+                  <span className={`text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
+                    isLocalConnected ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-border text-text-muted'
+                  }`}>
+                    {isLocalConnected ? 'Connected' : 'Disconnected'}
+                  </span>
+                </div>
+                <div className="flex flex-col gap-2 text-[10px] text-text-muted font-semibold select-none">
+                  {isLocalConnected ? (
+                    <>
+                      <div className="flex justify-between">
+                        <span>Gateway IP:</span>
+                        <span className="text-emerald-400 font-mono font-bold">{localUrl}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Mesh Mode:</span>
+                        <span className="text-text font-bold uppercase">{leaderNode?.role || 'Leader Node'}</span>
+                      </div>
+                      <a
+                        href={localUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 flex items-center justify-center gap-1.5 bg-emerald-500/20 text-emerald-300 py-1.5 px-3 rounded-lg text-[10px] font-bold"
+                      >
+                        <span>Open Local AP Panel</span>
+                        <ExternalLink size={11} />
+                      </a>
+                    </>
+                  ) : (
+                    <div className="flex flex-col gap-1 text-[9px] leading-relaxed text-text-muted">
+                      <p className="font-bold text-text">Not on ESP32 SoftAP</p>
+                      <p>Connect Wi-Fi to HOME-AUTO-XXXX for offline direct control.</p>
+                    </div>
                   )}
                 </div>
               </div>

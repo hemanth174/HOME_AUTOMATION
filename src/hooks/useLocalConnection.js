@@ -35,8 +35,16 @@ export default function useLocalConnection() {
   }, []);
 
   useEffect(() => {
+<<<<<<< HEAD
     checkConnection();
     const interval = setInterval(checkConnection, 5000);
+=======
+    // Initial probe
+    checkConnection();
+
+    // Probe every 6 seconds in background
+    const interval = setInterval(checkConnection, 6000);
+>>>>>>> 21b6d4f91f39143be1c452e38bd4eb943f7a0728
     return () => clearInterval(interval);
   }, [checkConnection]);
 
