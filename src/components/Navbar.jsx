@@ -569,6 +569,7 @@ export default function Navbar() {
 
   const links = [
     { href: "/", label: "Dashboard", icon: LayoutGrid },
+    { href: "/local", label: "Local Control", icon: Zap },
     { href: "/presets", label: "Presets", icon: SlidersHorizontal },
     { href: "/boards", label: "Boards", icon: Cpu },
     { href: "/schedules", label: "Schedules", icon: CalendarDays },
@@ -884,15 +885,6 @@ export default function Navbar() {
 
         {/* Right: Theme Toggle, Notifications, Logout */}
         <div className="flex items-center gap-3">
-          {/* Local Mesh Quick Access Button */}
-          <Link
-            href="/local"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border bg-card-alt/40 hover:bg-accent-bg hover:border-accent/40 text-text-muted hover:text-accent transition-all text-xs font-extrabold shadow-sm"
-            title="Open Local Autonomous Controller (Sub-30ms)"
-          >
-            <Zap size={14} className="text-accent animate-pulse" />
-            <span className="hidden lg:inline">Local Mesh</span>
-          </Link>
 
           {/* Wi-Fi Client/Internet Network Status Indicator */}
           <div
@@ -1288,15 +1280,14 @@ export default function Navbar() {
                       <div className="p-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-[10px] text-emerald-300">
                         ⚡ Autonomous sub-100ms hardware control active. No cloud or router required.
                       </div>
-                      <a
-                        href={localUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <Link
+                        href="/local"
+                        onClick={() => setShowLocalMeshDropdown(false)}
                         className="mt-1 flex items-center justify-center gap-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 py-2 px-3 rounded-xl border border-emerald-500/30 text-xs font-bold transition-colors"
                       >
-                        <span>Open Direct AP Panel</span>
-                        <ExternalLink size={13} />
-                      </a>
+                        <span>Open Local Control Panel</span>
+                        <Zap size={13} className="text-emerald-400" />
+                      </Link>
                     </div>
                   ) : (
                     <div className="flex flex-col gap-2 text-[10px] text-text-muted leading-relaxed">

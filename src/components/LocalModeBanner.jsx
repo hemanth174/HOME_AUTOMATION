@@ -1,62 +1,79 @@
 'use client';
 
-import { Zap, WifiOff, ExternalLink, ShieldCheck, Wifi } from 'lucide-react';
+import Link from 'next/link';
+import { Zap, ShieldCheck, WifiOff } from 'lucide-react';
 
-export default function LocalModeBanner({ isClientOnline, isLocalConnected, localUrl = 'http://192.168.4.1' }) {
-  // Scenario 1: Router/Internet is dead, but connected to ESP32 SoftAP
+export default function LocalModeBanner({ isClientOnline, isLocalConnected }) {
+  // Scenario 1: No Internet, but connected to ESP32 SoftAP (HOME-AUTO-LEADER)
   if (!isClientOnline && isLocalConnected) {
     return (
-      <div className="pt-16 max-md:pt-14">
-        <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2.5 text-amber-200 text-xs sm:text-sm flex flex-col sm:flex-row items-center justify-between gap-2 transition-all">
+      <div className="pt-14 sm:pt-16 w-full">
+        <div className="bg-amber-500/15 border-b border-amber-500/30 px-3 py-2 text-amber-200 text-xs flex flex-wrap items-center justify-between gap-2 shadow-md">
           <div className="flex items-center gap-2">
-            <span className="flex h-2.5 w-2.5 relative">
+            <span className="flex h-2.5 w-2.5 relative shrink-0">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
             </span>
-            <div className="flex items-center gap-1.5 font-medium">
-              <Zap className="w-4 h-4 text-amber-400 " />
-              <span>Local Autonomous Mode:</span>
+            <div className="flex items-center gap-1.5 font-bold">
+              <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Offline Mode:</span>
             </div>
-            <span className="text-amber-300/80 hidden sm:inline">
-              Internet offline. Controlling devices directly via ESP32 local server (192.168.4.1).
+            <span className="text-amber-200/90 text-xs">
+              Connected to ESP32 Wi-Fi. Use Local Control tab for sub-30ms hardware access.
             </span>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <a
-              href={localUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 px-2.5 py-1 rounded-md border border-amber-500/40 text-xs transition-colors font-mono"
-            >
-              <span>Open ESP32 AP Panel</span>
-              <ExternalLink className="w-3 h-3" />
-            </a>
-          </div>
+          <Link
+            href="/local"
+            className="flex items-center gap-1 bg-amber-500/30 hover:bg-amber-500/40 text-amber-100 px-3 py-1 rounded-lg border border-amber-500/50 text-xs font-extrabold transition-all shrink-0"
+          >
+            <span>Open Local Control</span>
+            <Zap className="w-3.5 h-3.5" />
+          </Link>
         </div>
       </div>
     );
   }
 
-  // Scenario 2: Mobile Data active (Internet online) + ESP32 Local connected concurrently
+  // Scenario 2: Internet active + ESP32 Local connected
   if (isClientOnline && isLocalConnected) {
     return (
-      <div className="pt-16 max-md:pt-14">
-        <div className="bg-emerald-500/10 border-b border-emerald-500/20 px-4 py-1.5 text-emerald-300 text-xs flex items-center justify-between gap-2">
+      <div className="pt-14 sm:pt-16 w-full">
+        <div className="bg-emerald-500/10 border-b border-emerald-500/20 px-3 py-1.5 text-emerald-300 text-xs flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>
-              Dual-Plane Active: Connected to ESP32 Local Server & Cloud Sync synchronized.
+            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="text-xs">
+              ESP32 Local Mesh active & synced. Open Local Control for sub-30ms offline switching.
             </span>
           </div>
-          <a
-            href={localUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1 underline underline-offset-2 text-[11px]"
+          <Link
+            href="/local"
+            className="flex items-center gap-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 px-2.5 py-1 rounded-lg border border-emerald-500/30 text-xs font-bold transition-all shrink-0"
           >
-            <span>ESP32 AP (192.168.4.1)</span>
-            <ExternalLink className="w-2.5 h-2.5" />
-          </a>
+            <span>Local Control</span>
+            <Zap className="w-3 h-3 text-emerald-400" />
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Scenario 3: Internet is offline and NOT connected to ESP32
+  if (!isClientOnline && !isLocalConnected) {
+    return (
+      <div className="pt-14 sm:pt-16 w-full">
+        <div className="bg-red-500/15 border-b border-red-500/30 px-3 py-2 text-red-200 text-xs flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <WifiOff className="w-4 h-4 text-red-400 shrink-0" />
+            <span>
+              You are offline. Connect Wi-Fi to <strong>HOME-AUTO-LEADER</strong> for local hardware control.
+            </span>
+          </div>
+          <Link
+            href="/local"
+            className="flex items-center gap-1 bg-red-500/20 hover:bg-red-500/30 text-red-100 px-2.5 py-1 rounded-lg border border-red-500/40 text-xs font-bold transition-all shrink-0"
+          >
+            <span>Local Tab</span>
+          </Link>
         </div>
       </div>
     );

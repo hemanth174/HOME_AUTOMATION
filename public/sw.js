@@ -1,6 +1,7 @@
-const CACHE_NAME = 'smart-home-offline-v3';
+const CACHE_NAME = 'smart-home-offline-v4';
 const STATIC_ASSETS = [
   '/',
+  '/local',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
@@ -29,11 +30,10 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // CRITICAL: Completely bypass service worker for dev server, localhost, Next.js HMR, Turbopack, and APIs
+  // CRITICAL: Bypass service worker for dev server HMR, Supabase APIs, and non-GET requests
   if (
     url.hostname === 'localhost' ||
     url.hostname === '127.0.0.1' ||
-    url.pathname.startsWith('/_next') ||
     url.pathname.includes('webpack') ||
     url.pathname.includes('turbopack') ||
     url.pathname.startsWith('/api/') ||
@@ -43,18 +43,15 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Only apply offline caching in production deployments for static shell assets
+  // Network-first with cache fallback strategy for JS/CSS assets and pages when offline
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-      return fetch(event.request).then((networkResponse) => {
+    fetch(event.request)
+      .then((networkResponse) => {
         if (
           networkResponse &&
           networkResponse.status === 200 &&
           networkResponse.type === 'basic' &&
-          STATIC_ASSETS.includes(url.pathname)
+          (STATIC_ASSETS.includes(url.pathname) || url.pathname.startsWith('/_next/static/'))
         ) {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
@@ -62,12 +59,18 @@ self.addEventListener('fetch', (event) => {
           });
         }
         return networkResponse;
-      }).catch(() => {
-        if (event.request.mode === 'navigate') {
-          return caches.match('/');
-        }
-        return new Response('Offline mode active.', { status: 503 });
-      });
-    })
+      })
+      .catch(() => {
+        // Fallback to cache when network fails (e.g. connected to offline ESP32 SoftAP)
+        return caches.match(event.request).then((cachedResponse) => {
+          if (cachedResponse) {
+            return cachedResponse;
+          }
+          if (event.request.mode === 'navigate') {
+            return caches.match('/local').then((localCache) => localCache || caches.match('/'));
+          }
+          return new Response('Offline mode active.', { status: 503 });
+        });
+      })
   );
 });
