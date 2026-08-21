@@ -26,14 +26,11 @@ import {
   Wifi,
   WifiOff,
   Zap,
-<<<<<<< HEAD
+
 } from "lucide-react";
-=======
-  Radio,
-  ExternalLink
-} from 'lucide-react';
+
 import useLocalConnection from '@/hooks/useLocalConnection';
->>>>>>> 21b6d4f91f39143be1c452e38bd4eb943f7a0728
+
 
 // A custom sub-component for pixel-perfect dynamic Wi-Fi bars
 // signalColor: '#00ff41' (green) | '#f59e0b' (yellow) | '#ef4444' (red)
