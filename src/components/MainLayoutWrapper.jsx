@@ -10,8 +10,8 @@ import Loader from './Loader';
 export default function MainLayoutWrapper({ children }) {
   const pathname = usePathname();
   const cleanPath = (pathname || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '') || '/';
-  const VALID_ROUTES = ['/', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales'];
-  const PUBLIC_ROUTES = ['/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/terms'];
+  const VALID_ROUTES = ['/', '/local', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales'];
+  const PUBLIC_ROUTES = ['/local', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/terms'];
   const isTrackPage = cleanPath.startsWith('/track/');
   const isPublicPage = PUBLIC_ROUTES.includes(cleanPath) || isTrackPage;
   const is404Page = !VALID_ROUTES.includes(cleanPath) && !isTrackPage;
