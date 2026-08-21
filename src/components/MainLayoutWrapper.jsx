@@ -58,20 +58,39 @@ export default function MainLayoutWrapper({ children }) {
     }
   }, [pathname]);
 
-  // Monitor auth state and enforce route protection centrally
+  // Monitor auth state and enforce route protection centrally with fast offline fallback
   useEffect(() => {
     let active = true;
 
+    // Safety timeout: Never hang on "Verifying authentication..." for more than 1 second if offline / on ESP32 AP
+    const fallbackTimer = setTimeout(() => {
+      if (active && !authChecked) {
+        setAuthChecked(true);
+      }
+    }, 1000);
+
     const checkSession = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        // Immediate bypass for local route or offline mode
+        if (cleanPath === '/local' || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+          if (active) {
+            setAuthChecked(true);
+            clearTimeout(fallbackTimer);
+          }
+          return;
+        }
+
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise((res) => setTimeout(() => res(null), 1200));
+
+        const res = await Promise.race([sessionPromise, timeoutPromise]);
         if (!active) return;
-        
-        const currentUser = session?.user || null;
+        clearTimeout(fallbackTimer);
+
+        const currentUser = res?.data?.session?.user || null;
         setUser(currentUser);
         setAuthChecked(true);
 
-        // Route protection redirects (only if online and not in local mode)
         if (!currentUser && !isLoginPage && !isPublicPage && cleanPath !== '/' && navigator.onLine) {
           router.push('/login');
         } else if (currentUser && isLoginPage) {
@@ -79,6 +98,7 @@ export default function MainLayoutWrapper({ children }) {
         }
       } catch (err) {
         if (!active) return;
+        clearTimeout(fallbackTimer);
         setAuthChecked(true);
       }
     };
@@ -90,19 +110,14 @@ export default function MainLayoutWrapper({ children }) {
       const currentUser = session?.user || null;
       setUser(currentUser);
       setAuthChecked(true);
-
-      if (!currentUser && !isLoginPage && !isPublicPage && cleanPath !== '/' && navigator.onLine) {
-        router.push('/login');
-      } else if (currentUser && isLoginPage) {
-        router.push('/');
-      }
     });
 
     return () => {
       active = false;
+      clearTimeout(fallbackTimer);
       subscription.unsubscribe();
     };
-  }, [isLoginPage, cleanPath, router]);
+  }, [isLoginPage, cleanPath, router, isPublicPage]);
 
   // Loading screens to prevent UI flashes
   if (!authChecked) {

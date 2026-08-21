@@ -190,7 +190,7 @@ export default function LocalControlPage() {
   };
 
   return (
-    <div className="w-full min-h-screen bg-background text-text py-4 px-3 sm:py-8 sm:px-6 lg:px-8 select-none">
+    <div className="w-full min-h-screen bg-background text-text pt-16 sm:pt-20 pb-12 px-3.5 sm:px-6 lg:px-8 select-none">
       <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6">
 
         {/* Toast Notification */}

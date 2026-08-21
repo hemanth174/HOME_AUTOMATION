@@ -1217,21 +1217,12 @@ export default function Navbar() {
       <header className="fixed top-0 left-0 right-0 h-14 border-b border-border bg-header/90 backdrop-blur-md flex items-center justify-between px-4 z-40 md:hidden select-none">
         <Link
           href="/"
-          className="flex items-center gap-2 text-base font-black text-accent tracking-tight"
+          className="flex items-center gap-2 text-sm sm:text-base font-black text-accent tracking-tight whitespace-nowrap shrink-0"
         >
-          <Crown className="text-accent fill-accent/10 shrink-0" size={16} />
-          <span>smart home</span>
+          <Crown className="text-accent fill-accent/10 shrink-0" size={18} />
+          <span className="whitespace-nowrap font-black">Smart Home</span>
         </Link>
         <div className="flex items-center gap-2">
-          {/* Mobile Local Mesh Button */}
-          <Link
-            href="/local"
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-border bg-card-alt/40 text-text-muted hover:text-accent hover:border-accent/40 transition-all text-xs font-extrabold"
-            title="Local Autonomous Mesh"
-          >
-            <Zap size={13} className="text-accent animate-pulse" />
-            <span className="text-[11px]">Local</span>
-          </Link>
 
           {/* Wi-Fi Client/Internet Network Status Indicator (Mobile) */}
           <div
@@ -1482,14 +1473,6 @@ export default function Navbar() {
           </div>
 
           <ThemeToggle size={14} />
-
-          {/* Logout button directly in mobile header */}
-          <button
-            onClick={() => setShowLogoutModal(true)}
-            className="px-3 py-1.5 rounded-xl text-[10px] font-extrabold border border-red-500/40 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all duration-150 cursor-pointer"
-          >
-            Log out
-          </button>
         </div>
       </header>
 
@@ -1508,8 +1491,8 @@ export default function Navbar() {
               }`}
             >
               <Icon size={18} className="stroke-[2.5px]" />
-              <span className="text-[9px] font-black tracking-tight">
-                {link.label}
+              <span className="text-[9px] font-black tracking-tight truncate px-0.5">
+                {link.href === '/' ? 'Home' : link.href === '/local' ? 'Local' : link.label}
               </span>
             </Link>
           );
@@ -1660,13 +1643,27 @@ export default function Navbar() {
             <div className="px-2">
               <button
                 onClick={handleInstallClick}
-                className="w-full py-3 rounded-xl text-xs font-extrabold bg-accent text-[var(--btn-text)] hover:bg-accent-hover  cursor-pointer flex items-center justify-center gap-2 "
+                className="w-full py-3 rounded-xl text-xs font-extrabold bg-accent text-[var(--btn-text)] hover:bg-accent-hover cursor-pointer flex items-center justify-center gap-2"
               >
                 <Download size={15} className="stroke-[2.5px]" />
                 <span>Install Web App</span>
               </button>
             </div>
           )}
+
+          {/* Mobile Sheet Logout Button */}
+          <div className="px-2">
+            <button
+              onClick={() => {
+                setMobileOpen(false);
+                setShowLogoutModal(true);
+              }}
+              className="w-full py-3 rounded-xl text-xs font-extrabold bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500 hover:text-white transition-all cursor-pointer flex items-center justify-center gap-2"
+            >
+              <LogOut size={16} className="stroke-[2.5px]" />
+              <span>Log Out</span>
+            </button>
+          </div>
 
           {/* Timezone */}
           <div className="flex flex-col gap-0.5 px-2">

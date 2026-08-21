@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import Toast from '@/components/Toast';
 import Loader from '@/components/Loader';
 import Link from 'next/link';
-import { X, KeyRound, Zap } from 'lucide-react';
+import { X, KeyRound, Zap, LogOut } from 'lucide-react';
 
 export default function ProfilePage() {
   const [user, setUser] = useState(null);
@@ -84,6 +84,11 @@ export default function ProfilePage() {
       setPromptUpdate(params.get('promptUpdate') === 'true');
     }
   }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    window.location.href = '/login';
+  };
 
   const isGoogle = user?.app_metadata?.provider === 'google' || user?.identities?.some(id => id.provider === 'google');
   const isEmailVerified = user && (user.user_metadata?.email_verified === true || isGoogle);
@@ -308,314 +313,316 @@ export default function ProfilePage() {
   const initials = fullName.substring(0, 2).toUpperCase();
 
   return (
-    <div className="dashboard-container animate-fade-up">
-      <div className="flex justify-between items-center mb-5">
-        <h2 className="text-lg font-extrabold text-text tracking-tight">Account Profile</h2>
-      </div>
-
-      {promptUpdate && (
-        <div className="mb-6 p-4 rounded-xl border border-accent bg-accent-bg text-accent text-xs font-bold animate-fade-in shadow-gold-glow flex flex-col gap-1">
-          <span>🔔 Profile Action Required</span>
-          <span className="text-text-muted font-semibold">Please update your Full Name below to complete your profile setup.</span>
-        </div>
-      )}
-
-      <div className="relative overflow-hidden rounded-[18px] border border-border bg-card p-8 shadow-lg">
-        <div className="flex flex-col items-center gap-6">
-          {avatarUrl ? (
-            <img
-              src={avatarUrl}
-              alt={fullName}
-              className="w-24 h-24 rounded-full border-2 border-accent object-cover shadow-gold-glow shrink-0"
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            <div className="w-24 h-24 rounded-full border-2 border-accent bg-accent-bg flex items-center justify-center text-3xl font-black text-accent shadow-gold-glow shrink-0">
-              {initials}
-            </div>
-          )}
-
-          <div className="text-center">
-            <h2 className="text-2xl font-extrabold text-text leading-tight">{fullName}</h2>
-            <p className="text-xs text-text-muted mt-1">{user.email}</p>
+    <div className="w-full min-h-screen bg-background text-text pt-16 sm:pt-20 pb-12 px-3.5 sm:px-6 lg:px-8 select-none">
+      <div className="max-w-3xl mx-auto space-y-4 sm:space-y-6">
+        
+        {/* Header Title */}
+        <div className="flex items-center justify-between gap-3 bg-card/60 backdrop-blur-xl border border-border p-4 sm:p-5 rounded-2xl shadow-xl">
+          <div>
+            <h1 className="text-base sm:text-xl font-extrabold text-text tracking-tight">Account Profile</h1>
+            <p className="text-[11px] sm:text-xs text-text-muted mt-0.5">Manage your credentials, energy settings, and security.</p>
           </div>
+        </div>
 
-          <form onSubmit={handleSubmitProfileChanges} className="w-full max-w-md border-t border-border pt-6 flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-extrabold tracking-wide text-text-muted">Display Name / Full Name</label>
-              <input
-                className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="Enter your name"
-                required
+        {promptUpdate && (
+          <div className="p-3.5 sm:p-4 rounded-2xl border border-accent bg-accent-bg text-accent text-xs font-bold animate-fade-in shadow-gold-glow flex flex-col gap-1">
+            <span>🔔 Profile Action Required</span>
+            <span className="text-text-muted font-semibold">Please update your Full Name below to complete your profile setup.</span>
+          </div>
+        )}
+
+        {/* Profile Details Card */}
+        <div className="relative overflow-hidden rounded-2xl border border-border bg-card p-4 sm:p-8 shadow-lg">
+          <div className="flex flex-col items-center gap-4 sm:gap-6">
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt={fullName}
+                className="w-20 h-20 sm:w-24 sm:h-24 rounded-full border-2 border-accent object-cover shadow-gold-glow shrink-0"
+                referrerPolicy="no-referrer"
               />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <div className="flex justify-between items-center">
-                <label className="text-xs font-extrabold tracking-wide text-text-muted">Email Address</label>
-                {isEmailVerified ? (
-                  <span className="text-[10px] font-bold text-green-500 bg-green-500/10 px-2 py-0.5 rounded-md border border-green-500/20">Verified</span>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-red-500 bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20 animate-pulse">Unverified</span>
-                    <button
-                      type="button"
-                      onClick={handleTriggerEmailVerification}
-                      className="text-[10px] font-extrabold text-accent hover:underline cursor-pointer"
-                    >
-                      Verify Now
-                    </button>
-                  </div>
-                )}
-              </div>
-              <input
-                className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)] disabled:opacity-50"
-                type="email"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-                placeholder="Enter your email"
-                disabled={isGoogle}
-                required
-              />
-            </div>
-
-            {!isGoogle ? (
-              <>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-extrabold tracking-wide text-text-muted">New Password (leave blank to keep current)</label>
-                  <input
-                    className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                    type="password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Min 6 characters"
-                  />
-                </div>
-                {newPassword && (
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-extrabold tracking-wide text-text-muted">Confirm New Password</label>
-                    <input
-                      className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                      type="password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      placeholder="Confirm new password"
-                      required={!!newPassword}
-                    />
-                  </div>
-                )}
-              </>
             ) : (
-              <div className="flex flex-col gap-1 p-3.5 rounded-xl border border-border bg-card-alt text-xs text-text-muted">
-                <span className="font-extrabold text-accent">🔐 Google Managed Credentials</span>
-                <span>You are logged in with Google OAuth. Your email verification status and password security are managed directly by Google.</span>
+              <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full border-2 border-accent bg-accent-bg flex items-center justify-center text-2xl sm:text-3xl font-black text-accent shadow-gold-glow shrink-0">
+                {initials}
               </div>
             )}
-            
+
+            <div className="text-center min-w-0 w-full px-2">
+              <h2 className="text-xl sm:text-2xl font-extrabold text-text leading-tight truncate">{fullName}</h2>
+              <p className="text-xs text-text-muted mt-1 truncate">{user.email}</p>
+            </div>
+
+            <form onSubmit={handleSubmitProfileChanges} className="w-full max-w-md border-t border-border pt-4 sm:pt-6 flex flex-col gap-3.5 sm:gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-extrabold tracking-wide text-text-muted">Display Name / Full Name</label>
+                <input
+                  className="w-full px-3.5 py-2.5 rounded-xl border-[1.5px] border-border bg-input text-text text-xs sm:text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Enter your name"
+                  required
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <div className="flex justify-between items-center gap-2">
+                  <label className="text-xs font-extrabold tracking-wide text-text-muted">Email Address</label>
+                  {isEmailVerified ? (
+                    <span className="text-[10px] font-bold text-green-500 bg-green-500/10 px-2 py-0.5 rounded-md border border-green-500/20 shrink-0">Verified</span>
+                  ) : (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-[10px] font-bold text-red-500 bg-red-500/10 px-1.5 py-0.5 rounded-md border border-red-500/20">Unverified</span>
+                      <button
+                        type="button"
+                        onClick={handleTriggerEmailVerification}
+                        className="text-[10px] font-extrabold text-accent hover:underline cursor-pointer"
+                      >
+                        Verify
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <input
+                  className="w-full px-3.5 py-2.5 rounded-xl border-[1.5px] border-border bg-input text-text text-xs sm:text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)] disabled:opacity-50"
+                  type="email"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  placeholder="Enter your email"
+                  disabled={isGoogle}
+                  required
+                />
+              </div>
+
+              {!isGoogle ? (
+                <>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-extrabold tracking-wide text-text-muted">New Password</label>
+                    <input
+                      className="w-full px-3.5 py-2.5 rounded-xl border-[1.5px] border-border bg-input text-text text-xs sm:text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Min 6 characters"
+                    />
+                  </div>
+                  {newPassword && (
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-extrabold tracking-wide text-text-muted">Confirm New Password</label>
+                      <input
+                        className="w-full px-3.5 py-2.5 rounded-xl border-[1.5px] border-border bg-input text-text text-xs sm:text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
+                        type="password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Confirm new password"
+                        required={!!newPassword}
+                      />
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="flex flex-col gap-1 p-3.5 rounded-xl border border-border bg-card-alt text-xs text-text-muted">
+                  <span className="font-extrabold text-accent">🔐 Google Managed Credentials</span>
+                  <span>Logged in via Google OAuth. Password security is managed directly by Google.</span>
+                </div>
+              )}
+              
+              <button
+                className="w-full py-3 rounded-xl text-xs font-extrabold bg-accent text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow min-h-[44px]"
+                type="submit"
+                disabled={updating}
+              >
+                {updating ? 'Saving changes...' : 'Save Profile Changes'}
+              </button>
+            </form>
+
+            <div className="w-full max-w-md border-t border-border pt-4 sm:pt-6 flex flex-col gap-2.5 text-left">
+              <div className="flex justify-between items-center py-1.5 border-b border-border/60">
+                <span className="text-xs font-extrabold text-text-muted uppercase tracking-wider">Provider</span>
+                <span className="text-xs font-bold text-text bg-accent-bg px-2.5 py-0.5 rounded-md text-accent border border-accent/20">
+                  {isGoogle ? 'Google OAuth' : 'Email'}
+                </span>
+              </div>
+
+              <div className="flex justify-between items-center py-1.5 border-b border-border/60">
+                <span className="text-xs font-extrabold text-text-muted uppercase tracking-wider">Created</span>
+                <span className="text-xs font-bold text-text">
+                  {new Date(user.created_at).toLocaleDateString(undefined, {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                  })}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-2 flex flex-col sm:flex-row gap-2.5 w-full justify-center">
+              <Link
+                href="/"
+                className="w-full sm:w-auto inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-border bg-card-alt/40 px-6 py-2.5 text-xs font-bold text-text transition-all hover:bg-card-alt cursor-pointer"
+              >
+                Back to Dashboard
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* Energy Settings Card */}
+        <div id="energy-settings" className="relative overflow-hidden rounded-2xl border border-border bg-card p-4 sm:p-8 shadow-lg">
+          <div className="flex items-center gap-3 mb-4 sm:mb-6">
+            <div className="w-10 h-10 rounded-xl bg-accent-bg flex items-center justify-center text-accent border border-accent/20 shadow-gold-glow shrink-0">
+              <Zap size={18} className="stroke-[2.5px]" />
+            </div>
+            <div>
+              <h2 className="text-sm sm:text-base font-extrabold text-text tracking-tight">Energy &amp; Billing Settings</h2>
+              <p className="text-[11px] sm:text-xs font-semibold text-text-muted">Configure electricity tariff and household voltage for accurate cost tracking.</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSaveEnergySettings} className="flex flex-col gap-4 max-w-md">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-extrabold tracking-wide text-text-muted">Electricity Tariff</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-text-muted">
+                    {currency === 'USD' ? '$' : currency === 'EUR' ? '€' : '₹'}
+                  </span>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={tariff}
+                    onChange={e => setTariff(e.target.value)}
+                    className="w-full pl-7 pr-3 py-2.5 rounded-xl border-[1.5px] border-border bg-input text-text text-xs sm:text-sm outline-none transition-all focus:border-accent"
+                    placeholder="8.00"
+                    required
+                  />
+                </div>
+                <span className="text-[10px] font-semibold text-text-muted">per kWh</span>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-extrabold tracking-wide text-text-muted">Household Voltage</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="100"
+                    max="500"
+                    step="1"
+                    value={voltage}
+                    onChange={e => setVoltage(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border-[1.5px] border-border bg-input text-text text-xs sm:text-sm outline-none transition-all focus:border-accent"
+                    placeholder="230"
+                    required
+                  />
+                </div>
+                <span className="text-[10px] font-semibold text-text-muted">Volts (V) — India: 230V, US: 120V</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-extrabold tracking-wide text-text-muted">Currency Symbol</label>
+              <select
+                value={currency}
+                onChange={e => setCurrency(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl border-[1.5px] border-border bg-input text-text text-xs sm:text-sm outline-none transition-all focus:border-accent cursor-pointer"
+              >
+                <option value="INR">₹ INR — Indian Rupee</option>
+                <option value="USD">$ USD — US Dollar</option>
+                <option value="EUR">€ EUR — Euro</option>
+                <option value="GBP">£ GBP — British Pound</option>
+              </select>
+            </div>
+
             <button
-              className="w-full py-2.5 rounded-lg text-xs font-extrabold bg-accent text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow"
               type="submit"
-              disabled={updating}
+              disabled={savingEnergy}
+              className="w-full sm:w-auto inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl bg-accent px-6 py-2.5 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow disabled:opacity-50"
             >
-              {updating ? 'Saving changes...' : 'Save Profile Changes'}
+              {savingEnergy ? 'Saving...' : 'Save Energy Settings'}
             </button>
           </form>
-
-          <div className="w-full max-w-md border-t border-border pt-6 flex flex-col gap-4 text-left">
-            <div className="flex justify-between py-2 border-b border-border last:border-b-0">
-              <span className="text-xs font-extrabold text-text-muted uppercase tracking-wider">Authentication Provider</span>
-              <span className="text-xs font-bold text-text bg-accent-bg px-2.5 py-0.5 rounded-md text-accent border border-accent/20">
-                {isGoogle ? 'Google OAuth' : 'Email & Password'}
-              </span>
-            </div>
-
-            <div className="flex justify-between py-2 border-b border-border last:border-b-0">
-              <span className="text-xs font-extrabold text-text-muted uppercase tracking-wider">Account Created</span>
-              <span className="text-xs font-bold text-text">
-                {new Date(user.created_at).toLocaleDateString(undefined, {
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric',
-                })}
-              </span>
-            </div>
-          </div>
-
-          <div className="mt-4 flex gap-4 w-full justify-center">
-            <Link
-              href="/"
-              className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-6 py-2 text-xs font-semibold text-text transition-all hover:bg-card-alt cursor-pointer"
-            >
-              Back to Dashboard
-            </Link>
-          </div>
-        </div>
-      </div>
-
-      {/* Energy Settings Card */}
-      <div id="energy-settings" className="relative overflow-hidden rounded-[18px] border border-border bg-card p-8 shadow-lg mt-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-xl bg-accent-bg flex items-center justify-center text-accent border border-accent/20 shadow-gold-glow">
-            <Zap size={18} className="stroke-[2.5px]" />
-          </div>
-          <div>
-            <h2 className="text-base font-extrabold text-text tracking-tight">Energy &amp; Billing Settings</h2>
-            <p className="text-xs font-semibold text-text-muted">Configure your electricity tariff and household voltage for accurate cost calculations.</p>
-          </div>
         </div>
 
-        <form onSubmit={handleSaveEnergySettings} className="flex flex-col gap-4 max-w-md">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-extrabold tracking-wide text-text-muted">Electricity Tariff</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-text-muted">
-                  {currency === 'USD' ? '$' : currency === 'EUR' ? '€' : '₹'}
-                </span>
-                <input
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={tariff}
-                  onChange={e => setTariff(e.target.value)}
-                  className="w-full pl-7 pr-3 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                  placeholder="8.00"
-                  required
-                />
-              </div>
-              <span className="text-[10px] font-semibold text-text-muted">per kWh</span>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-extrabold tracking-wide text-text-muted">Household Voltage</label>
-              <div className="relative">
-                <input
-                  type="number"
-                  min="100"
-                  max="500"
-                  step="1"
-                  value={voltage}
-                  onChange={e => setVoltage(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                  placeholder="230"
-                  required
-                />
-              </div>
-              <span className="text-[10px] font-semibold text-text-muted">Volts (V) — India: 230V, US: 120V</span>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-extrabold tracking-wide text-text-muted">Currency Symbol</label>
-            <select
-              value={currency}
-              onChange={e => setCurrency(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent cursor-pointer"
-            >
-              <option value="INR">₹ INR — Indian Rupee</option>
-              <option value="USD">$ USD — US Dollar</option>
-              <option value="EUR">€ EUR — Euro</option>
-              <option value="GBP">£ GBP — British Pound</option>
-            </select>
-          </div>
-
-          <div className="flex items-center gap-3 p-3 rounded-xl bg-accent-bg/40 border border-accent/15 text-[11px] font-semibold text-text-muted">
-            <Zap size={13} className="text-accent shrink-0" />
-            <span>Cost = Energy (kWh) × <strong className="text-text">{currency === 'USD' ? '$' : currency === 'EUR' ? '€' : '₹'}{tariff || '?'}/kWh</strong> · Current (A) = Watts ÷ <strong className="text-text">{voltage || '?'}V</strong></span>
-          </div>
-
-          <button
-            type="submit"
-            disabled={savingEnergy}
-            className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg bg-accent px-6 py-2 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow disabled:opacity-50 disabled:cursor-not-allowed self-start"
-          >
-            {savingEnergy ? 'Saving...' : 'Save Energy Settings'}
-          </button>
-        </form>
-      </div>
-
-      {showMfaModal && (
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center">
-          <div 
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"
-            onClick={() => {
-              setShowMfaModal(false);
-              setMfaInput('');
-              setMfaError('');
-            }}
-          />
-          
-          <div 
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-            style={{ transform: translateY > 0 ? `translateY(${translateY}px)` : undefined }}
-            className={`relative bg-card w-full border border-border max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:rounded-t-[24px] max-md:p-6 max-md:pb-10 max-md:border-t max-md:border-x-0 md:w-[420px] md:rounded-[20px] md:p-8 md:shadow-2xl flex flex-col items-center ${
-              translateY === 0 ? 'transition-all duration-200 ease-out' : ''
-            }`}
-          >
-            <div className="w-12 h-1.5 bg-border rounded-full mb-6 cursor-grab active:cursor-grabbing md:hidden shrink-0" />
-            
-            <button
-              type="button"
+        {/* MFA Verification Modal */}
+        {showMfaModal && (
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center p-3">
+            <div 
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"
               onClick={() => {
                 setShowMfaModal(false);
                 setMfaInput('');
                 setMfaError('');
               }}
-              className="absolute top-4 right-4 p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-accent-bg/10 transition-all cursor-pointer border-none bg-transparent max-md:hidden"
+            />
+            
+            <div 
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              style={{ transform: translateY > 0 ? `translateY(${translateY}px)` : undefined }}
+              className={`relative bg-card w-full border border-border max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:rounded-t-[24px] max-md:p-6 max-md:pb-10 max-md:border-t max-md:border-x-0 md:w-[420px] md:rounded-[20px] md:p-8 md:shadow-2xl flex flex-col items-center ${
+                translateY === 0 ? 'transition-all duration-200 ease-out' : ''
+              }`}
             >
-              <X size={16} />
-            </button>
+              <div className="w-12 h-1.5 bg-border rounded-full mb-6 cursor-grab active:cursor-grabbing md:hidden shrink-0" />
+              
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMfaModal(false);
+                  setMfaInput('');
+                  setMfaError('');
+                }}
+                className="absolute top-4 right-4 p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-accent-bg/10 transition-all cursor-pointer border-none bg-transparent max-md:hidden"
+              >
+                <X size={16} />
+              </button>
 
-            <div className="w-12 h-12 rounded-full bg-accent-bg border border-accent/20 flex items-center justify-center text-accent mb-4 shadow-gold-glow/10 animate-pulse">
-              <KeyRound size={22} className="stroke-[2.5px]" />
-            </div>
-
-            <h3 className="text-base font-extrabold text-text text-center tracking-tight mb-1">
-              {verifyingCurrentEmail ? 'Email Verification' : 'MFA Security Verification'}
-            </h3>
-            <p className="text-xs text-text-muted text-center leading-relaxed mb-6 px-4">
-              Enter the 6-digit verification code sent to <strong>{user?.email}</strong> to {verifyingCurrentEmail ? 'verify your email address' : 'authorize these profile modifications'}.
-            </p>
-
-            {mfaError && (
-              <div className="w-full mb-4 p-3 rounded-xl border border-red-500/20 bg-red-500/5 text-red-500 text-xs font-bold text-center animate-shake leading-snug">
-                ⚠️ {mfaError}
+              <div className="w-12 h-12 rounded-full bg-accent-bg border border-accent/20 flex items-center justify-center text-accent mb-4 shadow-gold-glow/10 animate-pulse">
+                <KeyRound size={22} className="stroke-[2.5px]" />
               </div>
-            )}
 
-            <form onSubmit={handleVerifyOtp} className="w-full flex flex-col gap-4">
-              <div className="flex flex-col gap-1.5">
+              <h3 className="text-base font-extrabold text-text text-center tracking-tight mb-1">
+                {verifyingCurrentEmail ? 'Email Verification' : 'MFA Security Verification'}
+              </h3>
+              <p className="text-xs text-text-muted text-center leading-relaxed mb-6 px-2">
+                Enter the 6-digit code sent to <strong>{user?.email}</strong>.
+              </p>
+
+              {mfaError && (
+                <div className="w-full mb-4 p-3 rounded-xl border border-red-500/20 bg-red-500/5 text-red-500 text-xs font-bold text-center animate-shake leading-snug">
+                  ⚠️ {mfaError}
+                </div>
+              )}
+
+              <form onSubmit={handleVerifyOtp} className="w-full flex flex-col gap-4">
                 <input
                   type="text"
                   maxLength={6}
                   value={mfaInput}
                   onChange={(e) => setMfaInput(e.target.value.replace(/\D/g, ''))}
                   placeholder="000000"
-                  className="w-full px-4 py-3 rounded-xl border-[1.5px] border-border bg-input text-text text-center tracking-[0.3em] font-mono text-xl outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
+                  className="w-full px-4 py-3 rounded-xl border-[1.5px] border-border bg-input text-text text-center tracking-[0.3em] font-mono text-xl outline-none focus:border-accent"
                   disabled={mfaLoading}
                   required
                   autoFocus
                 />
-              </div>
 
-              <button
-                type="submit"
-                disabled={mfaLoading}
-                className="w-full py-3 rounded-lg text-xs font-extrabold bg-accent text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow flex items-center justify-center gap-2"
-              >
-                {mfaLoading ? 'Verifying...' : verifyingCurrentEmail ? 'Confirm Verification' : 'Confirm & Save Changes'}
-              </button>
-            </form>
+                <button
+                  type="submit"
+                  disabled={mfaLoading}
+                  className="w-full py-3 rounded-xl text-xs font-extrabold bg-accent text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow flex items-center justify-center gap-2 min-h-[44px]"
+                >
+                  {mfaLoading ? 'Verifying...' : verifyingCurrentEmail ? 'Confirm Verification' : 'Confirm & Save Changes'}
+                </button>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <Toast message={toast} onClose={() => setToast('')} />
+        <Toast message={toast} onClose={() => setToast('')} />
+      </div>
     </div>
   );
 }

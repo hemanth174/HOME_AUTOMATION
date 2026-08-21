@@ -83,8 +83,18 @@ export default function useDashboardData() {
 
   // Fetch cloud data when user is present
   useEffect(() => {
-    if (!user) return;
     let active = true;
+
+    // Safety timeout: Always dismiss loading screen after 1.2s max if offline
+    const maxLoadingTimer = setTimeout(() => {
+      if (active) setLoading(false);
+    }, 1200);
+
+    if (!user) {
+      setLoading(false);
+      clearTimeout(maxLoadingTimer);
+      return;
+    }
 
     const fetchData = async () => {
       const startTime = Date.now();
@@ -96,6 +106,7 @@ export default function useDashboardData() {
         ]);
 
         if (!active) return;
+        clearTimeout(maxLoadingTimer);
 
         if (boardsRes.data) {
           setBoards(boardsRes.data);
@@ -124,8 +135,9 @@ export default function useDashboardData() {
       } catch (err) {
         console.warn('Error fetching cloud data, relying on local state:', err);
       } finally {
+        clearTimeout(maxLoadingTimer);
         const elapsed = Date.now() - startTime;
-        const remaining = Math.max(0, 500 - elapsed);
+        const remaining = Math.max(0, 300 - elapsed);
         setTimeout(() => {
           if (active) setLoading(false);
         }, remaining);
@@ -136,6 +148,7 @@ export default function useDashboardData() {
 
     return () => {
       active = false;
+      clearTimeout(maxLoadingTimer);
     };
   }, [user]);
 
