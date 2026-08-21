@@ -22,12 +22,12 @@ const int INPUT_PINS[NUM_DEVICES] = {19, 18, 5, 17};
 //  CREDENTIALS & CONFIGURATION
 // ============================================================
 <<<<<<< HEAD
-const char* ssid     = "V2029";
+const char* ssid     = "";
 const char* password = "";
 
 const char* BOARD_IDENTIFIER = "test_1_board";
-const char* SUPABASE_BASE = "https://ojuvphlkzbxwjhqzexbt.supabase.co/rest/v1";
-const char* SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qdXZwaGxremJ4d2pocXpleGJ0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTg2Nzk2MiwiZXhwIjoyMDk3NDQzOTYyfQ.SN6g_bR4bpVEIGdIW-GLPTHRlqZBHF5YBUKjHDMWjLU"; 
+const char* SUPABASE_BASE = "YOu_url_here";
+const char* SUPABASE_SERVICE_KEY = "you_key_here"; 
 
 // SoftAP Configuration for Offline Autonomous Control
 const char* AP_SSID = "HOME-AUTO-LEADER";
