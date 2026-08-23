@@ -47,13 +47,13 @@
   --color-lp-slate-gray: var(--lp-surface-low);
 
   /* Font Families */
-  --font-display-lg: 'Sora', sans-serif;
-  --font-label-caps: 'JetBrains Mono', monospace;
-  --font-headline-sm: 'Sora', sans-serif;
-  --font-body-lg: 'JetBrains Mono', monospace;
-  --font-headline-md: 'Sora', sans-serif;
-  --font-body-md: 'JetBrains Mono', monospace;
-  --font-data-point: 'JetBrains Mono', monospace;
+  --font-display-lg: var(--font-sora), 'Sora', sans-serif;
+  --font-label-caps: var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
+  --font-headline-sm: var(--font-sora), 'Sora', sans-serif;
+  --font-body-lg: var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
+  --font-headline-md: var(--font-sora), 'Sora', sans-serif;
+  --font-body-md: var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
+  --font-data-point: var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
 }
 
 /* -------- CSS Variables (Theme Tokens) matching esp.css -------- */
@@ -228,14 +228,14 @@
 body {
     background: var(--bg);
     color: var(--text);
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
     -webkit-tap-highlight-color: transparent;
     -webkit-font-smoothing: antialiased;
     min-height: 100vh;
 }
 
 h1, h2, h3, h4, h5, h6 {
-    font-family: 'Sora', sans-serif;
+    font-family: var(--font-sora), 'Sora', sans-serif;
 }
 
 /* Smooth transitions */

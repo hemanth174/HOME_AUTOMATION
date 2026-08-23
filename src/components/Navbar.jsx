@@ -723,7 +723,7 @@ export default function Navbar() {
             className="rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all duration-200 text-text-muted hover:bg-accent-bg hover:text-accent flex items-center gap-3"
           >
             <HelpCircle size={16} className="stroke-[2.5px]" />
-            <span>FAQ's</span>
+            <span>FAQ&apos;s</span>
           </Link>
           <Link
             href="/terms"
@@ -1689,7 +1689,7 @@ export default function Navbar() {
               className="rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all text-text hover:bg-accent-bg/30 flex items-center gap-3"
             >
               <HelpCircle size={16} className="stroke-[2.5px]" />
-              <span>FAQ's</span>
+              <span>FAQ&apos;s</span>
             </Link>
             <Link
               href="/terms"

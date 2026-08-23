@@ -1,10 +1,17 @@
 /**
- * Local REST API Client for ESP32 Leader Node.
- * Handles direct communication over SoftAP (192.168.4.1) or local network.
- * Uses fast abort timeouts to ensure non-blocking fallback if off-mesh.
+ * Local REST API Client for the ESP32 mesh.
+ * Handles direct communication over SoftAP (192.168.4.1), LAN IP or mDNS.
+ *
+ * Design goals:
+ * - Fast connection: candidate endpoints are probed IN PARALLEL, first
+ *   responder wins (no sequential fallback chains).
+ * - Short, intelligent timeouts - never block the UI for seconds.
+ * - Multi-board aware: devices carry a node_id and commands can be
+ *   proxied through the leader to any room board.
  */
 
 const DEFAULT_LOCAL_IP = '192.168.4.1';
+const MDNS_HOST = 'home-automation.local';
 
 /**
  * Get active base URL for local ESP32 (stored in localStorage for persistence)
@@ -21,77 +28,128 @@ export function setLocalBaseUrl(url) {
 }
 
 /**
- * Helper to execute fetch with timeout
+ * All plausible ESP32 gateways, most likely first.
  */
-export async function localFetch(endpoint, options = {}, timeoutMs = 1200) {
-  const baseUrl = getLocalBaseUrl();
+export function getLocalCandidateUrls() {
+  const candidates = [
+    getLocalBaseUrl(),
+    `http://${DEFAULT_LOCAL_IP}`,
+    `http://${MDNS_HOST}`,
+  ];
+  return [...new Set(candidates)];
+}
 
+/**
+ * Low-level fetch with abort timeout. Rejects on timeout / network error.
+ */
+async function fetchJson(url, { method = 'GET', body, timeoutMs = 800 } = {}) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
-
   try {
-    const response = await fetch(`${baseUrl}${endpoint}`, {
-      ...options,
+    const res = await fetch(url, {
+      method,
       signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-      },
+      headers: { 'Content-Type': 'application/json' },
+      body,
       mode: 'cors',
+      cache: 'no-store',
     });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
     clearTimeout(id);
-    if (!response.ok) {
-      throw new Error(`HTTP error ${response.status}`);
-    }
-    return await response.json();
-  } catch (err) {
-    clearTimeout(id);
-    throw err;
   }
 }
 
 /**
- * Ping local ESP32 for status & heartbeat
+ * Probe every candidate gateway simultaneously; resolve with the FIRST
+ * one that answers /api/status. Worst case cost ~= timeoutMs.
  */
-export async function fetchLocalStatus() {
-  return await localFetch('/api/status', { method: 'GET' }, 1000);
+export async function discoverLocalNode(timeoutMs = 900) {
+  const urls = getLocalCandidateUrls();
+
+  const attempts = urls.map(async (baseUrl) => {
+    const status = await fetchJson(`${baseUrl}/api/status`, { timeoutMs });
+    if (!status || (!status.online && !status.nodeId && !status.role)) {
+      throw new Error('Invalid status payload');
+    }
+    setLocalBaseUrl(baseUrl);
+    return { baseUrl, status };
+  });
+
+  try {
+    return await Promise.any(attempts);
+  } catch {
+    throw new Error('ESP32 not reachable');
+  }
+}
+
+/** Validate + normalize a device payload from any firmware generation. */
+function normalizeDevice(d) {
+  return {
+    id: d.id ?? `${d.node_id || 'esp32'}_${d.relay_index}`,
+    relay_index: d.relay_index ?? 0,
+    is_on: Boolean(d.is_on),
+    feedback_on: Boolean(d.feedback_on),
+    node_id: d.node_id || null,
+    node_role: d.node_role || null,
+  };
 }
 
 /**
- * Fetch all device states directly from ESP32 GPIOs
+ * Ping the currently-selected local node.
  */
-export async function fetchLocalDevices() {
-  return await localFetch('/api/devices', { method: 'GET' }, 1000);
+export async function fetchLocalStatus(timeoutMs = 800) {
+  return fetchJson(`${getLocalBaseUrl()}/api/status`, { timeoutMs });
 }
 
 /**
- * Send switch command directly to ESP32 local REST server
+ * Fetch all device states (aggregated across the mesh when talking
+ * to a leader node).
  */
-export async function setLocalDeviceState(relayIndex, targetState) {
-  return await localFetch(`/api/device/${relayIndex}/state`, {
+export async function fetchLocalDevices(timeoutMs = 900) {
+  const data = await fetchJson(`${getLocalBaseUrl()}/api/devices`, { timeoutMs });
+  return Array.isArray(data) ? data.map(normalizeDevice) : [];
+}
+
+/**
+ * Send a switch command.
+ * - Without nodeId: legacy single-board endpoint (unchanged behaviour).
+ * - With nodeId: leader proxies the command to the owning room board.
+ */
+export async function setLocalDeviceState(relayIndex, targetState, nodeId = null) {
+  const base = getLocalBaseUrl();
+  const endpoint = nodeId
+    ? `/api/node/${encodeURIComponent(nodeId)}/device/${relayIndex}/state`
+    : `/api/device/${relayIndex}/state`;
+  return fetchJson(`${base}${endpoint}`, {
     method: 'POST',
     body: JSON.stringify({ state: Boolean(targetState) }),
-  }, 1500);
+    timeoutMs: nodeId ? 2500 : 1200, // extra hop through leader needs headroom
+  });
 }
 
 /**
- * Trigger all relays ON or OFF in a single local REST call.
- * Falls back to sending 4 individual requests if /api/all endpoint is absent.
- * @param {'on' | 'off'} action
+ * Trigger all relays ON/OFF in one call. The firmware fans this out across
+ * the whole mesh, so no client-side fan-out is needed anymore.
  */
 export async function triggerLocalAll(action) {
-  const targetState = action === 'on';
+  return fetchJson(`${getLocalBaseUrl()}/api/all/${action === 'on' ? 'on' : 'off'}`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+    timeoutMs: 3000,
+  });
+}
+
+/**
+ * Mesh topology listing (leader nodes only). Returns [] for single-board
+ * setups or member nodes so callers don't need special-casing.
+ */
+export async function fetchMeshNodes(timeoutMs = 900) {
   try {
-    // Try the bulk endpoint first (ESP32 may support it)
-    return await localFetch('/api/all', {
-      method: 'POST',
-      body: JSON.stringify({ state: targetState }),
-    }, 1500);
+    const data = await fetchJson(`${getLocalBaseUrl()}/api/mesh/nodes`, { timeoutMs });
+    return Array.isArray(data) ? data : [];
   } catch {
-    // Fallback: send individual commands for relay 0-3 in parallel
-    await Promise.all(
-      [0, 1, 2, 3].map(i => setLocalDeviceState(i, targetState))
-    );
-    return { success: true, fallback: true };
+    return [];
   }
 }

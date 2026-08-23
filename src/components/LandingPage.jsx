@@ -440,9 +440,8 @@ export default function LandingPage() {
                 ) : (
                   <ThreeModelViewer
                     key="esp-viewer"
-                    modelType="obj"
-                    modelPath="/models/ESP32Wroom.obj"
-                    mtlPath="/models/ESP32Wroom.mtl"
+                    modelType="glb"
+                    modelPath="/models/esp32_wroom.glb"
                     glowColor={0x00e3fd}
                   />
                 )}
@@ -530,7 +529,7 @@ export default function LandingPage() {
               <span className="font-label-caps text-xs text-lp-primary mb-4 block">POWERED BY SUPABASE</span>
               <h2 className="font-headline-md text-4xl mb-6 text-white font-extrabold">Full-Stack Intelligence.</h2>
               <p className="font-body-md text-lp-on-surface-variant mb-10 leading-relaxed text-sm">
-                Our software layer leverages low-latency WebSockets and a robust Supabase backend for real-time responsiveness. The "Energy Dashboard" provides deep logs of device uptime, providing actionable data for warehouse and retail managers to cut costs.
+                Our software layer leverages low-latency WebSockets and a robust Supabase backend for real-time responsiveness. The &quot;Energy Dashboard&quot; provides deep logs of device uptime, providing actionable data for warehouse and retail managers to cut costs.
               </p>
               <div className="space-y-6">
                 <div className="flex gap-4 items-start">
@@ -592,7 +591,7 @@ export default function LandingPage() {
               </div>
               <div className="flex-1 pt-1">
                 <h3 className="font-headline-sm text-xl mb-3 text-white font-bold">Phase 1: The Start</h3>
-                <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">Arduino Nano + HC05 Bluetooth. It worked, but the 30-minute disconnects and terrible range proved Bluetooth wasn't the answer for reliable infrastructure.</p>
+                <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">Arduino Nano + HC05 Bluetooth. It worked, but the 30-minute disconnects and terrible range proved Bluetooth wasn&apos;t the answer for reliable infrastructure.</p>
               </div>
             </div>
 
@@ -603,7 +602,7 @@ export default function LandingPage() {
               </div>
               <div className="flex-1 pt-1">
                 <h3 className="font-headline-sm text-xl mb-3 text-white font-bold">Phase 2: The Wi-Fi Shift</h3>
-                <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">Moved to ESP32 for range. Hit a wall with parallel wiring—if the manual switch was on, the app couldn't turn the light off. Zero feedback loop for the user.</p>
+                <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">Moved to ESP32 for range. Hit a wall with parallel wiring—if the manual switch was on, the app couldn&apos;t turn the light off. Zero feedback loop for the user.</p>
               </div>
             </div>
 

@@ -244,10 +244,14 @@ export default function useDashboardData() {
 
     let localDispatched = false;
 
-    // 2. Try Local REST API if connected to ESP32 SoftAP/LAN
+    // 2. Try Local REST API if connected to ESP32 SoftAP/LAN.
+    //    Multi-board: route via the owning board's identifier (node_id)
+    //    so the leader proxies the command to the right room board.
     if (isLocalConnected) {
       try {
-        await setLocalDeviceState(relayIndex, newState);
+        const owningBoard = boards.find(b => b.id === device.board_id);
+        const nodeId = owningBoard?.board_identifier || null;
+        await setLocalDeviceState(relayIndex, newState, nodeId);
         localDispatched = true;
       } catch (err) {
         console.warn('Local REST dispatch failed, falling back to cloud:', err);
@@ -275,7 +279,7 @@ export default function useDashboardData() {
     }
 
     return { success: true, localDispatched, newState };
-  }, [isLocalConnected, user, isClientOnline]);
+  }, [isLocalConnected, user, isClientOnline, boards]);
 
   /**
    * Dual-Plane Bulk Switch (All ON / All OFF)
