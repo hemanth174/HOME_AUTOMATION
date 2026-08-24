@@ -1,13 +1,14 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import AlarmExecutor from './AlarmExecutor';
 import GlobalToast from './GlobalToast';
 import Loader from './Loader';
 import LocalModeBanner from './LocalModeBanner';
 import useLocalConnection from '@/hooks/useLocalConnection';
+import { checkInternet } from '@/lib/netCheck';
 
 export default function MainLayoutWrapper({ children }) {
   const pathname = usePathname();
@@ -22,41 +23,74 @@ export default function MainLayoutWrapper({ children }) {
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(true);
   const [isClientOnline, setIsClientOnline] = useState(true); // Always true initially to match SSR
+  // Tracks that WE auto-sent the user to /local due to a real outage.
+  // Only then are we allowed to bounce them back to the dashboard when
+  // internet returns (never yank a user who opened /local themselves).
+  const autoSentToLocalRef = useRef(false);
   const { isLocalConnected, localUrl } = useLocalConnection();
 
   const fullWidthPage = isLoginPage || is404Page || isPublicPage || (!user && cleanPath === '/');
 
-  // Monitor client online/offline status & auto-redirect to /local when offline
+  // Real connectivity monitor.
+  //
+  // CRITICAL: navigator.onLine / the browser "online" event only mean a
+  // network INTERFACE is attached. Connecting the phone to the ESP32
+  // SoftAP (HOME-AUTO-LEADER) fires "online" even with ZERO internet,
+  // which used to wrongly flip the app online and navigate users away
+  // from /local. Every decision below goes through checkInternet(),
+  // which verifies actual reachability before acting.
   useEffect(() => {
-    // Sync real online state after mount (server always assumed true)
-    const realOnline = navigator.onLine;
-    setIsClientOnline(realOnline);
-    if (!realOnline && cleanPath !== '/local') {
-      router.push('/local');
-    }
+    let cancelled = false;
+    let navTimer = null;
+    let pollTimer = null;
 
-    const handleOnline = () => {
-      setIsClientOnline(true);
-      // When connectivity returns, bring the user back from the local
-      // control page to the main dashboard (they were auto-sent to /local
-      // when the connection dropped).
-      if (cleanPath === '/local') {
+    const evaluate = async () => {
+      const up = await checkInternet();
+      if (cancelled) return;
+      setIsClientOnline(up);
+
+      if (!up) {
+        // True outage: no reachable internet on the current network
+        // (Wi-Fi may still be attached - e.g. ESP32 SoftAP or dead router).
+        if (cleanPath !== '/local' && !autoSentToLocalRef.current) {
+          autoSentToLocalRef.current = true;
+          router.push('/local');
+        }
+      } else if (autoSentToLocalRef.current && cleanPath === '/local') {
+        // Internet genuinely restored AND we were the ones who sent the
+        // user to /local -> return them to the main dashboard.
+        autoSentToLocalRef.current = false;
         router.push('/');
-      }
-    };
-    const handleOffline = () => {
-      setIsClientOnline(false);
-      if (cleanPath !== '/local') {
-        router.push('/local');
+      } else if (up) {
+        autoSentToLocalRef.current = false;
       }
     };
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    evaluate();
+
+    // Connectivity transition events only TRIGGER a verified re-check -
+    // they never set state directly (the SoftAP "online" trap).
+    const recheckSoon = () => {
+      clearTimeout(navTimer);
+      navTimer = setTimeout(evaluate, 400);
+    };
+    window.addEventListener('online', recheckSoon);
+    window.addEventListener('offline', recheckSoon);
+    window.addEventListener('focus', recheckSoon);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') recheckSoon();
+    });
+
+    // Slow background beat catches silent ISP drops/restore.
+    pollTimer = setInterval(evaluate, 10000);
 
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      cancelled = true;
+      clearTimeout(navTimer);
+      clearInterval(pollTimer);
+      window.removeEventListener('online', recheckSoon);
+      window.removeEventListener('offline', recheckSoon);
+      window.removeEventListener('focus', recheckSoon);
     };
   }, [cleanPath, router]);
 

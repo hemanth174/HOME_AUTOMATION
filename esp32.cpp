@@ -324,6 +324,12 @@ void handleCORS() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
   server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   server.sendHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, apikey");
+  // Private Network Access (Chrome/Edge): requests made from a public
+  // HTTPS site (the web dashboard) to this private-network device
+  // require the server to opt-in, otherwise the browser blocks the
+  // request and the /local page appears dead while the direct IP page
+  // (same-origin) keeps working.
+  server.sendHeader("Access-Control-Allow-Private-Network", "true");
 }
 
 void handleDeviceToggle(int rIndex) {
@@ -944,6 +950,16 @@ void setup() {
 
   // Embedded REST server
   setupWebServer();
+
+  // If home Wi-Fi is down at boot (power cut / router offline), start the
+  // local mesh role election IMMEDIATELY instead of waiting for the first
+  // throttled loop() evaluation. HOME-AUTO-LEADER appears within seconds -
+  // no EN-button reset should ever be needed to bring the SoftAP online.
+  if (!isHomeWifiConnected()) {
+    Serial.println("-> Home Wi-Fi down at boot. Electing local role now...");
+    lastRoleEval = 0;
+    evaluateLocalRole();
+  }
 
   Serial.println("===========================================\n");
 }

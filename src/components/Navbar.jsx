@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 
 import useLocalConnection from "@/hooks/useLocalConnection";
+import { checkInternet } from "@/lib/netCheck";
 
 // A custom sub-component for pixel-perfect dynamic Wi-Fi bars
 // signalColor: '#00ff41' (green) | '#f59e0b' (yellow) | '#ef4444' (red)
@@ -223,6 +224,26 @@ export default function Navbar() {
       });
       return;
     }
+
+    // REAL internet verification: attaching to the ESP32 SoftAP
+    // (HOME-AUTO-LEADER) makes navigator.onLine true with zero internet.
+    // The Wi-Fi icon must only show "Connected" when the internet is
+    // actually reachable - otherwise the local mesh indicator is the
+    // source of truth. checkInternet() is cached internally (~8s), so
+    // this frequent call does not hammer the probe endpoint.
+    checkInternet().then((reallyUp) => {
+      if (!reallyUp) {
+        setIsClientOnline(false);
+        setClientNetQuality((prev) =>
+          prev.bars === 0
+            ? prev
+            : { percentage: 0, bars: 0, downlink: null, effectiveType: null, rtt: null },
+        );
+      } else {
+        // Re-assert quality once connectivity is confirmed back.
+        setClientNetQuality((prev) => (prev.bars === 0 ? { ...prev, percentage: 100, bars: 4, effectiveType: "4g" } : prev));
+      }
+    });
 
     const conn =
       navigator.connection ||

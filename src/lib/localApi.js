@@ -41,15 +41,23 @@ export function getLocalCandidateUrls() {
 
 /**
  * Low-level fetch with abort timeout. Rejects on timeout / network error.
+ *
+ * NOTE: a Content-Type header is attached ONLY when there is a body.
+ * Sending Content-Type: application/json on GETs makes them non-simple
+ * requests, forcing a CORS preflight (OPTIONS) on every poll - which
+ * Chrome's Private Network Access rules block for requests from the
+ * HTTPS app to http://192.168.4.1. Simple GETs skip preflight entirely.
  */
 async function fetchJson(url, { method = 'GET', body, timeoutMs = 800 } = {}) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const headers = {};
+    if (body) headers['Content-Type'] = 'application/json';
     const res = await fetch(url, {
       method,
       signal: controller.signal,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body,
       mode: 'cors',
       cache: 'no-store',

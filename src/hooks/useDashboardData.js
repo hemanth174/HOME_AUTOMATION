@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { setLocalDeviceState, triggerLocalAll, fetchLocalDevices } from '@/lib/localApi';
+import { checkInternet } from '@/lib/netCheck';
 import useLocalConnection from './useLocalConnection';
 
 const LOCAL_STORAGE_BOARDS = 'home_auto_cached_boards';
@@ -20,16 +21,28 @@ export default function useDashboardData() {
 
   const { isLocalConnected, leaderNode, localUrl, checkConnection } = useLocalConnection();
 
-  // Track online/offline status
+  // Track REAL online/offline status.
+  // navigator.onLine goes true when the phone joins the ESP32 SoftAP
+  // (HOME-AUTO-LEADER) even with no internet - only a verified probe
+  // may mark cloud sync as available again.
   useEffect(() => {
-    const handleOnline = () => setIsClientOnline(true);
-    const handleOffline = () => setIsClientOnline(false);
+    let active = true;
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    const evaluate = async () => {
+      const up = await checkInternet();
+      if (active) setIsClientOnline(up);
+    };
+
+    evaluate();
+    window.addEventListener('online', evaluate);
+    window.addEventListener('offline', evaluate);
+    const interval = setInterval(evaluate, 10000);
+
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      active = false;
+      window.removeEventListener('online', evaluate);
+      window.removeEventListener('offline', evaluate);
+      clearInterval(interval);
     };
   }, []);
 
