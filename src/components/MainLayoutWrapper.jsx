@@ -35,7 +35,15 @@ export default function MainLayoutWrapper({ children }) {
       router.push('/local');
     }
 
-    const handleOnline = () => setIsClientOnline(true);
+    const handleOnline = () => {
+      setIsClientOnline(true);
+      // When connectivity returns, bring the user back from the local
+      // control page to the main dashboard (they were auto-sent to /local
+      // when the connection dropped).
+      if (cleanPath === '/local') {
+        router.push('/');
+      }
+    };
     const handleOffline = () => {
       setIsClientOnline(false);
       if (cleanPath !== '/local') {

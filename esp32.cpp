@@ -129,7 +129,6 @@ void pollDatabase();
 void pollAlarms();
 void sendHeartbeat();
 bool resolveBoardAndDevices();
-void fetchInitialState();
 void setupWebServer();
 void handleDeviceToggle(int rIndex);
 void enqueueOfflineUpdate(int index, bool state, bool isFeedback);
@@ -148,6 +147,7 @@ void upsertMeshDeviceCache(const String& nodeId, int relayIndex, bool isOn, bool
 void pruneStaleMeshNodes();
 void buildDevicesPayload(JsonArray& arr, bool includeMesh);
 void handleToggleAllMesh(bool on);
+void syncAllStatesToDB();
 
 // ============================================================
 //  SMALL HELPERS
@@ -688,8 +688,17 @@ bool tryJoinMeshLeader() {
   Serial.println("-> Scanning for existing mesh leader...");
   int n = WiFi.scanNetworks();
   bool found = false;
+  // Never target our OWN SoftAP (same SSID). Compare BSSIDs so a board
+  // that is already broadcasting MESH_SSID cannot try to join itself.
+  String selfApBssid = WiFi.softAPmacAddress();
+  selfApBssid.toUpperCase();
   for (int i = 0; i < n; i++) {
-    if (WiFi.SSID(i) == String(MESH_SSID)) { found = true; break; }
+    String bssid = WiFi.BSSIDstr(i);
+    bssid.toUpperCase();
+    if (WiFi.SSID(i) == String(MESH_SSID) && bssid != selfApBssid) {
+      found = true;
+      break;
+    }
   }
   WiFi.scanDelete();
   if (!found) return false;
@@ -719,6 +728,9 @@ void becomeLeader() {
   leaderUptimeMillis = millis();
   // Leave the leader's network if we had joined one
   if (WiFi.SSID() == String(MESH_SSID)) WiFi.disconnect(false);
+  // Leader needs AP + STA: AP for the phone/members, STA to keep watching
+  // for the home Wi-Fi to come back.
+  WiFi.mode(WIFI_AP_STA);
   WiFi.softAPConfig(AP_IP, AP_GATEWAY, AP_SUBNET);
   WiFi.softAP(MESH_SSID, (strlen(MESH_PASS) >= 8) ? MESH_PASS : NULL);
   Serial.print("-> SoftAP active. IP: ");
@@ -891,24 +903,39 @@ void setup() {
   Serial.println("-> Relay GPIOs & NVS States restored.");
 
   // Lower TX power = less RF heat, still plenty for in-home range.
-  WiFi.setTxPower(WIFI_POWER_15dBm);
+  // (Must come after WiFi.mode so the radio stack is started.)
   WiFi.persistent(false);          // don't flash-write credentials each boot
   WiFi.setAutoReconnect(true);     // let the stack handle clean drops silently
 
-  // Start in STA+AP so local control exists regardless of internet state.
-  WiFi.mode(WIFI_AP_STA);
+  // FIX (EN-button issue): boot in STA mode FIRST.
+  // 1. Lower boot-time current draw -> far less likely to brownout on weak
+  //    power supplies right after a power cut (the old code brought up
+  //    SoftAP + STA simultaneously at boot).
+  // 2. Our own SoftAP is NOT broadcasting during the leader-election scan,
+  //    so the board can never try to "join" its own HOME-AUTO-LEADER
+  //    network and stall the home Wi-Fi connection.
+  // SoftAP is started later by becomeLeader() ONLY when home Wi-Fi is down.
+  WiFi.mode(WIFI_STA);
 
-  // SoftAP comes up immediately so Scenario 1 works instantly,
-  // then evaluateLocalRole() refines leadership within seconds.
-  WiFi.softAPConfig(AP_IP, AP_GATEWAY, AP_SUBNET);
-  WiFi.softAP(MESH_SSID, (strlen(MESH_PASS) >= 8) ? MESH_PASS : NULL);
-  Serial.print("-> Initial SoftAP up: ");
-  Serial.println(WiFi.softAPIP());
-
-  // Station: connect to home Wi-Fi for Supabase Cloud sync
   wifiMulti.addAP(ssid, password);
   Serial.print("-> Connecting to Home Wi-Fi: ");
   Serial.println(ssid);
+
+  // Initial blocking attempt so the cloud plane links immediately after
+  // power-on. If the router itself is still booting (whole-house power
+  // restore), the throttled retry in loop() connects as soon as it is up.
+  unsigned long wifiStart = millis();
+  while (wifiMulti.run() != WL_CONNECTED && millis() - wifiStart < 8000) {
+    delay(250);
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("-> Home Wi-Fi connected. IP: ");
+    Serial.println(WiFi.localIP());
+    WiFi.setTxPower(WIFI_POWER_15dBm);
+  } else {
+    Serial.println("-> Home Wi-Fi not up yet (router may still be booting). Will keep retrying quietly.");
+    WiFi.setTxPower(WIFI_POWER_15dBm);
+  }
 
   // mDNS responder (http://home-automation.local)
   if (MDNS.begin("home-automation")) {
@@ -1016,9 +1043,16 @@ void loop() {
       Serial.println("-> Linking Board to Supabase Database...");
       if (resolveBoardAndDevices()) {
         Serial.println("Board & Devices verified.");
-        fetchInitialState();
+        // FIX (offline-state preservation): the DEVICE is the source of
+        // truth right after reconnecting. Push current relay + feedback
+        // states to the cloud FIRST, so anything the user toggled while
+        // offline stays exactly as it is (the old code called
+        // fetchInitialState() here, which reverted relays to stale cloud
+        // state and disrupted offline-toggled devices).
+        syncAllStatesToDB();
         sendHeartbeat();
         pollAlarms();
+        // Queue carries every toggle made while offline -> cloud catches up.
         flushOfflineQueue();
       } else {
         Serial.println("FAILED to link Board/Devices. Retrying...");
@@ -1158,24 +1192,30 @@ bool resolveBoardAndDevices() {
   return foundAny;
 }
 
-void fetchInitialState() {
+// Push the CURRENT relay & feedback states to the cloud.
+// Called right after (re)connecting, so the database is updated to match
+// the physical device state - offline toggles are preserved and the cloud
+// simply catches up with what the user actually did. This is the opposite
+// of the old fetchInitialState(), which reverted the relays to stale
+// cloud state and disrupted offline-toggled devices.
+void syncAllStatesToDB() {
   if (boardUUID == "") return;
-  HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=relay_index,is_on");
-  http.addHeader("apikey", SUPABASE_SERVICE_KEY);
-  http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
+  for (int i = 0; i < NUM_DEVICES; i++) {
+    if (deviceUUIDs[i] == "") continue;
 
-  if (http.GET() == 200) {
-    DynamicJsonDocument doc(1024); deserializeJson(doc, http.getString());
-    for (int i = 0; i < doc.size(); i++) {
-      int rIndex = doc[i]["relay_index"];
-      if (rIndex >= 0 && rIndex < NUM_DEVICES) {
-        bool initState = doc[i]["is_on"];
-        setRelay(rIndex, initState);
-      }
-    }
+    HTTPClient http;
+    http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUIDs[i]);
+    http.addHeader("apikey", SUPABASE_SERVICE_KEY);
+    http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
+    http.addHeader("Content-Type", "application/json");
+
+    String body = "{\"is_on\":" + String(isRelayOn[i] ? "true" : "false") +
+                  ",\"feedback_on\":" + String((confirmedInputState[i] == LOW) ? "true" : "false") +
+                  ",\"last_changed\":\"" + getIsoTime() + "\"}";
+    http.PATCH(body);
+    http.end();
   }
-  http.end();
+  Serial.println("-> Current device states synced to cloud (offline states preserved).");
 }
 
 void pollAlarms() {

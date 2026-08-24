@@ -26,7 +26,6 @@ import {
   Wifi,
   WifiOff,
   Zap,
-  ExternalLink,
 } from "lucide-react";
 
 import useLocalConnection from "@/hooks/useLocalConnection";
@@ -1323,20 +1322,104 @@ export default function Navbar() {
                 <div className="flex flex-col gap-1.5 text-[10px] text-text-muted font-semibold select-none">
                   {isClientOnline ? (
                     <>
+                      {(wifiIsCritical || wifiIsWeak) && (
+                        <div className="flex items-start gap-1.5 p-2 rounded-lg bg-amber-500/5 border border-amber-500/20 text-[9px] text-amber-300">
+                          <span className="text-base leading-none mt-px">
+                            {wifiIsCritical ? "🔴" : "🟡"}
+                          </span>
+                          <div>
+                            <p className="font-bold">
+                              {wifiIsCritical
+                                ? "Critical Wi-Fi Speed"
+                                : "Low Wi-Fi Speed Detected"}
+                            </p>
+                            <p className="text-[9px] text-text-muted leading-tight mt-0.5">
+                              {wifiIsCritical
+                                ? "Very poor signal quality. Real-time updates may fail or disconnect."
+                                : "Signal degraded. Automations and updates may be slow or delayed."}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                       <div className="flex justify-between">
-                        <span>Gateway IP:</span>
-                        <span className="text-text font-bold">192.168.1.1</span>
+                        <span>Download Speed:</span>
+                        <span
+                          className={`font-bold ${
+                            wifiIsCritical
+                              ? "text-red-400"
+                              : wifiIsWeak
+                                ? "text-amber-400"
+                                : "text-[#00ff41]"
+                          }`}
+                        >
+                          {clientNetQuality.downlink !== null
+                            ? `${clientNetQuality.downlink} Mbps`
+                            : "—"}
+                        </span>
                       </div>
                       <div className="flex justify-between">
-                        <span>Ping Latency:</span>
-                        <span className="text-accent font-bold">~14 ms</span>
+                        <span>Latency (RTT):</span>
+                        <span
+                          className={`font-bold ${
+                            clientNetQuality.rtt > 300
+                              ? "text-red-400"
+                              : clientNetQuality.rtt > 150
+                                ? "text-amber-400"
+                                : "text-text"
+                          }`}
+                        >
+                          {clientNetQuality.rtt !== null
+                            ? `${clientNetQuality.rtt} ms`
+                            : "~14 ms"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Network Type:</span>
+                        <span className="text-text font-bold uppercase">
+                          {clientNetQuality.effectiveType || "802.11ax"}
+                        </span>
+                      </div>
+                      {/* Live signal bar visualization */}
+                      <div className="flex items-center gap-1.5 pt-1">
+                        <span className="text-[9px] text-text-muted">
+                          Signal:
+                        </span>
+                        <div className="flex items-end gap-0.5">
+                          {[1, 2, 3, 4].map((i) => (
+                            <div
+                              key={i}
+                              className={`rounded-sm transition-all duration-500 ${
+                                i <= clientNetQuality.bars
+                                  ? wifiIsCritical
+                                    ? "bg-red-500"
+                                    : wifiIsWeak
+                                      ? "bg-amber-400"
+                                      : "bg-[#00ff41]"
+                                  : "bg-border"
+                              }`}
+                              style={{ width: 4, height: 4 + i * 3 }}
+                            />
+                          ))}
+                        </div>
+                        <span
+                          className={`text-[9px] font-bold ml-1 ${
+                            wifiIsCritical
+                              ? "text-red-400"
+                              : wifiIsWeak
+                                ? "text-amber-400"
+                                : "text-[#00ff41]"
+                          }`}
+                        >
+                          {clientNetQuality.bars * 25}%
+                        </span>
                       </div>
                     </>
                   ) : (
                     <div className="flex flex-col gap-1 text-[9px] leading-relaxed text-red-500/90 font-semibold">
-                      <p>⚠️ Internet Offline</p>
-                      <p className="text-text-muted/80 mt-0.5">
-                        Please check local Wi-Fi gateway.
+                      <p>⚠️ No Internet or Wi-Fi Router Connection</p>
+                      <p className="text-text-muted/80 leading-tight mt-0.5">
+                        Your client terminal is offline. Please check your
+                        local Wi-Fi router connectivity.
                       </p>
                     </div>
                   )}
@@ -1444,6 +1527,12 @@ export default function Navbar() {
                                   {sig.speed}
                                 </span>
                               </div>
+                              <div className="flex justify-between items-center text-[9px] font-semibold text-text-muted mt-0.5">
+                                <span>Distance:</span>
+                                <span className="text-text font-bold">
+                                  {sig.distance} m
+                                </span>
+                              </div>
                               <div className="w-full h-1 bg-border rounded-full overflow-hidden mt-0.5">
                                 <div
                                   className="h-full bg-accent transition-all duration-500"
@@ -1514,33 +1603,48 @@ export default function Navbar() {
                   {isLocalConnected ? (
                     <>
                       <div className="flex justify-between">
-                        <span>Gateway IP:</span>
+                        <span>Gateway Address:</span>
                         <span className="text-emerald-400 font-mono font-bold">
                           {localUrl}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span>Mesh Mode:</span>
+                        <span>Mesh Role:</span>
                         <span className="text-text font-bold uppercase">
                           {leaderNode?.role || "Leader Node"}
                         </span>
                       </div>
-                      <a
-                        href={localUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-1 flex items-center justify-center gap-1.5 bg-emerald-500/20 text-emerald-300 py-1.5 px-3 rounded-lg text-[10px] font-bold"
+                      <div className="flex justify-between">
+                        <span>Local Latency:</span>
+                        <span className="text-emerald-400 font-bold">
+                          &lt; 8 ms (Direct RF)
+                        </span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-[9px] text-emerald-300">
+                        ⚡ Autonomous sub-100ms hardware control active. No
+                        cloud or router required.
+                      </div>
+                      <Link
+                        href="/local"
+                        onClick={() => setShowLocalMeshDropdownMobile(false)}
+                        className="mt-1 flex items-center justify-center gap-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 py-2 px-3 rounded-xl border border-emerald-500/30 text-[10px] font-bold transition-colors"
                       >
-                        <span>Open Local AP Panel</span>
-                        <ExternalLink size={11} />
-                      </a>
+                        <span>Open Local Control Panel</span>
+                        <Zap size={11} className="text-emerald-400" />
+                      </Link>
                     </>
                   ) : (
                     <div className="flex flex-col gap-1 text-[9px] leading-relaxed text-text-muted">
-                      <p className="font-bold text-text">Not on ESP32 SoftAP</p>
+                      <p className="font-bold text-text">
+                        Not connected to ESP32 SoftAP
+                      </p>
                       <p>
-                        Connect Wi-Fi to HOME-AUTO-XXXX for offline direct
-                        control.
+                        To control devices without internet, connect your
+                        device to the{" "}
+                        <strong className="text-text font-mono">
+                          HOME-AUTO-XXXX
+                        </strong>{" "}
+                        Wi-Fi network.
                       </p>
                     </div>
                   )}
