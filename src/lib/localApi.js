@@ -40,6 +40,44 @@ export function getLocalCandidateUrls() {
 }
 
 /**
+ * Fetch wrapper for the local ESP32.
+ *
+ * Chrome (120+) blocks or restricts HTTPS pages from fetching plain-HTTP
+ * local devices like http://192.168.4.1 (mixed content / Local Network
+ * Access rules). Declaring `targetAddressSpace` tells the browser the
+ * request intentionally goes to a private/local device, which exempts it
+ * from mixed-content blocking and triggers the Local Network Access
+ * permission prompt where required.
+ *
+ * The enum value changed across Chrome versions ('private' -> 'local'),
+ * so we probe strategies in order and lock onto whichever one this
+ * browser accepts. Browsers without support just fetch normally.
+ */
+const ADDRESS_SPACE_STRATEGIES = ['local', 'private', undefined];
+let addressSpaceIndex = 0;
+
+async function localFetch(url, options = {}) {
+  let lastError;
+  for (let i = addressSpaceIndex; i < ADDRESS_SPACE_STRATEGIES.length; i++) {
+    const space = ADDRESS_SPACE_STRATEGIES[i];
+    try {
+      const res = space
+        ? await fetch(url, { ...options, targetAddressSpace: space })
+        : await fetch(url, options);
+      // A real response (any status) proves this strategy works.
+      addressSpaceIndex = i;
+      return res;
+    } catch (err) {
+      lastError = err;
+      // TypeError covers BOTH "unknown fetch option" and network
+      // failure - try the next strategy; the working one gets locked
+      // in on the first successful response.
+    }
+  }
+  throw lastError;
+}
+
+/**
  * Low-level fetch with abort timeout. Rejects on timeout / network error.
  *
  * NOTE: a Content-Type header is attached ONLY when there is a body.
@@ -54,7 +92,7 @@ async function fetchJson(url, { method = 'GET', body, timeoutMs = 800 } = {}) {
   try {
     const headers = {};
     if (body) headers['Content-Type'] = 'application/json';
-    const res = await fetch(url, {
+    const res = await localFetch(url, {
       method,
       signal: controller.signal,
       headers,

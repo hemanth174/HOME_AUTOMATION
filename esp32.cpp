@@ -330,6 +330,9 @@ void handleCORS() {
   // request and the /local page appears dead while the direct IP page
   // (same-origin) keeps working.
   server.sendHeader("Access-Control-Allow-Private-Network", "true");
+  // Device identity shown in Chrome's local-network permission prompt.
+  server.sendHeader("Private-Network-Access-Name", "smart-home-leader");
+  server.sendHeader("Private-Network-Access-ID", "02:4C:A5:00:00:01");
 }
 
 void handleDeviceToggle(int rIndex) {

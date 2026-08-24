@@ -328,7 +328,17 @@ export default function Navbar() {
   }, []);
 
   // Derive icon color from bar count
-  const wifiIconColor = !isClientOnline
+  // The Wi-Fi ROUTER icon must reflect the CURRENT Wi-Fi network's
+  // internet - not cellular. When the phone is on the ESP32 SoftAP
+  // (leader reports its uplink station down), mobile data may still
+  // keep the internet probe alive, but this Wi-Fi has NO internet:
+  // show the router icon as offline and let the local Zap icon be the
+  // active indicator instead.
+  const onEspSoftAp =
+    isLocalConnected && leaderNode?.stationConnected === false;
+  const wifiRouterOnline = isClientOnline && !onEspSoftAp;
+
+  const wifiIconColor = !wifiRouterOnline
     ? "currentColor"
     : clientNetQuality.bars >= 4
       ? "#00ff41"
@@ -336,8 +346,8 @@ export default function Navbar() {
         ? "#f59e0b"
         : "#ef4444";
 
-  const wifiIsWeak = isClientOnline && clientNetQuality.bars < 4;
-  const wifiIsCritical = isClientOnline && clientNetQuality.bars <= 2;
+  const wifiIsWeak = wifiRouterOnline && clientNetQuality.bars < 4;
+  const wifiIsCritical = wifiRouterOnline && clientNetQuality.bars <= 2;
 
   // Helper: check if a board is online based on heartbeat timestamp
   const isBoardOnline = (lastSeen) => {
@@ -846,7 +856,7 @@ export default function Navbar() {
                 setShowWifiDropdown(false);
               }}
               className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-center relative ${
-                !isClientOnline
+                !wifiRouterOnline
                   ? "border-red-500/30 bg-red-500/5 text-red-500 hover:bg-red-500/10 hover:border-red-500/50"
                   : wifiIsCritical
                     ? "border-red-500/30 bg-red-500/5 text-red-500 hover:bg-red-500/10 hover:border-red-500/50 animate-pulse"
@@ -858,7 +868,7 @@ export default function Navbar() {
             >
               <WifiSignalIcon
                 percentage={clientNetQuality.percentage}
-                online={isClientOnline}
+                online={wifiRouterOnline}
                 size={15}
                 signalColor={wifiIconColor}
               />
@@ -883,7 +893,7 @@ export default function Navbar() {
                   </span>
                   <span
                     className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md ${
-                      !isClientOnline
+                      !wifiRouterOnline
                         ? "bg-red-500/10 text-red-500 border border-red-500/20"
                         : wifiIsCritical
                           ? "bg-red-500/10 text-red-500 border border-red-500/20"
@@ -892,8 +902,10 @@ export default function Navbar() {
                             : "bg-[rgba(0,255,65,0.08)] text-[#00ff41] border border-[#00ff41]/20"
                     }`}
                   >
-                    {!isClientOnline
-                      ? "Offline"
+                    {!wifiRouterOnline
+                      ? onEspSoftAp
+                        ? "Local Mode"
+                        : "Offline"
                       : wifiIsCritical
                         ? "Critical"
                         : wifiIsWeak
@@ -903,7 +915,22 @@ export default function Navbar() {
                 </div>
 
                 <div className="flex flex-col gap-2 text-xs font-semibold select-none">
-                  {isClientOnline ? (
+                  {!wifiRouterOnline ? (
+                    <div className="flex flex-col gap-1.5 text-[11px] text-text-muted">
+                      {onEspSoftAp ? (
+                        <div className="p-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-[10px] text-emerald-300">
+                          ⚡ Connected to <strong>HOME-AUTO-LEADER</strong> — this
+                          Wi-Fi has no internet by design. Use the ⚡ Local
+                          Server panel or the Local tab for hardware control.
+                        </div>
+                      ) : (
+                        <div className="p-2 rounded-lg bg-red-500/5 border border-red-500/20 text-[10px] text-red-300">
+                          No internet on this network. Cloud features paused
+                          until connectivity returns.
+                        </div>
+                      )}
+                    </div>
+                  ) : (
                     <div className="flex flex-col gap-1.5 text-[11px] text-text-muted">
                       {/* Low signal warning banner */}
                       {wifiIsWeak && (
@@ -1003,15 +1030,7 @@ export default function Navbar() {
                           {clientNetQuality.bars * 25}%
                         </span>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-1 text-[10px] leading-relaxed text-red-500/90 font-semibold">
-                      <p>⚠️ No Internet or Wi-Fi Router Connection</p>
-                      <p className="text-[9px] text-text-muted leading-tight mt-0.5">
-                        Your client terminal is offline. Please check your local
-                        Wi-Fi router connectivity.
-                      </p>
-                    </div>
+                     </div>
                   )}
                 </div>
               </div>
@@ -1311,14 +1330,14 @@ export default function Navbar() {
                 setShowWifiDropdownMobile(false);
               }}
               className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-center ${
-                !isClientOnline
+                !wifiRouterOnline
                   ? "border-red-500/30 bg-red-500/5 text-red-500 hover:bg-red-500/10 hover:border-red-500/50"
                   : "border-border bg-transparent text-text-muted hover:bg-accent-bg hover:border-border/80"
               }`}
             >
               <WifiSignalIcon
-                percentage={isClientOnline ? 100 : 0}
-                online={isClientOnline}
+                percentage={wifiRouterOnline ? 100 : 0}
+                online={wifiRouterOnline}
                 size={14}
               />
             </button>
@@ -1332,16 +1351,20 @@ export default function Navbar() {
                   </span>
                   <span
                     className={`text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
-                      isClientOnline
+                      wifiRouterOnline
                         ? "bg-accent-bg text-accent border border-accent/20"
                         : "bg-red-500/10 text-red-500 border border-red-500/20"
                     }`}
                   >
-                    {isClientOnline ? "Connected" : "Offline"}
+                    {wifiRouterOnline
+                      ? "Connected"
+                      : onEspSoftAp
+                        ? "Local Mode"
+                        : "Offline"}
                   </span>
                 </div>
                 <div className="flex flex-col gap-1.5 text-[10px] text-text-muted font-semibold select-none">
-                  {isClientOnline ? (
+                  {wifiRouterOnline ? (
                     <>
                       {(wifiIsCritical || wifiIsWeak) && (
                         <div className="flex items-start gap-1.5 p-2 rounded-lg bg-amber-500/5 border border-amber-500/20 text-[9px] text-amber-300">
@@ -1437,11 +1460,25 @@ export default function Navbar() {
                     </>
                   ) : (
                     <div className="flex flex-col gap-1 text-[9px] leading-relaxed text-red-500/90 font-semibold">
-                      <p>⚠️ No Internet or Wi-Fi Router Connection</p>
-                      <p className="text-text-muted/80 leading-tight mt-0.5">
-                        Your client terminal is offline. Please check your
-                        local Wi-Fi router connectivity.
-                      </p>
+                      {onEspSoftAp ? (
+                        <>
+                          <p className="text-emerald-400">
+                            ⚡ Connected to HOME-AUTO-LEADER
+                          </p>
+                          <p className="text-text-muted/80 leading-tight mt-0.5">
+                            This Wi-Fi has no internet by design. Open the Local
+                            tab for offline hardware control.
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p>⚠️ No Internet or Wi-Fi Router Connection</p>
+                          <p className="text-text-muted/80 leading-tight mt-0.5">
+                            Your client terminal is offline. Please check your
+                            local Wi-Fi router connectivity.
+                          </p>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>

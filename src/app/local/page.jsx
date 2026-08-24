@@ -68,7 +68,10 @@ export default function LocalControlPage() {
   const connect = useCallback(async () => {
     setPhase(PHASE.CONNECTING);
     try {
-      const { baseUrl: winnerUrl } = await discoverLocalNode(900);
+      // Generous first probe: Chrome may pause the request to show a
+      // "Local network access" permission prompt (required for an HTTPS
+      // site to talk to a plain-HTTP device like the ESP32).
+      const { baseUrl: winnerUrl } = await discoverLocalNode(2500);
       setBaseUrlState(winnerUrl);
       setCustomUrlInput(winnerUrl);
 
@@ -350,7 +353,10 @@ export default function LocalControlPage() {
                   2️⃣ <strong>Turn OFF Mobile Data (Cellular)</strong> so your
                   phone routes commands over Wi-Fi.
                   <br />
-                  3️⃣ Tap Retry above, or open the direct AP panel.
+                  3️⃣ If the browser asks for <strong>&quot;Local network
+                  access&quot;</strong> permission, tap <strong>Allow</strong>.
+                  <br />
+                  4️⃣ Tap Retry above, or open the direct AP panel.
                 </p>
               </div>
             </div>
