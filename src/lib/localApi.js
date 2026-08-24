@@ -80,22 +80,21 @@ async function localFetch(url, options = {}) {
 /**
  * Low-level fetch with abort timeout. Rejects on timeout / network error.
  *
- * NOTE: a Content-Type header is attached ONLY when there is a body.
- * Sending Content-Type: application/json on GETs makes them non-simple
- * requests, forcing a CORS preflight (OPTIONS) on every poll - which
- * Chrome's Private Network Access rules block for requests from the
- * HTTPS app to http://192.168.4.1. Simple GETs skip preflight entirely.
+ * NOTE: request bodies are sent as text/plain (CORS "simple request").
+ * application/json would make every POST non-simple, forcing a CORS
+ * preflight (OPTIONS) before each toggle - and Chrome's Private Network
+ * Access rules block that preflight for HTTPS -> http://192.168.4.1.
+ * That is exactly the "status loads fine but switching fails" symptom.
+ * The ESP32 firmware reads the raw body (server.arg("plain")) and does
+ * not care about the Content-Type.
  */
 async function fetchJson(url, { method = 'GET', body, timeoutMs = 800 } = {}) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const headers = {};
-    if (body) headers['Content-Type'] = 'application/json';
     const res = await localFetch(url, {
       method,
       signal: controller.signal,
-      headers,
       body,
       mode: 'cors',
       cache: 'no-store',
@@ -171,7 +170,8 @@ export async function setLocalDeviceState(relayIndex, targetState, nodeId = null
   return fetchJson(`${base}${endpoint}`, {
     method: 'POST',
     body: JSON.stringify({ state: Boolean(targetState) }),
-    timeoutMs: nodeId ? 2500 : 1200, // extra hop through leader needs headroom
+    // SoftAP round trips can be slow (400ms+ observed); leave headroom
+    timeoutMs: nodeId ? 3000 : 2500,
   });
 }
 
@@ -183,7 +183,7 @@ export async function triggerLocalAll(action) {
   return fetchJson(`${getLocalBaseUrl()}/api/all/${action === 'on' ? 'on' : 'off'}`, {
     method: 'POST',
     body: JSON.stringify({}),
-    timeoutMs: 3000,
+    timeoutMs: 4000,
   });
 }
 
