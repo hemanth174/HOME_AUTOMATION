@@ -78,7 +78,7 @@ export default function LandingPage() {
       {/* Top Navbar */}
       <header className="fixed top-0 w-full z-50 flex justify-between items-center px-4 md:px-6 py-3 md:py-4 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant">
         <div className="text-base md:text-xl font-headline-md font-black tracking-tighter text-white uppercase select-none">
-          ELECTRIC WARRIORS
+          VIKA TECH
         </div>
         <nav className="hidden md:flex gap-8 font-label-caps text-[12px] tracking-tight items-center">
           <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="text-lp-primary font-bold border-b-2 border-lp-primary-container pb-1 cursor-pointer">
