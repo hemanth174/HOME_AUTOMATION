@@ -88,5 +88,7 @@ where o.user_id = a.user_id;
 alter table public.account_approval_requests enable row level security;
 alter table public.provisioning_records enable row level security;
 alter table public.approval_audit_log enable row level security;
+drop policy if exists "users read own approval" on public.account_approval_requests;
+drop policy if exists "users read own provisioning" on public.provisioning_records;
 create policy "users read own approval" on public.account_approval_requests for select using (auth.uid() = user_id);
 create policy "users read own provisioning" on public.provisioning_records for select using (auth.uid() = user_id);
