@@ -19,8 +19,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata = {
-  title: 'Smart Home',
-  description: 'Smart Home Automation Control Panel',
+  title: 'VikaTech',
+  description: 'VikaTech Automation Control Panel',
   manifest: '/manifest.json',
 };
 

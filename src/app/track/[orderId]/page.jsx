@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import InfoPageShell from '@/components/InfoPageShell';
 import { supabase } from '@/lib/supabase';
 import { STAGES, CATEGORY_LABELS, DETAIL_LABELS } from '@/lib/orderCategories';
+import { RefreshCw } from 'lucide-react';
 
 const STAGE_ICONS = {
   Received: 'inbox',
@@ -22,12 +23,12 @@ export default function TrackOrderPage() {
 
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [notFound, setNotFound] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    const fetchOrder = async () => {
-      setLoading(true);
+  const fetchOrder = useCallback(async (manual = false) => {
+      if (manual) setRefreshing(true);
+      else setLoading(true);
       setNotFound(false);
       try {
         const { data, error } = await supabase
@@ -35,20 +36,24 @@ export default function TrackOrderPage() {
           .select('*')
           .eq('order_id', orderId)
           .maybeSingle();
-        if (!active) return;
         if (error) throw error;
         if (!data) setNotFound(true);
         else setOrder(data);
       } catch (err) {
         console.error('Tracking fetch error:', err);
-        if (active) setNotFound(true);
+        setNotFound(true);
       } finally {
-        if (active) setLoading(false);
+        if (manual) setRefreshing(false);
+        else setLoading(false);
       }
-    };
-    if (orderId) fetchOrder();
-    return () => { active = false; };
   }, [orderId]);
+
+  useEffect(() => {
+    if (!orderId) return undefined;
+    fetchOrder();
+    const poll = setInterval(() => fetchOrder(true), 60000);
+    return () => clearInterval(poll);
+  }, [fetchOrder, orderId]);
 
   const currentIndex = order ? STAGES.indexOf(order.status) : -1;
   const details = order?.details || {};
@@ -92,8 +97,19 @@ export default function TrackOrderPage() {
                 {CATEGORY_LABELS[order.category] || order.category} &middot; booked on {new Date(order.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
               </p>
             </div>
-            <div className="px-6 py-4 bg-lp-surface-lowest border border-lp-primary-container/25 rounded font-data-point text-lp-primary-container text-lg font-bold select-none">
-              {order.order_id}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => fetchOrder(true)}
+                disabled={refreshing}
+                className="inline-flex items-center gap-2 rounded border border-lp-outline-variant px-3 py-2 text-[10px] font-label-caps font-bold uppercase tracking-wider text-lp-on-surface-variant hover:border-lp-primary-container hover:text-lp-primary-container disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+                {refreshing ? 'Refreshing' : 'Refresh'}
+              </button>
+              <div className="px-6 py-4 bg-lp-surface-lowest border border-lp-primary-container/25 rounded font-data-point text-lp-primary-container text-lg font-bold select-none">
+                {order.order_id}
+              </div>
             </div>
           </div>
 

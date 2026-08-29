@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import VoiceControl from '@/components/VoiceControl';
 import Toast from '@/components/Toast';
@@ -10,7 +11,8 @@ import AddBoardModal from '@/components/AddBoardModal';
 import EditBoardModal from '@/components/EditBoardModal';
 import QuickPresets from '@/components/QuickPresets';
 import useDashboardData from '@/hooks/useDashboardData';
-import { Cpu } from 'lucide-react';
+import { Cpu, ShieldCheck } from 'lucide-react';
+import { isAdminEmail } from '@/lib/admin';
 
 export default function Dashboard() {
   const {
@@ -52,7 +54,7 @@ export default function Dashboard() {
             const steps = [
               {
                 popover: {
-                  title: 'Welcome to Smart Home!',
+                  title: 'Welcome to VikaTech!',
                   description: 'Let us take you on a quick interactive tour to navigate your home dashboard.',
                   side: 'center',
                   align: 'start'
@@ -317,7 +319,7 @@ export default function Dashboard() {
   }, []);
 
   if (loading) {
-    return <Loader message="Loading Smart Home Dashboard..." />;
+    return <Loader message="Loading VikaTech Dashboard..." />;
   }
 
   return (
@@ -348,6 +350,15 @@ export default function Dashboard() {
               All Off
             </button>
           </div>
+            {isAdminEmail(user?.email) && (
+              <Link
+                href="/admin"
+                className="inline-flex min-h-[32px] items-center justify-center gap-2 rounded-lg border border-accent/40 bg-accent-bg px-3.5 py-1 text-xs font-extrabold text-accent transition-all hover:border-accent whitespace-nowrap"
+              >
+                <ShieldCheck size={14} />
+                Admin
+              </Link>
+            )}
             <button
               onClick={() => setShowAddBoardModal(true)}
               className="inline-flex min-h-[32px] items-center justify-center gap-2 rounded-lg bg-accent px-3.5 py-1 text-xs font-extrabold text-[var(--btn-text)] transition-all duration-250 cursor-pointer hover:bg-accent-hover shadow-gold-glow whitespace-nowrap"

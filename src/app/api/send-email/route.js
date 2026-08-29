@@ -30,7 +30,7 @@ export async function POST(request) {
     });
 
     const mailOptions = {
-      from: process.env.SMTP_FROM || `"Smart Home Secure" <${user}>`,
+      from: process.env.SMTP_FROM || `"VikaTech" <${user}>`,
       to: email,
       subject: subject,
       text: text,

@@ -14,7 +14,7 @@ export default function MainLayoutWrapper({ children }) {
   const pathname = usePathname();
   const router = useRouter();
   const cleanPath = (pathname || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '') || '/';
-  const VALID_ROUTES = ['/', '/local', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales'];
+  const VALID_ROUTES = ['/', '/local', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/admin'];
   const PUBLIC_ROUTES = ['/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/terms'];
   const isTrackPage = cleanPath.startsWith('/track/');
   const isPublicPage = PUBLIC_ROUTES.includes(cleanPath) || isTrackPage;
@@ -40,6 +40,13 @@ export default function MainLayoutWrapper({ children }) {
   // from /local. Every decision below goes through checkInternet(),
   // which verifies actual reachability before acting.
   useEffect(() => {
+    // Admin and public tracking pages are cloud-only views. Do not run the
+    // local-mode connectivity probe here; its timeout intentionally appears
+    // as a cancelled generate_204 request in browser DevTools.
+    if (cleanPath === '/admin' || isTrackPage) {
+      setIsClientOnline(true);
+      return undefined;
+    }
     let cancelled = false;
     let navTimer = null;
     let pollTimer = null;

@@ -34,7 +34,7 @@ export default function Home() {
   }, []);
 
   if (loading) {
-    return <Loader message="Loading Smart Home..." />;
+    return <Loader message="Loading VikaTech..." />;
   }
 
   if (user) {

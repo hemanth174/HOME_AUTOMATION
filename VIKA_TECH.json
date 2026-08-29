@@ -1,0 +1,258 @@
+{
+  "name": "VikaTech - Order Tracking Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Setup Instructions\n\n**1. Supabase node:** Create a credential with your project URL + service_role key.\n\n**2. Email (SMTP) node:** Add your SMTP credentials (same ones as your .env SMTP_HOST/USER/PASS).\n\n**3. Edit the tracking link** in the email node: replace `YOUR-WEBSITE-DOMAIN` with your real domain.\n\n**4. Activate the workflow**, then copy the Production Webhook URL into `.env.local`:\n\nNEXT_PUBLIC_N8N_WEBHOOK_URL=https://your-n8n-host/webhook/ew-order\n\nFlow:\nWebsite POST -> Normalize -> Insert into order_trackings -> Confirmation email -> Respond 200",
+        "height": 420,
+        "width": 360
+      },
+      "id": "note-setup",
+      "name": "Sticky Note - Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-480, -160]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ew-order",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Order Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-80, 0],
+      "webhookId": "ew-order"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateInput": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "order_id",
+              "value": "={{ $json.body.order_id }}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "full_name",
+              "value": "={{ $json.body.full_name || 'Customer' }}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "email",
+              "value": "={{ $json.body.email || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "phone",
+              "value": "={{ $json.body.phone || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "a5",
+              "name": "category",
+              "value": "={{ $json.body.category || 'home' }}",
+              "type": "string"
+            },
+            {
+              "id": "a6",
+              "name": "details",
+              "value": "={{ $json.body.details || {} }}",
+              "type": "object"
+            },
+            {
+              "id": "a7",
+              "name": "address",
+              "value": "={{ $json.body.address || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "a8",
+              "name": "lat",
+              "value": "={{ $json.body.lat ?? null }}",
+              "type": "number"
+            },
+            {
+              "id": "a9",
+              "name": "lng",
+              "value": "={{ $json.body.lng ?? null }}",
+              "type": "number"
+            },
+            {
+              "id": "a10",
+              "name": "status",
+              "value": "Received",
+              "type": "string"
+            },
+            {
+              "id": "a11",
+              "name": "created_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "a12",
+              "name": "status_history",
+              "value": "={{ [ { status: 'Received', at: $now.toISO() } ] }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-normalize",
+      "name": "Normalize Order",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [160, 0]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "order_trackings",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "order_id",
+              "fieldValue": "={{ $json.order_id }}"
+            },
+            {
+              "fieldId": "full_name",
+              "fieldValue": "={{ $json.full_name }}"
+            },
+            {
+              "fieldId": "phone",
+              "fieldValue": "={{ $json.phone }}"
+            },
+            {
+              "fieldId": "category",
+              "fieldValue": "={{ $json.category }}"
+            },
+            {
+              "fieldId": "details",
+              "fieldValue": "={{ $json.details }}"
+            },
+            {
+              "fieldId": "address",
+              "fieldValue": "={{ $json.address }}"
+            },
+            {
+              "fieldId": "lat",
+              "fieldValue": "={{ $json.lat }}"
+            },
+            {
+              "fieldId": "lng",
+              "fieldValue": "={{ $json.lng }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "={{ $json.status }}"
+            },
+            {
+              "fieldId": "status_history",
+              "fieldValue": "={{ $json.status_history }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-supabase",
+      "name": "Save to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [400, 0],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "fromEmail": "ahemanthramasai@gmail.com",
+        "toEmail": "={{ $('Normalize Order').item.json.email }}",
+        "subject": "=Your VikaTech inquiry {{ $('Normalize Order').item.json.order_id }} is confirmed",
+        "emailFormat": "html",
+        "html": "=<!DOCTYPE html>\n<html>\n<body style=\"margin:0;padding:24px;background:#0b0f17;font-family:-apple-system,'Segoe UI',Roboto,sans-serif;color:#f1f5f9;\">\n  <div style=\"max-width:520px;margin:0 auto;background:#131b2e;border:1px solid #1e293b;border-radius:16px;padding:32px;\">\n    <h2 style=\"color:#ffffff;margin:0 0 8px;\">Thanks, {{ $('Normalize Order').item.json.full_name }}!</h2>\n    <p style=\"color:#94a3b8;font-size:14px;line-height:1.6;margin:0 0 20px;\">\n      Your smart home inquiry has been received. Our team responds within 24 hours on business days.\n    </p>\n    <div style=\"background:#0b0f17;border:1px solid rgba(201,168,76,0.35);border-radius:10px;padding:16px;text-align:center;margin-bottom:20px;\">\n      <span style=\"display:block;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;\">Your Tracking ID</span>\n      <span style=\"font-size:20px;font-weight:800;color:#c9a84c;\">{{ $('Normalize Order').item.json.order_id }}</span>\n    </div>\n    <a href=\"https://YOUR-WEBSITE-DOMAIN/track/{{ $('Normalize Order').item.json.order_id }}\" style=\"display:block;background:#c9a84c;color:#111827;text-align:center;padding:12px;border-radius:10px;font-weight:800;font-size:14px;text-decoration:none;\">\n      Track Your Project &rarr;\n    </a>\n    <p style=\"color:#64748b;font-size:11px;line-height:1.6;margin:20px 0 0;\">\n      Keep this email. You can follow every stage (Survey, Quoting, Manufacturing, Shipping, Installation) using the link above.\n    </p>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "node-email",
+      "name": "Send Confirmation Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [640, 0],
+      "onError": "continueRegularOutput",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, order_id: $('Normalize Order').item.json.order_id }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "node-respond",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [880, 0]
+    }
+  ],
+  "connections": {
+    "Order Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Order": {
+      "main": [
+        [
+          {
+            "node": "Save to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Confirmation Email": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false
+}

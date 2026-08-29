@@ -1,7 +1,7 @@
 {
-  "name": "Smart Home",
-  "short_name": "SmartHome",
-  "description": "Smart Home Automation Control Panel",
+  "name": "VikaTech",
+  "short_name": "VikaTech",
+  "description": "VikaTech Automation Control Panel",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0A0A0A",

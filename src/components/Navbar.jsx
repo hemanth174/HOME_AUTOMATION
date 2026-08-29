@@ -13,6 +13,7 @@ import {
   AlarmClock,
   TrendingUp,
   History,
+  ShieldCheck,
   Menu,
   X,
   LogOut,
@@ -30,6 +31,7 @@ import {
 
 import useLocalConnection from "@/hooks/useLocalConnection";
 import { checkInternet } from "@/lib/netCheck";
+import { isAdminEmail } from "@/lib/admin";
 
 // A custom sub-component for pixel-perfect dynamic Wi-Fi bars
 // signalColor: '#00ff41' (green) | '#f59e0b' (yellow) | '#ef4444' (red)
@@ -301,6 +303,7 @@ export default function Navbar() {
   };
 
   useEffect(() => {
+    if (pathname === "/admin") return undefined;
     if (typeof window !== "undefined") {
       readNetworkQuality();
 
@@ -325,7 +328,7 @@ export default function Navbar() {
         clearInterval(interval);
       };
     }
-  }, []);
+  }, [pathname]);
 
   // Derive icon color from bar count
   // The Wi-Fi ROUTER icon must reflect the CURRENT Wi-Fi network's
@@ -604,6 +607,7 @@ export default function Navbar() {
     "/partner-program",
     "/contact-sales",
     "/local",
+    "/admin",
   ];
   const PUBLIC_ROUTES = [
     "/privacy-policy",
@@ -626,6 +630,7 @@ export default function Navbar() {
     { href: "/alarms", label: "Alarms", icon: AlarmClock },
     { href: "/analytics", label: "Analytics", icon: TrendingUp },
     { href: "/logs", label: "Logs", icon: History },
+    ...(isAdminEmail(user?.email) ? [{ href: "/admin", label: "Admin Console", icon: ShieldCheck }] : []),
   ];
 
   // User metadata fallback info
@@ -702,7 +707,7 @@ export default function Navbar() {
             className="flex items-center gap-2.5 font-black text-accent tracking-tight hover:opacity-90 transition-opacity"
           >
             <Crown className="text-accent fill-accent/10 shrink-0" size={20} />
-            <span className="text-xl">Smart Home</span>
+            <span className="text-xl">VikaTech</span>
           </Link>
         </div>
 
@@ -1316,7 +1321,7 @@ export default function Navbar() {
           className="flex items-center gap-2 text-sm sm:text-base font-black text-accent tracking-tight whitespace-nowrap shrink-0"
         >
           <Crown className="text-accent fill-accent/10 shrink-0" size={18} />
-          <span className="whitespace-nowrap font-black">Smart Home</span>
+          <span className="whitespace-nowrap font-black">VikaTech</span>
         </Link>
         <div className="flex items-center gap-2">
           {/* Wi-Fi Client/Internet Network Status Indicator (Mobile) */}
