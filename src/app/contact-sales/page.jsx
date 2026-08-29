@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import InfoPageShell from '@/components/InfoPageShell';
 import LocationPicker from '@/components/LocationPicker';
-import { CATEGORIES, CATEGORY_FIELDS, generateOrderId } from '@/lib/orderCategories';
+import { CATEGORIES, CATEGORY_FIELDS } from '@/lib/orderCategories';
+import { supabase } from '@/lib/supabase';
 
 const channels = [
   {
@@ -57,16 +58,14 @@ export default function ContactSalesPage() {
     setError('');
     setStatus('sending');
 
-    const webhook = process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL;
-    if (!webhook) {
-      setError('Order service is not configured yet. Please email us directly for now.');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setError('Please sign in before booking. Your request will remain pending until both administrators approve it.');
       setStatus('idle');
       return;
     }
 
-    const orderId = generateOrderId();
     const payload = {
-      order_id: orderId,
       full_name: form.full_name,
       email: form.email,
       phone: form.phone,
@@ -78,13 +77,14 @@ export default function ContactSalesPage() {
     };
 
     try {
-      const res = await fetch(webhook, {
+      const res = await fetch('/api/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
         body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error(`Webhook responded with ${res.status}`);
-      router.push(`/track/${orderId}`);
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Could not save order');
+      router.push(`/track/${result.order.order_id}`);
     } catch (err) {
       console.error('n8n webhook error:', err);
       setError('Could not reach the order service. Please try again or email us directly.');

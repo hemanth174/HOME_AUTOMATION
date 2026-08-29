@@ -14,12 +14,13 @@ export default function MainLayoutWrapper({ children }) {
   const pathname = usePathname();
   const router = useRouter();
   const cleanPath = (pathname || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '') || '/';
-  const VALID_ROUTES = ['/', '/local', '/login', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/admin'];
+  const VALID_ROUTES = ['/', '/local', '/login', '/pending', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/admin'];
   const PUBLIC_ROUTES = ['/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/terms'];
   const isTrackPage = cleanPath.startsWith('/track/');
   const isPublicPage = PUBLIC_ROUTES.includes(cleanPath) || isTrackPage;
   const is404Page = !VALID_ROUTES.includes(cleanPath) && !isTrackPage;
   const isLoginPage = cleanPath === '/login';
+  const isPendingPage = cleanPath === '/pending';
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(true);
   const [isClientOnline, setIsClientOnline] = useState(true); // Always true initially to match SSR
@@ -29,7 +30,7 @@ export default function MainLayoutWrapper({ children }) {
   const autoSentToLocalRef = useRef(false);
   const { isLocalConnected, localUrl } = useLocalConnection();
 
-  const fullWidthPage = isLoginPage || is404Page || isPublicPage || (!user && cleanPath === '/');
+  const fullWidthPage = isLoginPage || isPendingPage || cleanPath === '/admin' || is404Page || isPublicPage || (!user && cleanPath === '/');
 
   // Real connectivity monitor.
   //
@@ -43,7 +44,7 @@ export default function MainLayoutWrapper({ children }) {
     // Admin and public tracking pages are cloud-only views. Do not run the
     // local-mode connectivity probe here; its timeout intentionally appears
     // as a cancelled generate_204 request in browser DevTools.
-    if (cleanPath === '/admin' || isTrackPage) {
+    if (cleanPath === '/admin' || isPendingPage || isTrackPage) {
       setIsClientOnline(true);
       return undefined;
     }
@@ -134,6 +135,17 @@ export default function MainLayoutWrapper({ children }) {
         const currentUser = session?.user || null;
         setUser(currentUser);
 
+        if (currentUser && !isPendingPage && !isLoginPage && !isPublicPage && cleanPath !== '/admin') {
+          const approvalResponse = await fetch('/api/account/status', { cache: 'no-store', headers: { Authorization: `Bearer ${session.access_token}` } });
+          if (approvalResponse.ok) {
+            const approvalData = await approvalResponse.json();
+            if (approvalData.approval?.account_status !== 'approved') {
+              router.push('/pending');
+              return;
+            }
+          }
+        }
+
         if (!currentUser && !isLoginPage && !isPublicPage && cleanPath !== '/' && navigator.onLine) {
           router.push('/login');
         } else if (currentUser && isLoginPage) {
@@ -156,7 +168,7 @@ export default function MainLayoutWrapper({ children }) {
       active = false;
       subscription.unsubscribe();
     };
-  }, [isLoginPage, cleanPath, router, isPublicPage]);
+  }, [isLoginPage, isPendingPage, cleanPath, router, isPublicPage]);
 
   // Loading screens to prevent UI flashes
   // Redirecting loading screen if accessing unauthorized areas while online

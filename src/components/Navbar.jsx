@@ -608,6 +608,7 @@ export default function Navbar() {
     "/contact-sales",
     "/local",
     "/admin",
+    "/pending",
   ];
   const PUBLIC_ROUTES = [
     "/privacy-policy",
@@ -656,6 +657,7 @@ export default function Navbar() {
       "/analytics": "Analytics - Overview",
       "/logs": "Logs - Overview",
       "/profile": "Profile - Account",
+      "/admin": "VikaTech Admin Console",
     };
     return pathMap[pathname] || "Dashboard - Admin Overview";
   };
@@ -687,7 +689,7 @@ export default function Navbar() {
   };
 
   // If on login page, 404 page, public info page, or not authenticated, hide navigation completely
-  if (isLoginPage || is404Page || isPublicPage || !user) {
+  if (isLoginPage || cleanPath === "/pending" || cleanPath === "/admin" || is404Page || isPublicPage || !user) {
     return null;
   }
 
@@ -725,6 +727,8 @@ export default function Navbar() {
               <Link
                 key={link.href}
                 href={link.href}
+                target={link.href === "/admin" ? "_blank" : undefined}
+                rel={link.href === "/admin" ? "noopener noreferrer" : undefined}
                 onClick={(e) => handleOfflineLinkClick(e, link)}
                 className={`rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all duration-200 ease-out flex items-center justify-between ${
                   isCloudDisabled
@@ -1731,6 +1735,8 @@ export default function Navbar() {
             <Link
               key={link.href}
               href={link.href}
+              target={link.href === "/admin" ? "_blank" : undefined}
+              rel={link.href === "/admin" ? "noopener noreferrer" : undefined}
               onClick={(e) => {
                 handleOfflineLinkClick(e, link);
                 setMobileOpen(false);
@@ -1815,6 +1821,8 @@ export default function Navbar() {
                 <Link
                   key={link.href}
                   href={link.href}
+                  target={link.href === "/admin" ? "_blank" : undefined}
+                  rel={link.href === "/admin" ? "noopener noreferrer" : undefined}
                   onClick={(e) => {
                     handleOfflineLinkClick(e, link);
                     setMobileOpen(false);

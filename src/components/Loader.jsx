@@ -53,14 +53,6 @@ export default function Loader({ message = 'Loading...' }) {
     };
   }, [mounted]);
 
-  if (!mounted) {
-    return (
-      <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-bg text-center">
-        <div className="text-sm font-semibold text-text-muted animate-pulse">{message}</div>
-      </div>
-    );
-  }
-
   return (
     <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-bg text-center select-none animate-fade-in">
       <div className="w-[180px] h-[180px] flex items-center justify-center">

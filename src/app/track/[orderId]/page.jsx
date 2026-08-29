@@ -85,6 +85,17 @@ export default function TrackOrderPage() {
         </div>
       ) : (
         <div className="max-w-4xl mx-auto flex flex-col gap-8">
+          {order.approval_status && order.approval_status !== 'approved' && (
+            <div className={`p-5 rounded-xl border ${order.approval_status === 'rejected' ? 'border-red-400/40 bg-red-400/10' : 'border-lp-primary-container/40 bg-lp-primary-container/10'}`}>
+              <div className="flex items-start gap-3">
+                <span className="material-symbols-outlined text-lp-primary-container">{order.approval_status === 'rejected' ? 'block' : 'hourglass_top'}</span>
+                <div>
+                  <h3 className="text-sm font-label-caps font-bold text-white uppercase tracking-wider">{order.approval_status === 'rejected' ? 'Request rejected' : order.approval_status === 'awaiting_second_admin' ? 'Waiting for second administrator approval' : 'Waiting for administrator approval'}</h3>
+                  <p className="text-xs font-body-md text-lp-on-surface-variant mt-2">{order.rejection_reason || 'Your order can move forward after the account approval process is complete.'}</p>
+                </div>
+              </div>
+            </div>
+          )}
           {/* Status Header */}
           <div className="p-8 bg-lp-surface-low border border-lp-outline-variant rounded-xl flex flex-col md:flex-row md:items-center gap-6 justify-between">
             <div>

@@ -106,6 +106,10 @@ finalzzz_antigravity/
 
 ## Local Development Setup
 
+### VikaTech account approvals
+
+Run `supabase_approval_flow.sql` in the Supabase SQL editor, then configure `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, `PROVISIONING_ENCRYPTION_KEY`, and `NEXT_PUBLIC_SITE_URL`. The scheduled reminder endpoint is `/api/cron/approval-reminders`; Vercel runs it hourly and it sends reminders only after a full 24 hours without the second admin approval.
+
 To run the platform locally on your computer:
 
 ```bash

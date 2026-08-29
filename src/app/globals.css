@@ -152,6 +152,32 @@
     }
 }
 
+.admin-loading-bar {
+  width: 38%;
+  animation: admin-loading 1.35s ease-in-out infinite;
+}
+
+/* Keep long Admin Console queues inside their panel instead of growing the
+   whole document. The first data section is either Orders or User approvals. */
+main.animate-fade-in > div > section:first-of-type > div:last-child {
+  max-height: 560px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+main.animate-fade-in > div > section:first-of-type thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--card, #ffffff);
+}
+
+@keyframes admin-loading {
+  0% { transform: translateX(-110%); }
+  50% { transform: translateX(165%); }
+  100% { transform: translateX(290%); }
+}
+
 @keyframes fade-in {
     from {
         opacity: 0;

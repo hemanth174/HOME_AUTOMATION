@@ -353,6 +353,8 @@ export default function Dashboard() {
             {isAdminEmail(user?.email) && (
               <Link
                 href="/admin"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="inline-flex min-h-[32px] items-center justify-center gap-2 rounded-lg border border-accent/40 bg-accent-bg px-3.5 py-1 text-xs font-extrabold text-accent transition-all hover:border-accent whitespace-nowrap"
               >
                 <ShieldCheck size={14} />

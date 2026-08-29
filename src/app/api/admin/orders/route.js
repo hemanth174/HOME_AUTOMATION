@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
 import { requireAdmin } from '@/lib/adminServer';
 import { STAGES, CATEGORY_LABELS } from '@/lib/orderCategories';
+import { APPROVAL_ADMINS } from '@/lib/approval';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +36,24 @@ export async function GET(request) {
   const { data: orders, error } = await auth.admin.from('order_trackings').select('*').order('created_at', { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const { data: usersData } = await auth.admin.auth.admin.listUsers({ perPage: 1000 });
-  return NextResponse.json({ orders: orders || [], users: usersData?.users || [] });
+  const { data: approvals } = await auth.admin.from('account_approval_requests').select('*').order('created_at', { ascending: false });
+  const adminSet = new Set(APPROVAL_ADMINS);
+  // Migrate legacy customer records so the approval action is available in
+  // the console even when the SQL migration was run before this rule changed.
+  for (const item of approvals || []) {
+    if (!adminSet.has((item.email || '').toLowerCase()) && !item.admin_one_approved_at && item.admin_two_approved_at) {
+      const normalized = { admin_one_email: item.admin_two_email, admin_one_approved_at: item.admin_two_approved_at, first_approved_at: item.admin_two_approved_at, admin_two_email: null, admin_two_approved_at: null, second_approved_at: null, updated_at: new Date().toISOString() };
+      Object.assign(item, normalized);
+      await auth.admin.from('account_approval_requests').update(normalized).eq('user_id', item.user_id);
+    }
+    if (!adminSet.has((item.email || '').toLowerCase()) && item.account_status === 'approved' && !(item.admin_one_approved_at && item.admin_two_approved_at)) {
+      item.account_status = 'pending';
+      await auth.admin.from('account_approval_requests').update({ account_status: 'pending', updated_at: new Date().toISOString() }).eq('user_id', item.user_id);
+    }
+  }
+  const users = (usersData?.users || []).filter(item => !adminSet.has((item.email || '').toLowerCase()));
+  const userApprovals = (approvals || []).filter(item => !adminSet.has((item.email || '').toLowerCase()));
+  return NextResponse.json({ orders: orders || [], users, approvals: userApprovals });
 }
 
 export async function PATCH(request) {
