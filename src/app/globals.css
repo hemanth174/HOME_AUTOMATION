@@ -283,7 +283,7 @@ body,
     background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-    background: var(--border);
+    background: #ffffff;
     border-radius: 6px;
 }
 
@@ -358,18 +358,51 @@ body {
     background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, rgba(0, 255, 65, 0.35), rgba(0, 255, 65, 0.12));
+    background: #ffffff;
     border-radius: 8px;
     border: 2px solid transparent;
     background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(180deg, rgba(0, 255, 65, 0.65), rgba(0, 255, 65, 0.3));
+    background: #ffffff;
     background-clip: padding-box;
 }
 * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(0, 255, 65, 0.35) transparent;
+    scrollbar-color: #ffffff transparent;
+}
+
+/* Voice agent motion: calm idle breathing and an energetic listening state. */
+@keyframes voice-agent-breathe {
+    0%, 100% { transform: scale(1); filter: saturate(1); }
+    50% { transform: scale(1.045); filter: saturate(1.25); }
+}
+@keyframes voice-agent-bars {
+    0%, 100% { transform: scaleY(0.45); opacity: 0.65; }
+    50% { transform: scaleY(1); opacity: 1; }
+}
+.voice-agent-idle {
+    animation: voice-agent-breathe 2.8s ease-in-out infinite;
+}
+.voice-agent-bars {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 20px;
+}
+.voice-agent-bars span {
+    width: 3px;
+    height: 14px;
+    border-radius: 999px;
+    background: currentColor;
+    animation: voice-agent-bars 0.8s ease-in-out infinite;
+}
+.voice-agent-bars span:nth-child(2) { animation-delay: 0.15s; }
+.voice-agent-bars span:nth-child(3) { animation-delay: 0.3s; }
+.voice-agent-bars span:nth-child(4) { animation-delay: 0.45s; }
+@media (prefers-reduced-motion: reduce) {
+    .voice-agent-idle,
+    .voice-agent-bars span { animation: none; }
 }
 
 /* -------- Cursor Animations (landing theme) -------- */

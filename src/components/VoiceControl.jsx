@@ -394,7 +394,8 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           transcript: transcript,
           devices: commandDevices,
           presets: presetsRef.current,
-          currentTime: getLocalISOString()
+          currentTime: getLocalISOString(),
+          language: selectedLang
         })
       });
 
@@ -407,7 +408,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           console.log('OpenRouter returned UNKNOWN action:', result.message);
           const clarifyMsg = result.message || 'Could not understand voice command.';
           safeToast(clarifyMsg);
-          speak(clarifyMsg, result.language || 'en-US');
+          speak(clarifyMsg, result.language || selectedLang);
           return;
         }
       } else {
@@ -695,7 +696,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
 
     safeToast('Command not recognised. Try: "turn on fan 2", "turn off living room", "all off", or "show schedules"');
     speak('Command not recognized. Please try again.', 'en-US');
-  }, [getLatestDevices, onToast, applyPreset]);
+  }, [getLatestDevices, onToast, applyPreset, selectedLang]);
 
   // Speech Recognition
   const startListening = () => {
@@ -839,21 +840,24 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       <div className="fixed bottom-[92px] right-7 max-md:bottom-[148px] max-md:right-6 bg-card/85 backdrop-blur-md px-2 py-1 rounded-full border border-border shadow-[0_4px_16px_rgba(0,0,0,0.3)] z-[200] flex gap-1 items-center select-none font-bold text-[10px] tracking-wider transition-all duration-300">
         <button
           onClick={() => setSelectedLang('en-US')}
-          className={`px-2 py-0.5 rounded-full border-none cursor-pointer transition-colors ${selectedLang === 'en-US' ? 'bg-accent text-black dark:text-white' : 'dark:text-white hover:text-text bg-transparent'}`}
+          aria-label="Use English"
+          className={`px-2 py-0.5 rounded-full border-none cursor-pointer transition-all duration-300 ${selectedLang === 'en-US' ? 'bg-accent text-[var(--btn-text)] shadow-[0_0_12px_var(--accent-glow)]' : 'text-text-muted hover:text-accent hover:bg-accent-bg bg-transparent'}`}
         >
           EN
         </button>
         <div className="w-[1px] h-3 bg-border" />
         <button
           onClick={() => setSelectedLang('te-IN')}
-          className={`px-2 py-0.5 rounded-full border-none cursor-pointer transition-colors ${selectedLang === 'te-IN' ? 'bg-accent text-accent-fg' : 'text-text-muted hover:text-text bg-transparent'}`}
+          aria-label="Use Telugu"
+          className={`px-2 py-0.5 rounded-full border-none cursor-pointer transition-all duration-300 ${selectedLang === 'te-IN' ? 'bg-accent text-[var(--btn-text)] shadow-[0_0_12px_var(--accent-glow)]' : 'text-text-muted hover:text-accent hover:bg-accent-bg bg-transparent'}`}
         >
           తె
         </button>
         <div className="w-[1px] h-3 bg-border" />
         <button
           onClick={() => setSelectedLang('hi-IN')}
-          className={`px-2 py-0.5 rounded-full border-none cursor-pointer transition-colors ${selectedLang === 'hi-IN' ? 'bg-accent text-accent-fg' : 'text-text-muted hover:text-text bg-transparent'}`}
+          aria-label="Use Hindi"
+          className={`px-2 py-0.5 rounded-full border-none cursor-pointer transition-all duration-300 ${selectedLang === 'hi-IN' ? 'bg-accent text-[var(--btn-text)] shadow-[0_0_12px_var(--accent-glow)]' : 'text-text-muted hover:text-accent hover:bg-accent-bg bg-transparent'}`}
         >
           हि
         </button>
@@ -877,7 +881,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       <button
         id="voice-control-mic-btn"
         onClick={toggleListening}
-        className={`fixed bottom-7 right-7 max-md:bottom-20 max-md:right-6 w-14 h-14 rounded-full border-none bg-gradient-to-tr from-accent to-[#e2cc89] text-[var(--btn-text)] cursor-pointer z-[200] shadow-[0_6px_24px_var(--accent-glow)] shadow-gold-glow hover:scale-[1.08] active:scale-100 transition-all duration-300 flex items-center justify-center select-none group`}
+        className={`fixed bottom-7 right-7 max-md:bottom-20 max-md:right-6 w-14 h-14 rounded-full border-none bg-gradient-to-tr from-accent to-[#e2cc89] text-[var(--btn-text)] cursor-pointer z-[200] shadow-[0_6px_24px_var(--accent-glow)] shadow-gold-glow hover:scale-[1.08] active:scale-100 transition-all duration-300 flex items-center justify-center select-none group ${listening ? 'text-[var(--btn-text)]' : 'voice-agent-idle'}`}
         title="Voice Control"
       >
         {listening ? (
@@ -888,7 +892,12 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
             <span className="absolute inset-[-12px] rounded-full bg-accent/10 animate-ping [animation-duration:2s]" />
 
             {/* Cross Icon */}
-            <X size={20} className="stroke-[2.5px] relative z-10 animate-pulse text-[var(--btn-text)]" />
+            <div className="relative z-10 flex items-center gap-1">
+              <div className="voice-agent-bars" aria-hidden="true">
+                <span /><span /><span /><span />
+              </div>
+              {/* <X size={18} className="stroke-[2.5px] animate-pulse text-[var(--btn-text)]" /> */}
+            </div>
           </div>
         ) : (
           <Mic size={20} className="stroke-[2.5px] group-hover:scale-110 transition-transform text-[var(--btn-text)]" />

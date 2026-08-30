@@ -39,37 +39,41 @@ function extractJsonFromText(rawText) {
 }
 
 // Fallback rule-based parser in case the external AI API is slow or returns unexpected text
-function fallbackParseCommand(transcript, devices = [], presets = []) {
+function fallbackParseCommand(transcript, devices = [], presets = [], requestedLanguage = 'en-US') {
   const norm = (transcript || '').toLowerCase().trim();
-  const isOn = norm.includes('turn on') || norm.includes('switch on') || norm.includes('activate') || norm.includes('on');
-  const isOff = norm.includes('turn off') || norm.includes('switch off') || norm.includes('deactivate') || norm.includes('off');
+  const language = requestedLanguage || 'en-US';
+  const isHindi = language === 'hi-IN';
+  const isTelugu = language === 'te-IN';
+  const local = (english, hindi, telugu) => isHindi ? hindi : isTelugu ? telugu : english;
+  const isOn = norm.includes('turn on') || norm.includes('switch on') || norm.includes('activate') || norm.includes(' on') || norm.includes('चालू') || norm.includes('जलाओ') || norm.includes('जला');
+  const isOff = norm.includes('turn off') || norm.includes('switch off') || norm.includes('deactivate') || norm.includes(' off') || norm.includes('बंद') || norm.includes('बुझा');
 
   // 1. Toggle All
-  if (norm.includes('all on') || norm.includes('turn on all') || norm.includes('all off') || norm.includes('turn off all') || norm.includes('sab on') || norm.includes('sab bandh')) {
+  if (norm.includes('all on') || norm.includes('turn on all') || norm.includes('all off') || norm.includes('turn off all') || norm.includes('sab on') || norm.includes('sab bandh') || norm.includes('सभी') || norm.includes('सब') || norm.includes('सारे')) {
     const targetState = !isOff;
     return {
       actionType: 'TOGGLE_ALL',
       isOn: targetState,
-      message: `Turning all devices ${targetState ? 'on' : 'off'}`,
-      language: 'en-US'
+      message: local(`Turning all devices ${targetState ? 'on' : 'off'}`, `सभी डिवाइस ${targetState ? 'चालू' : 'बंद'} कर रहा हूँ`, `అన్ని పరికరాలను ${targetState ? 'ఆన్' : 'ఆఫ్'} చేస్తున్నాను`),
+      language
     };
   }
 
   // 2. Navigation & Guidance
-  if (norm.includes('schedule') || norm.includes('timer')) {
-    return { actionType: 'GUIDANCE', message: 'Opening schedules page', language: 'en-US', redirectTo: '/schedules' };
+  if (norm.includes('schedule') || norm.includes('timer') || norm.includes('शेड्यूल') || norm.includes('टाइमर')) {
+    return { actionType: 'GUIDANCE', message: local('Opening schedules page', 'शेड्यूल पेज खोल रहा हूँ', 'షెడ్యూల్స్ పేజీ తెరుస్తున్నాను'), language, redirectTo: '/schedules' };
   }
-  if (norm.includes('alarm')) {
-    return { actionType: 'GUIDANCE', message: 'Opening alarms page', language: 'en-US', redirectTo: '/alarms' };
+  if (norm.includes('alarm') || norm.includes('अलार्म')) {
+    return { actionType: 'GUIDANCE', message: local('Opening alarms page', 'अलार्म पेज खोल रहा हूँ', 'అలారమ్స్ పేజీ తెరుస్తున్నాను'), language, redirectTo: '/alarms' };
   }
-  if (norm.includes('faq') || norm.includes('help')) {
-    return { actionType: 'GUIDANCE', message: 'Opening FAQ section', language: 'en-US', redirectTo: '/faq' };
+  if (norm.includes('faq') || norm.includes('help') || norm.includes('मदद') || norm.includes('सहायता')) {
+    return { actionType: 'GUIDANCE', message: local('Opening FAQ section', 'FAQ खोल रहा हूँ', 'FAQ విభాగాన్ని తెరుస్తున్నాను'), language, redirectTo: '/faq' };
   }
-  if (norm.includes('analytics') || norm.includes('power') || norm.includes('energy')) {
-    return { actionType: 'GUIDANCE', message: 'Opening analytics', language: 'en-US', redirectTo: '/analytics' };
+  if (norm.includes('analytics') || norm.includes('power') || norm.includes('energy') || norm.includes('ऊर्जा')) {
+    return { actionType: 'GUIDANCE', message: local('Opening analytics', 'एनालिटिक्स खोल रहा हूँ', 'అనలిటిక్స్ తెరుస్తున్నాను'), language, redirectTo: '/analytics' };
   }
-  if (norm.includes('terms')) {
-    return { actionType: 'GUIDANCE', message: 'Opening terms and conditions', language: 'en-US', redirectTo: '/terms' };
+  if (norm.includes('terms') || norm.includes('नियम')) {
+    return { actionType: 'GUIDANCE', message: local('Opening terms and conditions', 'नियम और शर्तें खोल रहा हूँ', 'నిబంధనలు తెరుస్తున్నాను'), language, redirectTo: '/terms' };
   }
 
   // 3. Preset match
@@ -80,8 +84,8 @@ function fallbackParseCommand(transcript, devices = [], presets = []) {
         presetId: p.id,
         presetName: p.name,
         deactivate: isOff,
-        message: `${isOff ? 'Deactivating' : 'Activating'} preset ${p.name}`,
-        language: 'en-US'
+        message: local(`${isOff ? 'Deactivating' : 'Activating'} preset ${p.name}`, `${p.name} ${isOff ? 'बंद' : 'चालू'} कर रहा हूँ`, `${p.name}ని ${isOff ? 'ఆఫ్' : 'ఆన్'} చేస్తున్నాను`),
+        language
       };
     }
   }
@@ -96,22 +100,22 @@ function fallbackParseCommand(transcript, devices = [], presets = []) {
         deviceId: d.id,
         isOn: targetState,
         deviceName: d.name,
-        message: `Turning ${targetState ? 'on' : 'off'} ${d.name}`,
-        language: 'en-US'
+        message: local(`Turning ${targetState ? 'on' : 'off'} ${d.name}`, `${d.name} ${targetState ? 'चालू' : 'बंद'} कर रहा हूँ`, `${d.name}ని ${targetState ? 'ఆన్' : 'ఆఫ్'} చేస్తున్నాను`),
+        language
       };
     }
   }
 
   return {
     actionType: 'UNKNOWN',
-    message: 'Could not recognize command. Please try saying "turn on fan" or "all off".',
-    language: 'en-US'
+    message: local('Could not recognize command. Please try saying "turn on fan" or "all off".', 'कमांड समझ नहीं आई। कृपया फिर से बोलें, जैसे "पंखा चालू करो"।', 'కమాండ్ అర్థం కాలేదు. "ఫ్యాన్ ఆన్ చేయి" అని చెప్పండి.'),
+    language
   };
 }
 
 export async function POST(request) {
   try {
-    const { transcript, devices = [], presets = [], currentTime } = await request.json();
+    const { transcript, devices = [], presets = [], currentTime, language = 'en-US' } = await request.json();
 
     const apiKey = process.env.OPENROUTER_API_KEY;
     const model = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
@@ -128,7 +132,7 @@ export async function POST(request) {
 
     // If no API key configured, use intelligent local fallback
     if (!apiKey || apiKey.trim() === '') {
-      const localResult = fallbackParseCommand(transcript, deviceList, presetList);
+      const localResult = fallbackParseCommand(transcript, deviceList, presetList, language);
       return NextResponse.json(localResult);
     }
 
@@ -138,7 +142,7 @@ Available Devices: ${JSON.stringify(deviceList)}
 Available Presets: ${JSON.stringify(presetList)}
 Current Local Time: ${currentTime || new Date().toISOString()}
 
-Detect language: English -> "en-US", Hindi -> "hi-IN", Telugu -> "te-IN". Keep output "message" short (under 10 words) in that language.
+Use the requested language: ${language}. Detect the transcript language only when it clearly differs. Always return the message and language in the requested language unless the user clearly spoke another language. Hindi must use natural Devanagari (not English fallback text). English -> "en-US", Hindi -> "hi-IN", Telugu -> "te-IN". Keep output "message" short (under 10 words) in that language.
 
 Return EXACTLY ONE of these JSON formats:
 1. Toggle Single Device:
@@ -203,7 +207,7 @@ Return EXACTLY ONE of these JSON formats:
     }
 
     // If AI fails or returns non-parseable response, run reliable fallback parser
-    const fallbackResult = fallbackParseCommand(transcript, deviceList, presetList);
+    const fallbackResult = fallbackParseCommand(transcript, deviceList, presetList, language);
     return NextResponse.json(fallbackResult);
 
   } catch (error) {
@@ -212,7 +216,7 @@ Return EXACTLY ONE of these JSON formats:
     return NextResponse.json({
       actionType: 'UNKNOWN',
       message: 'Could not process voice command. Please try again.',
-      language: 'en-US'
+      language,
     });
   }
 }

@@ -43,3 +43,5 @@ next-env.d.ts
 # unused files and agent workspaces
 /unused_files/
 /brain/
+
+.vercel
