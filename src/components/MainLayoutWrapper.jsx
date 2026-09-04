@@ -24,7 +24,7 @@ export default function MainLayoutWrapper({ children }) {
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(true);
   const [isClientOnline, setIsClientOnline] = useState(true); // Always true initially to match SSR
-  const { isLocalConnected, localUrl, isProbing } = useLocalConnection();
+  const { isLocalConnected, localUrl } = useLocalConnection();
 
   const fullWidthPage = isLoginPage || isPendingPage || cleanPath === '/admin' || is404Page || isPublicPage || (!user && cleanPath === '/');
 
@@ -166,7 +166,6 @@ export default function MainLayoutWrapper({ children }) {
           <LocalModeBanner
             isClientOnline={isClientOnline}
             isLocalConnected={isLocalConnected}
-            isProbing={isProbing}
             localUrl={localUrl}
         />
       )}

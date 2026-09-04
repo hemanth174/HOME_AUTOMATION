@@ -3,23 +3,13 @@
 import { useState, useEffect } from 'react';
 import { Zap, ShieldCheck, WifiOff } from 'lucide-react';
 
-export default function LocalModeBanner({ isClientOnline, isLocalConnected, isProbing }) {
+export default function LocalModeBanner({ isClientOnline, isLocalConnected }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
   // Prevent hydration mismatch — don't render until client is ready
   if (!mounted) return null;
 
-  if (!isLocalConnected && isProbing) {
-    return (
-      <div className="pt-14 sm:pt-16 w-full">
-        <div className="bg-amber-500/10 border-b border-amber-500/20 px-3 py-2 text-amber-200 text-xs flex items-center gap-2">
-          <Zap className="w-4 h-4 text-amber-400 animate-pulse shrink-0" />
-          <span>Connecting to ESP32 hardware. Dashboard controls will activate when the connection is ready.</span>
-        </div>
-      </div>
-    );
-  }
   // Scenario 1: No Internet, but connected to ESP32 SoftAP (HOME-AUTO-LEADER)
   if (!isClientOnline && isLocalConnected) {
     return (
