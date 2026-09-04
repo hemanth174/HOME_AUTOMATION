@@ -13,23 +13,37 @@ export default function LocalControlPage() {
   const { isLocalConnected, localUrl, checkConnection } = useLocalConnection();
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [busy, setBusy] = useState({});
 
-  const loadDevices = useCallback(async () => {
+  const loadDevices = useCallback(async (rediscover = false) => {
     setLoading(true);
     try {
-      await discoverLocalNode(2500);
+      if (rediscover) await discoverLocalNode(2500);
       setDevices(await fetchLocalDevices(2500));
+      setError("");
     } catch {
-      setDevices([]);
+      if (!rediscover) {
+        try {
+          await discoverLocalNode(2500);
+          setDevices(await fetchLocalDevices(2500));
+          setError("");
+        } catch {
+          setDevices([]);
+          setError("The ESP32 answered, but its device list could not be loaded.");
+        }
+      } else {
+        setDevices([]);
+        setError("Connect to HOME-AUTO-LEADER and allow local network access.");
+      }
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadDevices();
-    const timer = setInterval(loadDevices, 5000);
+    loadDevices(true);
+    const timer = setInterval(() => loadDevices(false), 5000);
     return () => clearInterval(timer);
   }, [loadDevices]);
 
@@ -56,7 +70,7 @@ export default function LocalControlPage() {
             <h1 className="text-2xl font-black">Local Control</h1>
             <p className="text-xs text-text-muted mt-1">Direct ESP32 device control</p>
           </div>
-          <button onClick={loadDevices} disabled={loading} className="rounded-xl border border-border p-3 cursor-pointer disabled:opacity-50" aria-label="Refresh local devices">
+          <button onClick={() => loadDevices(true)} disabled={loading} className="rounded-xl border border-border p-3 cursor-pointer disabled:opacity-50" aria-label="Refresh local devices">
             <RefreshCw className={loading ? "animate-spin" : ""} size={18} />
           </button>
         </header>
@@ -69,7 +83,7 @@ export default function LocalControlPage() {
         {!loading && !devices.length && (
           <div className="rounded-2xl border border-border p-8 text-center text-text-muted">
             <WifiOff className="mx-auto mb-3" size={28} />
-            No ESP32 devices found.
+            {error || "No ESP32 devices found."}
           </div>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

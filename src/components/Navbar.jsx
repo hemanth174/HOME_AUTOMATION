@@ -194,7 +194,8 @@ export default function Navbar() {
   const [offlineToast, setOfflineToast] = useState(null);
 
   const handleOfflineLinkClick = (e, link) => {
-    if (!isClientOnline && link.href !== "/") {
+    const localOffline = isLocalConnected && !isClientOnline;
+    if ((localOffline && link.href !== "/local") || (!localOffline && !isClientOnline && link.href !== "/")) {
       e.preventDefault();
       setOfflineToast(
         `⚠️ ${link.label} is unavailable offline. Dashboard device controls remain available locally.`,
@@ -721,7 +722,9 @@ export default function Navbar() {
           {links.map((link) => {
             const active = pathname === link.href;
             const Icon = link.icon;
-            const isCloudDisabled = !isClientOnline && link.href !== "/";
+            const isCloudDisabled = isLocalConnected && !isClientOnline
+              ? link.href !== "/local"
+              : !isClientOnline && link.href !== "/";
 
             return (
               <Link
@@ -1713,7 +1716,9 @@ export default function Navbar() {
         {bottomBarLinks.map((link) => {
           const active = pathname === link.href && !mobileOpen;
           const Icon = link.icon;
-          const isCloudDisabled = !isClientOnline && link.href !== "/";
+          const isCloudDisabled = isLocalConnected && !isClientOnline
+            ? link.href !== "/local"
+            : !isClientOnline && link.href !== "/";
 
           return (
             <Link
@@ -1795,7 +1800,9 @@ export default function Navbar() {
             {sheetLinks.map((link) => {
               const active = pathname === link.href;
               const Icon = link.icon;
-              const isCloudDisabled = !isClientOnline && link.href !== "/";
+              const isCloudDisabled = isLocalConnected && !isClientOnline
+                ? link.href !== "/local"
+                : !isClientOnline && link.href !== "/";
 
               return (
                 <Link
