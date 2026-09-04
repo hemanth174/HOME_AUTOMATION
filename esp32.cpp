@@ -122,8 +122,8 @@ unsigned long leaderUptimeMillis = 0;
 
 // Function Prototypes
 void setRelay(int index, bool on, bool saveToNVS = true);
-void updateDeviceInDB(int index, bool state);
-void updateFeedbackInDB(int index, bool feedback);
+bool updateDeviceInDB(int index, bool state);
+bool updateFeedbackInDB(int index, bool feedback);
 void markAlarmFiredInDB(String alarmId);
 void pollDatabase();
 void pollAlarms();
@@ -148,6 +148,9 @@ void pruneStaleMeshNodes();
 void buildDevicesPayload(JsonArray& arr, bool includeMesh);
 void handleToggleAllMesh(bool on);
 void syncAllStatesToDB();
+void loadOfflineQueue();
+void saveOfflineQueue();
+void configureHttp(HTTPClient& http, uint16_t connectTimeout = 2500, uint16_t requestTimeout = 4000);
 
 // ============================================================
 //  SMALL HELPERS
@@ -160,6 +163,11 @@ String getSelfIp() {
   if (localRole == ROLE_LEADER) return WiFi.softAPIP().toString();
   if (WiFi.status() == WL_CONNECTED) return WiFi.localIP().toString();
   return WiFi.softAPIP().toString();
+}
+
+void configureHttp(HTTPClient& http, uint16_t connectTimeout, uint16_t requestTimeout) {
+  http.setConnectTimeout(connectTimeout);
+  http.setTimeout(requestTimeout);
 }
 
 // Stable pseudo-random delay derived from the board id so that boards
@@ -348,7 +356,11 @@ void handleDeviceToggle(int rIndex) {
   }
 
   DynamicJsonDocument req(256);
-  deserializeJson(req, server.arg("plain"));
+  DeserializationError err = deserializeJson(req, server.arg("plain"));
+  if (err || !req["state"].is<bool>()) {
+    server.send(400, "application/json", "{\"error\":\"Invalid state payload\"}");
+    return;
+  }
   bool targetState = req["state"].as<bool>();
 
   setRelay(rIndex, targetState);
@@ -504,7 +516,10 @@ void setupWebServer() {
       }
 
       DynamicJsonDocument req(256);
-      if (server.hasArg("plain")) deserializeJson(req, server.arg("plain"));
+      if (!server.hasArg("plain") || deserializeJson(req, server.arg("plain")) || !req["state"].is<bool>()) {
+        server.send(400, "application/json", "{\"error\":\"Invalid state payload\"}");
+        return;
+      }
       bool targetState = req["state"].as<bool>();
 
       if (proxyToggleToMember(nodeId, rIndex, targetState)) {
@@ -858,32 +873,67 @@ void evaluateLocalRole() {
 //  STORE AND FORWARD OFFLINE QUEUE
 // ============================================================
 void enqueueOfflineUpdate(int index, bool state, bool isFeedback) {
+  // Keep only the latest value for each device/source pair. This prevents a
+  // rapid switch sequence from exhausting the queue while offline.
+  for (int i = 0; i < queueCount; i++) {
+    if (offlineQueue[i].pending && offlineQueue[i].deviceIndex == index &&
+        offlineQueue[i].isFeedback == isFeedback) {
+      offlineQueue[i].state = state;
+      saveOfflineQueue();
+      return;
+    }
+  }
+
   if (queueCount < MAX_PENDING) {
     offlineQueue[queueCount].deviceIndex = index;
     offlineQueue[queueCount].state = state;
     offlineQueue[queueCount].isFeedback = isFeedback;
     offlineQueue[queueCount].pending = true;
     queueCount++;
+    saveOfflineQueue();
     Serial.printf("Enqueued offline action: Dev [%d] State: %d (Queue: %d)\n", index, state, queueCount);
   }
+}
+
+void saveOfflineQueue() {
+  preferences.putUChar("q_count", (uint8_t)queueCount);
+  for (int i = 0; i < MAX_PENDING; i++) {
+    char key[8];
+    sprintf(key, "q%d_i", i); preferences.putChar(key, i < queueCount ? offlineQueue[i].deviceIndex : -1);
+    sprintf(key, "q%d_s", i); preferences.putBool(key, i < queueCount && offlineQueue[i].state);
+    sprintf(key, "q%d_f", i); preferences.putBool(key, i < queueCount && offlineQueue[i].isFeedback);
+  }
+}
+
+void loadOfflineQueue() {
+  queueCount = min((int)preferences.getUChar("q_count", 0), MAX_PENDING);
+  for (int i = 0; i < queueCount; i++) {
+    char key[8];
+    sprintf(key, "q%d_i", i); offlineQueue[i].deviceIndex = preferences.getChar(key, -1);
+    sprintf(key, "q%d_s", i); offlineQueue[i].state = preferences.getBool(key, false);
+    sprintf(key, "q%d_f", i); offlineQueue[i].isFeedback = preferences.getBool(key, false);
+    offlineQueue[i].pending = offlineQueue[i].deviceIndex >= 0 && offlineQueue[i].deviceIndex < NUM_DEVICES;
+  }
+  Serial.printf("Restored %d pending offline updates.\n", queueCount);
 }
 
 void flushOfflineQueue() {
   if (queueCount == 0 || !isHomeWifiConnected() || boardUUID == "") return;
 
   Serial.printf("Flushing %d offline updates to Supabase Cloud...\n", queueCount);
+  int remaining = 0;
   for (int i = 0; i < queueCount; i++) {
-    if (offlineQueue[i].pending) {
-      if (offlineQueue[i].isFeedback) {
-        updateFeedbackInDB(offlineQueue[i].deviceIndex, offlineQueue[i].state);
-      } else {
-        updateDeviceInDB(offlineQueue[i].deviceIndex, offlineQueue[i].state);
-      }
-      offlineQueue[i].pending = false;
+    if (!offlineQueue[i].pending) continue;
+    bool delivered = offlineQueue[i].isFeedback
+      ? updateFeedbackInDB(offlineQueue[i].deviceIndex, offlineQueue[i].state)
+      : updateDeviceInDB(offlineQueue[i].deviceIndex, offlineQueue[i].state);
+    if (!delivered) {
+      offlineQueue[remaining++] = offlineQueue[i];
     }
   }
-  queueCount = 0;
-  Serial.println("Offline queue completely flushed.");
+  queueCount = remaining;
+  saveOfflineQueue();
+  Serial.printf("Offline queue remaining: %d.\n", queueCount);
 }
 
 // ============================================================
@@ -901,6 +951,7 @@ void setup() {
   setCpuFrequencyMhz(160);
 
   preferences.begin("smart_home", false);
+  loadOfflineQueue();
 
   // Initialize GPIOs & restore saved relay states
   for (int i = 0; i < NUM_DEVICES; i++) {
@@ -1128,6 +1179,7 @@ void pollDatabase() {
 
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=relay_index,is_on");
+  configureHttp(http);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
 
@@ -1150,28 +1202,32 @@ void pollDatabase() {
   http.end();
 }
 
-void updateDeviceInDB(int index, bool state) {
-  if (deviceUUIDs[index] == "") return;
+bool updateDeviceInDB(int index, bool state) {
+  if (index < 0 || index >= NUM_DEVICES || deviceUUIDs[index] == "") return false;
 
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUIDs[index]);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");
-  http.PATCH("{\"is_on\":" + String(state ? "true" : "false") + "}");
+  configureHttp(http);
+  int code = http.PATCH("{\"is_on\":" + String(state ? "true" : "false") + "}");
   http.end();
+  return code == 200 || code == 204;
 }
 
-void updateFeedbackInDB(int index, bool feedback) {
-  if (deviceUUIDs[index] == "") return;
+bool updateFeedbackInDB(int index, bool feedback) {
+  if (index < 0 || index >= NUM_DEVICES || deviceUUIDs[index] == "") return false;
 
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUIDs[index]);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");
-  http.PATCH("{\"feedback_on\":" + String(feedback ? "true" : "false") + "}");
+  configureHttp(http);
+  int code = http.PATCH("{\"feedback_on\":" + String(feedback ? "true" : "false") + "}");
   http.end();
+  return code == 200 || code == 204;
 }
 
 bool resolveBoardAndDevices() {
@@ -1179,6 +1235,7 @@ bool resolveBoardAndDevices() {
 
   // 1. Find Board UUID
   http.begin(String(SUPABASE_BASE) + "/boards?board_identifier=eq." + BOARD_IDENTIFIER + "&select=id");
+  configureHttp(http);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
 
@@ -1195,6 +1252,7 @@ bool resolveBoardAndDevices() {
   bool foundAny = false;
   if (boardUUID != "") {
     http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=id,relay_index");
+    configureHttp(http);
     http.addHeader("apikey", SUPABASE_SERVICE_KEY);
     http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
 
@@ -1228,6 +1286,7 @@ void syncAllStatesToDB() {
 
     HTTPClient http;
     http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUIDs[i]);
+    configureHttp(http);
     http.addHeader("apikey", SUPABASE_SERVICE_KEY);
     http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
     http.addHeader("Content-Type", "application/json");
@@ -1253,6 +1312,7 @@ void pollAlarms() {
 
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/alarms?device_id=in.(" + queryIds + ")&fired=eq.false&select=id,trigger_at,action,device_id");
+  configureHttp(http);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
 
@@ -1285,6 +1345,7 @@ void pollAlarms() {
 void markAlarmFiredInDB(String alarmId) {
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/alarms?id=eq." + alarmId);
+  configureHttp(http);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");
@@ -1300,6 +1361,7 @@ void sendHeartbeat() {
 
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/boards?id=eq." + boardUUID);
+  configureHttp(http);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");

@@ -238,6 +238,44 @@ export default function useDashboardData() {
     };
   }, [user]);
 
+  // When the local leader is reachable, use its aggregated mesh snapshot for
+  // the dashboard display. This keeps cached cloud data from hiding changes
+  // made on member boards while the internet is unavailable.
+  useEffect(() => {
+    if (!isLocalConnected) return;
+    let active = true;
+
+    const syncLocalDevices = async () => {
+      try {
+        const localDevices = await fetchLocalDevices(2200);
+        if (!active || !localDevices.length) return;
+
+        setDevices((current) => {
+          const updated = current.map((device) => {
+            const board = boards.find((item) => item.id === device.board_id);
+            const local = localDevices.find(
+              (item) =>
+                item.relay_index === device.relay_index &&
+                (!board?.board_identifier || item.node_id === board.board_identifier),
+            );
+            return local ? { ...device, is_on: local.is_on, feedback_on: local.feedback_on } : device;
+          });
+          try { localStorage.setItem(LOCAL_STORAGE_DEVICES, JSON.stringify(updated)); } catch {}
+          return updated;
+        });
+      } catch {
+        // The regular cloud/cache path remains available during a local retry.
+      }
+    };
+
+    syncLocalDevices();
+    const timer = setInterval(syncLocalDevices, 4000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [isLocalConnected, boards]);
+
   /**
    * Dual-Plane Device Controller:
    * 1. If Local ESP32 connected -> dispatches directly to local REST endpoint immediately (sub-100ms response).

@@ -1,15 +1,25 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
 import { Zap, ShieldCheck, WifiOff } from 'lucide-react';
 
-export default function LocalModeBanner({ isClientOnline, isLocalConnected }) {
+export default function LocalModeBanner({ isClientOnline, isLocalConnected, isProbing }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
   // Prevent hydration mismatch — don't render until client is ready
   if (!mounted) return null;
+
+  if (!isLocalConnected && isProbing) {
+    return (
+      <div className="pt-14 sm:pt-16 w-full">
+        <div className="bg-amber-500/10 border-b border-amber-500/20 px-3 py-2 text-amber-200 text-xs flex items-center gap-2">
+          <Zap className="w-4 h-4 text-amber-400 animate-pulse shrink-0" />
+          <span>Connecting to ESP32 hardware. Dashboard controls will activate when the connection is ready.</span>
+        </div>
+      </div>
+    );
+  }
   // Scenario 1: No Internet, but connected to ESP32 SoftAP (HOME-AUTO-LEADER)
   if (!isClientOnline && isLocalConnected) {
     return (
@@ -25,16 +35,9 @@ export default function LocalModeBanner({ isClientOnline, isLocalConnected }) {
               <span>Offline Mode:</span>
             </div>
             <span className="text-amber-200/90 text-xs">
-              Connected to ESP32 Wi-Fi. Use Local Control tab for sub-30ms hardware access.
+              Connected to ESP32 Wi-Fi. Dashboard controls are working locally.
             </span>
           </div>
-          <Link
-            href="/local"
-            className="flex items-center gap-1 bg-amber-500/30 hover:bg-amber-500/40 text-amber-100 px-3 py-1 rounded-lg border border-amber-500/50 text-xs font-extrabold transition-all shrink-0"
-          >
-            <span>Open Local Control</span>
-            <Zap className="w-3.5 h-3.5" />
-          </Link>
         </div>
       </div>
     );
@@ -48,16 +51,9 @@ export default function LocalModeBanner({ isClientOnline, isLocalConnected }) {
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
             <span className="text-xs">
-              ESP32 Local Mesh active & synced. Open Local Control for sub-30ms offline switching.
+              ESP32 Local Mesh active and synced. Dashboard controls use the local connection.
             </span>
           </div>
-          <Link
-            href="/local"
-            className="flex items-center gap-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 px-2.5 py-1 rounded-lg border border-emerald-500/30 text-xs font-bold transition-all shrink-0"
-          >
-            <span>Local Control</span>
-            <Zap className="w-3 h-3 text-emerald-400" />
-          </Link>
         </div>
       </div>
     );
@@ -74,12 +70,6 @@ export default function LocalModeBanner({ isClientOnline, isLocalConnected }) {
               You are offline. Connect Wi-Fi to <strong>HOME-AUTO-LEADER</strong> for local hardware control.
             </span>
           </div>
-          <Link
-            href="/local"
-            className="flex items-center gap-1 bg-red-500/20 hover:bg-red-500/30 text-red-100 px-2.5 py-1 rounded-lg border border-red-500/40 text-xs font-bold transition-all shrink-0"
-          >
-            <span>Local Tab</span>
-          </Link>
         </div>
       </div>
     );

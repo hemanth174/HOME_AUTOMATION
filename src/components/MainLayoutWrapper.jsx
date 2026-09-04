@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import AlarmExecutor from './AlarmExecutor';
 import GlobalToast from './GlobalToast';
@@ -24,11 +24,7 @@ export default function MainLayoutWrapper({ children }) {
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(true);
   const [isClientOnline, setIsClientOnline] = useState(true); // Always true initially to match SSR
-  // Tracks that WE auto-sent the user to /local due to a real outage.
-  // Only then are we allowed to bounce them back to the dashboard when
-  // internet returns (never yank a user who opened /local themselves).
-  const autoSentToLocalRef = useRef(false);
-  const { isLocalConnected, localUrl } = useLocalConnection();
+  const { isLocalConnected, localUrl, isProbing } = useLocalConnection();
 
   const fullWidthPage = isLoginPage || isPendingPage || cleanPath === '/admin' || is404Page || isPublicPage || (!user && cleanPath === '/');
 
@@ -57,21 +53,6 @@ export default function MainLayoutWrapper({ children }) {
       if (cancelled) return;
       setIsClientOnline(up);
 
-      if (!up) {
-        // True outage: no reachable internet on the current network
-        // (Wi-Fi may still be attached - e.g. ESP32 SoftAP or dead router).
-        if (cleanPath !== '/local' && !autoSentToLocalRef.current) {
-          autoSentToLocalRef.current = true;
-          router.push('/local');
-        }
-      } else if (autoSentToLocalRef.current && cleanPath === '/local') {
-        // Internet genuinely restored AND we were the ones who sent the
-        // user to /local -> return them to the main dashboard.
-        autoSentToLocalRef.current = false;
-        router.push('/');
-      } else if (up) {
-        autoSentToLocalRef.current = false;
-      }
     };
 
     evaluate();
@@ -182,10 +163,11 @@ export default function MainLayoutWrapper({ children }) {
   return (
     <div className={fullWidthPage ? "w-full min-h-screen" : "w-full min-h-screen md:pl-64 pb-20 md:pb-8 transition-all duration-300"}>
       {!fullWidthPage && (
-        <LocalModeBanner
-          isClientOnline={isClientOnline}
-          isLocalConnected={isLocalConnected}
-          localUrl={localUrl}
+          <LocalModeBanner
+            isClientOnline={isClientOnline}
+            isLocalConnected={isLocalConnected}
+            isProbing={isProbing}
+            localUrl={localUrl}
         />
       )}
       {children}

@@ -194,10 +194,10 @@ export default function Navbar() {
   const [offlineToast, setOfflineToast] = useState(null);
 
   const handleOfflineLinkClick = (e, link) => {
-    if (!isClientOnline && link.href !== "/local") {
+    if (!isClientOnline && link.href !== "/") {
       e.preventDefault();
       setOfflineToast(
-        `⚠️ ${link.label} is unavailable offline. Use Local Control tab for offline switching.`,
+        `⚠️ ${link.label} is unavailable offline. Dashboard device controls remain available locally.`,
       );
       setTimeout(() => setOfflineToast(null), 3500);
     }
@@ -624,7 +624,6 @@ export default function Navbar() {
 
   const links = [
     { href: "/", label: "Dashboard", icon: LayoutGrid },
-    { href: "/local", label: "Local Control", icon: Zap },
     { href: "/presets", label: "Presets", icon: SlidersHorizontal },
     { href: "/boards", label: "Boards", icon: Cpu },
     { href: "/schedules", label: "Schedules", icon: CalendarDays },
@@ -721,7 +720,7 @@ export default function Navbar() {
           {links.map((link) => {
             const active = pathname === link.href;
             const Icon = link.icon;
-            const isCloudDisabled = !isClientOnline && link.href !== "/local";
+            const isCloudDisabled = !isClientOnline && link.href !== "/";
 
             return (
               <Link
@@ -1271,14 +1270,6 @@ export default function Navbar() {
                         ⚡ Autonomous sub-100ms hardware control active. No
                         cloud or router required.
                       </div>
-                      <Link
-                        href="/local"
-                        onClick={() => setShowLocalMeshDropdown(false)}
-                        className="mt-1 flex items-center justify-center gap-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 py-2 px-3 rounded-xl border border-emerald-500/30 text-xs font-bold transition-colors"
-                      >
-                        <span>Open Local Control Panel</span>
-                        <Zap size={13} className="text-emerald-400" />
-                      </Link>
                     </div>
                   ) : (
                     <div className="flex flex-col gap-2 text-[10px] text-text-muted leading-relaxed">
@@ -1691,14 +1682,6 @@ export default function Navbar() {
                         ⚡ Autonomous sub-100ms hardware control active. No
                         cloud or router required.
                       </div>
-                      <Link
-                        href="/local"
-                        onClick={() => setShowLocalMeshDropdownMobile(false)}
-                        className="mt-1 flex items-center justify-center gap-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 py-2 px-3 rounded-xl border border-emerald-500/30 text-[10px] font-bold transition-colors"
-                      >
-                        <span>Open Local Control Panel</span>
-                        <Zap size={11} className="text-emerald-400" />
-                      </Link>
                     </>
                   ) : (
                     <div className="flex flex-col gap-1 text-[9px] leading-relaxed text-text-muted">
@@ -1729,7 +1712,7 @@ export default function Navbar() {
         {bottomBarLinks.map((link) => {
           const active = pathname === link.href && !mobileOpen;
           const Icon = link.icon;
-          const isCloudDisabled = !isClientOnline && link.href !== "/local";
+          const isCloudDisabled = !isClientOnline && link.href !== "/";
 
           return (
             <Link
@@ -1751,11 +1734,7 @@ export default function Navbar() {
             >
               <Icon size={18} className="stroke-[2.5px]" />
               <span className="text-[9px] font-black tracking-tight truncate px-0.5">
-                {link.href === "/"
-                  ? "Home"
-                  : link.href === "/local"
-                    ? "Local"
-                    : link.label}
+                {link.href === "/" ? "Home" : link.label}
               </span>
             </Link>
           );
@@ -1815,7 +1794,7 @@ export default function Navbar() {
             {sheetLinks.map((link) => {
               const active = pathname === link.href;
               const Icon = link.icon;
-              const isCloudDisabled = !isClientOnline && link.href !== "/local";
+              const isCloudDisabled = !isClientOnline && link.href !== "/";
 
               return (
                 <Link

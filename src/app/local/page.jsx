@@ -74,6 +74,7 @@ export default function LocalControlPage() {
       // "Local network access" permission prompt (required for an HTTPS
       // site to talk to a plain-HTTP device like the ESP32).
       const { baseUrl: winnerUrl } = await discoverLocalNode(2500);
+      if (attempt !== connectAttemptRef.current) return;
       setBaseUrlState(winnerUrl);
       setCustomUrlInput(winnerUrl);
 

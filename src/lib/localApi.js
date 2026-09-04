@@ -197,7 +197,8 @@ export async function triggerLocalAll(action) {
   return fetchJson(`${getLocalBaseUrl()}/api/all/${action === 'on' ? 'on' : 'off'}`, {
     method: 'POST',
     body: JSON.stringify({}),
-    timeoutMs: 4000,
+    // The leader forwards sequentially to up to eight member boards.
+    timeoutMs: 12000,
   });
 }
 

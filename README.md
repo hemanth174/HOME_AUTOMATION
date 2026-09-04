@@ -125,3 +125,29 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser to view the application locally.
+
+### ESP32 local connection
+
+The `/local` page connects directly from the browser to the ESP32 over HTTP. It
+does not route hardware commands through Next.js or Supabase:
+
+1. Power the board and connect the phone/computer to `HOME-AUTO-LEADER` with
+   password `12345678` when the home router is unavailable.
+2. Open the website, allow the browser's **Local network access** permission,
+   and open **Local Control**.
+3. The page probes `http://192.168.4.1` and `http://home-automation.local` in
+   parallel. The first valid `/api/status` response becomes the active target.
+4. Device state is read from `GET /api/devices`; switches use
+   `POST /api/device/{0-3}/state` with `{ "state": true|false }`.
+
+When home Wi-Fi is available, the board also syncs with Supabase, but local
+commands still go directly to the board. Before flashing `esp32.cpp`, replace
+the empty `ssid`/`password` and the placeholder Supabase URL/key with the
+credentials for the actual installation. A firmware built with those
+placeholders cannot connect to the cloud network.
+
+If the site is hosted over HTTPS, the browser must allow its Local Network
+Access prompt. For the most reliable setup, use the ESP32's direct panel at
+`http://192.168.4.1` while connected to its Wi-Fi, or serve the dashboard from
+an HTTP origin on the same local network if the browser blocks HTTPS-to-HTTP
+local requests.
