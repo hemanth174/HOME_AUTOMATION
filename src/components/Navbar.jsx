@@ -624,6 +624,7 @@ export default function Navbar() {
 
   const links = [
     { href: "/", label: "Dashboard", icon: LayoutGrid },
+    { href: "/local", label: "Local Control", icon: Zap },
     { href: "/presets", label: "Presets", icon: SlidersHorizontal },
     { href: "/boards", label: "Boards", icon: Cpu },
     { href: "/schedules", label: "Schedules", icon: CalendarDays },
