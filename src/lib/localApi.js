@@ -88,9 +88,11 @@ async function localFetch(url, options = {}) {
  * The ESP32 firmware reads the raw body (server.arg("plain")) and does
  * not care about the Content-Type.
  */
-async function fetchJson(url, { method = 'GET', body, timeoutMs = 800 } = {}) {
+async function fetchJson(url, { method = 'GET', body, timeoutMs = 2000, signal } = {}) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
+  const abortFromCaller = () => controller.abort();
+  signal?.addEventListener('abort', abortFromCaller, { once: true });
   try {
     const res = await localFetch(url, {
       method,
@@ -103,6 +105,7 @@ async function fetchJson(url, { method = 'GET', body, timeoutMs = 800 } = {}) {
     return await res.json();
   } finally {
     clearTimeout(id);
+    signal?.removeEventListener('abort', abortFromCaller);
   }
 }
 
@@ -113,18 +116,29 @@ async function fetchJson(url, { method = 'GET', body, timeoutMs = 800 } = {}) {
 export async function discoverLocalNode(timeoutMs = 900) {
   const urls = getLocalCandidateUrls();
 
-  const attempts = urls.map(async (baseUrl) => {
-    const status = await fetchJson(`${baseUrl}/api/status`, { timeoutMs });
-    if (!status || (!status.online && !status.nodeId && !status.role)) {
+  // Cancel losing probes. Without this, a slow mDNS/AP request can finish
+  // after the winner and overwrite the persisted endpoint.
+  const controllers = urls.map(() => new AbortController());
+  const attempts = urls.map(async (baseUrl, index) => {
+    const status = await fetchJson(`${baseUrl}/api/status`, {
+      timeoutMs,
+      signal: controllers[index].signal,
+    });
+    if (!status || status.online !== true || !status.nodeId) {
       throw new Error('Invalid status payload');
     }
-    setLocalBaseUrl(baseUrl);
-    return { baseUrl, status };
+    return { baseUrl, status, index };
   });
 
   try {
-    return await Promise.any(attempts);
+    const winner = await Promise.any(attempts);
+    setLocalBaseUrl(winner.baseUrl);
+    controllers.forEach((controller, index) => {
+      if (index !== winner.index) controller.abort();
+    });
+    return winner;
   } catch {
+    controllers.forEach((controller) => controller.abort());
     throw new Error('ESP32 not reachable');
   }
 }

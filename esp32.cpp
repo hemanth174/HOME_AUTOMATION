@@ -763,10 +763,14 @@ void evaluateLocalRole() {
   if (millis() - lastRoleEval < ROLE_EVAL_INTERVAL) return;
   lastRoleEval = millis();
 
-  // Home Wi-Fi available -> cloud plane handles everything.
-  // Stand down from mesh duty to save power (less RF activity = less heat).
+  // Home Wi-Fi is the cloud plane, but do not tear down an active leader AP.
+  // The browser may still be using 192.168.4.1 while the router reconnects;
+  // removing the AP here caused a predictable website disconnect.
   if (isHomeWifiConnected()) {
-    if (localRole != ROLE_IDLE) {
+    if (localRole == ROLE_LEADER) {
+      return;
+    }
+    if (localRole == ROLE_MEMBER) {
       Serial.println("-> Home Wi-Fi active. Standing down local mesh.");
       localRole = ROLE_IDLE;
       WiFi.softAPdisconnect(true);

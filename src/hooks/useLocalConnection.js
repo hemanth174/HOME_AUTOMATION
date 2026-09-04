@@ -17,7 +17,7 @@ import { discoverLocalNode, getLocalBaseUrl } from '@/lib/localApi';
  *   (10s connected / 20s disconnected) - no aggressive polling.
  */
 
-const FAST_TIMEOUT_MS = 800;
+const FAST_TIMEOUT_MS = 2200;
 
 let snapshot = {
   isLocalConnected: false,
@@ -43,7 +43,7 @@ function patch(next) {
 
 function scheduleNextBeat() {
   if (beatTimer) clearTimeout(beatTimer);
-  const interval = snapshot.isLocalConnected ? 10000 : 20000;
+  const interval = snapshot.isLocalConnected ? 15000 : 8000;
   beatTimer = setTimeout(() => checkConnection(), interval);
 }
 

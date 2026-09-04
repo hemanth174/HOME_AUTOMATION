@@ -51,6 +51,7 @@ export default function LocalControlPage() {
   const [toastMessage, setToastMessage] = useState(null);
 
   const refreshTimerRef = useRef(null);
+  const connectAttemptRef = useRef(0);
   const baseUrlRef = useRef(baseUrl);
   baseUrlRef.current = baseUrl;
 
@@ -66,6 +67,7 @@ export default function LocalControlPage() {
    * Total worst-case time to a decision: ~1 second - not a loading marathon.
    */
   const connect = useCallback(async () => {
+    const attempt = ++connectAttemptRef.current;
     setPhase(PHASE.CONNECTING);
     try {
       // Generous first probe: Chrome may pause the request to show a
@@ -78,15 +80,17 @@ export default function LocalControlPage() {
       // Status & devices fetched simultaneously - one round trip each.
       const start = performance.now();
       const [statusData, deviceList] = await Promise.all([
-        fetchLocalStatus(800),
-        fetchLocalDevices(900).catch(() => []),
+        fetchLocalStatus(2200),
+        fetchLocalDevices(2200).catch(() => []),
       ]);
+      if (attempt !== connectAttemptRef.current) return;
       setLatency(Math.round(performance.now() - start));
 
       setNodeInfo(statusData);
       setDevices(deviceList);
       setPhase(PHASE.CONNECTED);
     } catch {
+      if (attempt !== connectAttemptRef.current) return;
       setPhase(PHASE.UNAVAILABLE);
       setLatency(null);
     }
@@ -97,13 +101,18 @@ export default function LocalControlPage() {
     if (document.hidden) return;
     try {
       const [deviceList] = await Promise.all([
-        fetchLocalDevices(900).catch(() => null),
+        fetchLocalDevices(2200).catch(() => null),
       ]);
-      if (deviceList) setDevices(deviceList);
+      if (deviceList) {
+        setDevices(deviceList);
+      } else {
+        // Re-discover the endpoint if the saved AP/LAN address disappeared.
+        connect();
+      }
     } catch {
       // transient failure - next tick or explicit retry will recover
     }
-  }, []);
+  }, [connect]);
 
   // Initial connect + slow background beat (no aggressive polling).
   useEffect(() => {
