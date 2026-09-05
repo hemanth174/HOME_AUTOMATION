@@ -487,7 +487,10 @@ void setupWebServer() {
   // REST API: GET All Device States (aggregated across the mesh when leader)
   server.on("/api/devices", HTTP_GET, []() {
     handleCORS();
-    DynamicJsonDocument doc(2048);
+    // 8 member boards x 4 relays + this board can exceed 2 KB once every
+    // device contains node, relay, and feedback fields. A truncated JSON
+    // response makes the browser report that devices could not be loaded.
+    DynamicJsonDocument doc(8192);
     JsonArray arr = doc.to<JsonArray>();
     buildDevicesPayload(arr, true);
 

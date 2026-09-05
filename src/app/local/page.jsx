@@ -9,31 +9,40 @@ import {
 } from "@/lib/localApi";
 import useLocalConnection from "@/hooks/useLocalConnection";
 
+const LOCAL_DEVICES_CACHE = "home_auto_cached_local_devices";
+
 export default function LocalControlPage() {
   const { isLocalConnected, localUrl, checkConnection } = useLocalConnection();
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [localPageConnected, setLocalPageConnected] = useState(false);
   const [busy, setBusy] = useState({});
 
   const loadDevices = useCallback(async (rediscover = false) => {
     setLoading(true);
     try {
       if (rediscover) await discoverLocalNode(2500);
-      setDevices(await fetchLocalDevices(2500));
+      setLocalPageConnected(true);
+      const nextDevices = await fetchLocalDevices(2500);
+      setDevices(nextDevices);
+      localStorage.setItem(LOCAL_DEVICES_CACHE, JSON.stringify(nextDevices));
       setError("");
     } catch {
       if (!rediscover) {
         try {
           await discoverLocalNode(2500);
-          setDevices(await fetchLocalDevices(2500));
+          setLocalPageConnected(true);
+          const nextDevices = await fetchLocalDevices(2500);
+          setDevices(nextDevices);
+          localStorage.setItem(LOCAL_DEVICES_CACHE, JSON.stringify(nextDevices));
           setError("");
         } catch {
-          setDevices([]);
+          setLocalPageConnected(false);
           setError("The ESP32 answered, but its device list could not be loaded.");
         }
       } else {
-        setDevices([]);
+        setLocalPageConnected(false);
         setError("Connect to HOME-AUTO-LEADER and allow local network access.");
       }
     } finally {
@@ -42,6 +51,15 @@ export default function LocalControlPage() {
   }, []);
 
   useEffect(() => {
+    try {
+      const cached = JSON.parse(localStorage.getItem(LOCAL_DEVICES_CACHE) || "[]");
+      if (Array.isArray(cached) && cached.length) {
+        setDevices(cached);
+        setLoading(false);
+      }
+    } catch {
+      // Ignore invalid cache and wait for the live request.
+    }
     loadDevices(true);
     const timer = setInterval(() => loadDevices(false), 5000);
     return () => clearInterval(timer);
@@ -75,8 +93,8 @@ export default function LocalControlPage() {
           </button>
         </header>
 
-        <div className={`rounded-2xl border p-4 text-sm ${isLocalConnected ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400" : "border-red-500/30 bg-red-500/10 text-red-400"}`}>
-          {isLocalConnected ? `Connected to ESP32 at ${localUrl}` : "ESP32 is unavailable. Connect to HOME-AUTO-LEADER Wi-Fi and retry."}
+        <div className={`rounded-2xl border p-4 text-sm ${isLocalConnected || localPageConnected ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400" : "border-red-500/30 bg-red-500/10 text-red-400"}`}>
+          {isLocalConnected || localPageConnected ? `Connected to ESP32 at ${localUrl}` : "ESP32 is unavailable. Connect to HOME-AUTO-LEADER Wi-Fi and retry."}
         </div>
 
         {loading && <p className="text-sm text-text-muted">Loading local devices...</p>}
@@ -90,7 +108,7 @@ export default function LocalControlPage() {
           {devices.map((device) => {
             const key = `${device.node_id || "local"}-${device.relay_index}`;
             return (
-              <button key={device.id} onClick={() => toggle(device)} disabled={busy[key] || !isLocalConnected} className="rounded-2xl border border-border bg-card p-5 text-left cursor-pointer disabled:opacity-50">
+              <button key={device.id} onClick={() => toggle(device)} disabled={busy[key] || !(isLocalConnected || localPageConnected)} className="rounded-2xl border border-border bg-card p-5 text-left cursor-pointer disabled:opacity-50">
                 <div className="flex items-center justify-between">
                   <span className="font-bold">{device.node_id || "ESP32"} · Device {device.relay_index + 1}</span>
                   <Power size={20} className={device.is_on ? "text-emerald-400" : "text-text-muted"} />

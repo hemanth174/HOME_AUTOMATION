@@ -86,7 +86,7 @@ export default function MainLayoutWrapper({ children }) {
   // SoftAP mode is a dedicated local session. Keep the user on the local
   // control page because cloud routes cannot work without internet access.
   useEffect(() => {
-    if (isLocalConnected && !isClientOnline && cleanPath !== '/local') {
+    if (!isClientOnline && cleanPath !== '/local') {
       router.replace('/local');
     }
   }, [isLocalConnected, isClientOnline, cleanPath, router]);
