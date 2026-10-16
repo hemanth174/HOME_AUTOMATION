@@ -1,18 +1,52 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import Link from "next/link";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import VoiceControl from "@/components/VoiceControl";
 import Toast from "@/components/Toast";
 import Loader from "@/components/Loader";
-import BoardCard from "@/components/BoardCard";
 import AddBoardModal from "@/components/AddBoardModal";
 import EditBoardModal from "@/components/EditBoardModal";
 import QuickPresets from "@/components/QuickPresets";
 import useDashboardData from "@/hooks/useDashboardData";
-import { Cpu, Plus, Power, PowerOff, ShieldCheck } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Cpu,
+  Plus,
+  Power,
+  PowerOff,
+  Pencil,
+} from "lucide-react";
 import { isAdminEmail } from "@/lib/admin";
+import RoomList from "@/components/pg/RoomList";
+import DeviceCard from "@/components/pg/DeviceCard";
+import OverviewCards from "@/components/pg/OverviewCards";
+import EnergyPanel from "@/components/pg/EnergyPanel";
+import ActivityFeed from "@/components/pg/ActivityFeed";
+import {
+  getDeviceWattage,
+  getDeviceRunHoursToday,
+} from "@/app/analytics/helpers";
+import { isBoardOnline } from "@/components/pg/deviceKind";
+
+// Collapsed rooms persist in a cookie: { [boardId]: true } = collapsed.
+// Only collapsed rooms are stored; expanding deletes the key.
+const ROOM_COOKIE = "vt_rooms_collapsed";
+function readCollapsedRooms() {
+  try {
+    const m = document.cookie.match(/(?:^|;\s*)vt_rooms_collapsed=([^;]*)/);
+    return m ? JSON.parse(decodeURIComponent(m[1])) : {};
+  } catch {
+    return {};
+  }
+}
+function writeCollapsedRooms(map) {
+  try {
+    document.cookie = `${ROOM_COOKIE}=${encodeURIComponent(JSON.stringify(map))}; path=/; max-age=31536000; SameSite=Lax`;
+  } catch {}
+}
 
 export default function Dashboard() {
   const {
@@ -30,6 +64,7 @@ export default function Dashboard() {
     setLoading,
     controlDevice,
     controlAll,
+    isClientOnline,
     isLocalConnected,
   } = useDashboardData();
 
@@ -41,6 +76,31 @@ export default function Dashboard() {
   // Edit Board Modal State
   const [showEditBoardModal, setShowEditBoardModal] = useState(false);
   const [editingBoardObj, setEditingBoardObj] = useState(null);
+
+  // PG layout state: rooms are boards (no room table exists in the backend).
+  const [selectedBoardId, setSelectedBoardId] = useState(null);
+  // Pending device writes: { [deviceId]: desiredState }. Cleared when the
+  // realtime echo reflects the state, or by a safety timeout.
+  const [pending, setPending] = useState({});
+  const deviceCarouselRef = useRef(null);
+  // Two-click confirm arm for bulk actions: null | 'room-on' | 'room-off' | 'all-on' | 'all-off'
+  const [confirmArm, setConfirmArm] = useState(null);
+  const confirmTimer = useRef(null);
+
+  const scrollDeviceCarousel = useCallback((direction) => {
+    const carousel = deviceCarouselRef.current;
+    if (!carousel) return;
+    const firstCard = carousel.querySelector("article");
+    const gap = 12;
+    const distance = firstCard
+      ? firstCard.getBoundingClientRect().width + gap
+      : carousel.clientWidth;
+    carousel.scrollBy({ left: direction * distance, behavior: "smooth" });
+  }, []);
+
+  // Real history for energy estimates + activity feed.
+  const [todayLogs, setTodayLogs] = useState([]);
+  const [dailyRows, setDailyRows] = useState([]);
 
   // Driver.js guided tour for first-time users
   useEffect(() => {
@@ -167,16 +227,152 @@ export default function Dashboard() {
     setModalDragY(0);
   }, [modalDragY]);
 
-  const toggleBoard = useCallback((boardId) => {
-    setExpandedBoards((prev) => ({ ...prev, [boardId]: !prev[boardId] }));
+  // Default room selection follows the board list.
+  useEffect(() => {
+    if (boards.length === 0) {
+      setSelectedBoardId(null);
+      return;
+    }
+    setSelectedBoardId((prev) =>
+      prev && boards.some((b) => b.id === prev) ? prev : boards[0].id,
+    );
+  }, [boards]);
+
+  // Re-apply collapsed rooms saved in the cookie on every boards change.
+  // This also restores the preference after a full page reload.
+  useEffect(() => {
+    if (boards.length === 0) return;
+    const saved = readCollapsedRooms();
+    const ids = Object.keys(saved).filter((id) =>
+      boards.some((b) => String(b.id) === String(id)),
+    );
+    if (ids.length === 0) return;
+    setExpandedBoards((prev) => {
+      const next = { ...(prev || {}) };
+      let changed = false;
+      ids.forEach((id) => {
+        // Cookie keys are strings; restore the board's native id type.
+        const board = boards.find((b) => String(b.id) === String(id));
+        const key = board ? board.id : id;
+        if (next[key] !== false) {
+          next[key] = false;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [boards, setExpandedBoards]);
+
+  const toggleRoomCollapsed = useCallback(
+    (boardId) => {
+      const currentlyExpanded = (expandedBoards?.[boardId] ?? true);
+      const nextVal = !currentlyExpanded;
+      setExpandedBoards((prev) => ({ ...(prev || {}), [boardId]: nextVal }));
+      try {
+        const saved = readCollapsedRooms();
+        if (nextVal) delete saved[boardId];
+        else saved[boardId] = true;
+        writeCollapsedRooms(saved);
+      } catch {}
+    },
+    [expandedBoards, setExpandedBoards],
+  );
+
+  // Fetch today's activity logs (energy estimates + feed) and stored
+  // daily energy rollups. Real rows only; empty = unavailable states.
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const fetchHistory = async () => {
+      try {
+        const [logsRes, dailyRes] = await Promise.all([
+          supabase
+            .from("activity_logs")
+            .select("id, created_at, action, device_name, triggered_by, device_id")
+            .eq("user_id", user.id)
+            .gte("created_at", startOfToday.toISOString())
+            .order("created_at", { ascending: false })
+            .limit(200),
+          supabase
+            .from("daily_analytics")
+            .select("date, total_kwh")
+            .eq("user_id", user.id)
+            .order("date", { ascending: false })
+            .limit(31),
+        ]);
+        if (!active) return;
+        if (logsRes.data) setTodayLogs(logsRes.data);
+        if (dailyRes.data) setDailyRows(dailyRes.data);
+      } catch (err) {
+        console.warn("Dashboard history fetch failed:", err);
+      }
+    };
+
+    fetchHistory();
+    const timer = setInterval(fetchHistory, 60000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [user]);
+
+  // Clear pending flags once the realtime echo reflects the desired state.
+  useEffect(() => {
+    setPending((prev) => {
+      const ids = Object.keys(prev);
+      if (ids.length === 0) return prev;
+      const next = { ...prev };
+      let changed = false;
+      for (const id of ids) {
+        const d = devices.find((x) => String(x.id) === String(id));
+        if (d && d.is_on === next[id]) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [devices]);
+
+  // Safety: never leave a control disabled longer than 6s.
+  useEffect(() => {
+    if (Object.keys(pending).length === 0) return;
+    const timer = setTimeout(() => setPending({}), 6000);
+    return () => clearTimeout(timer);
+  }, [pending]);
+
+  useEffect(() => {
+    return () => {
+      if (confirmTimer.current) clearTimeout(confirmTimer.current);
+    };
+  }, []);
+
+  const armConfirm = useCallback((kind) => {
+    if (confirmTimer.current) clearTimeout(confirmTimer.current);
+    setConfirmArm(kind);
+    confirmTimer.current = setTimeout(() => setConfirmArm(null), 4000);
   }, []);
 
   const toggleDevice = useCallback(
     async (device) => {
-      if (!device) return;
-      await controlDevice(device, !device.is_on, "Manual Dashboard Switch");
+      if (!device || pending[device.id]) return;
+      const desired = !device.is_on;
+      setPending((prev) => ({ ...prev, [device.id]: desired }));
+      try {
+        await controlDevice(device, desired, "Manual Dashboard Switch");
+      } catch (err) {
+        showToast(err?.message || "Device update failed. Please retry.");
+        setPending((prev) => {
+          const next = { ...prev };
+          delete next[device.id];
+          return next;
+        });
+      }
     },
-    [controlDevice],
+    [controlDevice, pending, showToast],
   );
 
   const isPresetActive = useCallback(
@@ -377,25 +573,109 @@ export default function Dashboard() {
     [user, getDevicesForBoard, showToast],
   );
 
-  const getFeedbackStatus = useCallback((device) => {
-    if (device.feedback_on === null || device.feedback_on === undefined) {
-      return {
-        text: device.is_on ? "ON" : "OFF",
-        className: device.is_on ? "match" : "",
-        manualOn: false,
-      };
-    }
+  // ---- Derived PG view-model (all values from live state / real rows) ----
+  // Fall back to the first board: between a boards update (e.g. realtime
+  // delete) and the selection effect below, the selected id may match
+  // nothing for one frame — never render with a null room.
+  const selectedBoard =
+    boards.find((b) => b.id === selectedBoardId) || boards[0] || null;
+  const selectedDevices = selectedBoard
+    ? getDevicesForBoard(selectedBoard.id)
+    : [];
 
-    if (device.feedback_on === true) {
-      return { text: "Manual ON", className: "manual", manualOn: true };
-    }
+  const activeCount = devices.filter((d) => d.is_on).length;
+  const onlineBoards = boards.filter((b) => isBoardOnline(b));
+  const liveWatts = Math.round(
+    devices.reduce(
+      (sum, d) => sum + (d.is_on ? getDeviceWattage(d.name) : 0),
+      0,
+    ),
+  );
+  const energyKwhToday = devices.reduce(
+    (sum, d) => sum + (getDeviceWattage(d.name) * getDeviceRunHoursToday(d, todayLogs)) / 1000,
+    0,
+  );
+  const energyAvailable = devices.length > 0;
+  // Sections appear by themselves once the user has data.
+  const hasPresets = (presets || []).length > 0;
+  const hasEnergyHistory = (dailyRows || []).some((r) => Number(r.total_kwh || 0) > 0);
 
-    return {
-      text: device.is_on ? "ON" : "OFF",
-      className: device.is_on ? "match" : "",
-      manualOn: false,
-    };
-  }, []);
+  const statusMessage = useMemo(() => {
+    if (!isClientOnline && !isLocalConnected)
+      return "You are offline — showing the last synced state.";
+    if (boards.length === 0) return "Add your first room controller to get started.";
+    const parts = [];
+    parts.push(
+      activeCount === 0
+        ? "All devices are off"
+        : `${activeCount} of ${devices.length} device${devices.length === 1 ? "" : "s"} on`,
+    );
+    parts.push(
+      onlineBoards.length === boards.length
+        ? "all rooms online"
+        : `${onlineBoards.length} of ${boards.length} rooms online`,
+    );
+    if (isLocalConnected) parts.push("local mesh linked");
+    return parts.join(" · ") + ".";
+  }, [isClientOnline, isLocalConnected, boards.length, activeCount, devices.length, onlineBoards.length]);
+
+  const systemOk =
+    isClientOnline && boards.length > 0 && onlineBoards.length === boards.length;
+  const systemMessage = useMemo(() => {
+    if (!isClientOnline && !isLocalConnected) return "Offline — local only";
+    if (boards.length === 0) return "No rooms yet";
+    if (onlineBoards.length === boards.length) return "All rooms responding";
+    return `${boards.length - onlineBoards.length} room${boards.length - onlineBoards.length === 1 ? "" : "s"} offline`;
+  }, [isClientOnline, isLocalConnected, boards.length, onlineBoards.length]);
+
+  const deviceRoom = useCallback(
+    (log) => {
+      const device = devices.find((d) => String(d.id) === String(log.device_id));
+      if (!device) return null;
+      const board = boards.find((b) => b.id === device.board_id);
+      return board ? board.name : null;
+    },
+    [devices, boards],
+  );
+
+  const userName =
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    user?.email?.split("@")[0] ||
+    "there";
+
+  // Two-click confirm wrapper for bulk power actions.
+  const withConfirm = useCallback(
+    (kind, run) => {
+      if (confirmArm === kind) {
+        setConfirmArm(null);
+        if (confirmTimer.current) clearTimeout(confirmTimer.current);
+        run();
+      } else {
+        armConfirm(kind);
+      }
+    },
+    [confirmArm, armConfirm],
+  );
+
+  const bulkBtn = (kind, label, Icon, onClick) => {
+    const armed = confirmArm === kind;
+    return (
+      <button
+        onClick={onClick}
+        title={armed ? "Click again to confirm" : label}
+        aria-label={armed ? `Confirm ${label}` : label}
+        className={`inline-flex min-h-[36px] items-center justify-center gap-2 rounded-xl border px-3.5 text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap ${
+          armed
+            ? "border-(--pg-error) bg-(--pg-error) text-white"
+            : "border-(--pg-line) bg-(--pg-card) text-(--pg-ink) hover:border-(--pg-brand-line) hover:text-(--pg-brand)"
+        }`}
+      >
+        <Icon size={14} aria-hidden="true" />
+        <span className="max-sm:hidden">{armed ? "Confirm?" : label}</span>
+      </button>
+    );
+  };
 
   if (loading) {
     return <Loader message="Loading VikaTech Dashboard..." />;
@@ -404,104 +684,203 @@ export default function Dashboard() {
   return (
     <>
       <div className="dashboard-container animate-fade-up">
-        <QuickPresets
-          presets={presets}
-          isPresetActive={isPresetActive}
-          applyPreset={applyPreset}
-          deletePreset={deletePreset}
+        <OverviewCards
+          userName={userName}
+          statusMessage={statusMessage}
+          totalDevices={devices.length}
+          activeDevices={activeCount}
+          energyKwhToday={energyKwhToday}
+          energyAvailable={energyAvailable}
+          liveWatts={liveWatts}
+          systemOk={systemOk}
+          systemMessage={systemMessage}
         />
 
-        <div className="flex min-[480px]:flex-row justify-between min-[480px]:items-center gap-3 mb-5 ml-1 select-none boards-section-selector">
-          <h2 className="text-lg font-extrabold text-text tracking-tight whitespace-nowrap">
-            Boards & Devices
-          </h2>
-          <div className="flex items-center gap-2  max-[480px]:justify-">
-            <div className="flex gap-2 min-[481px]:gap-3">
-              <button
-                onClick={turnAllDevicesOn}
-                aria-label="Turn all devices on"
-                title="Turn all devices on"
-                className="inline-flex min-h-[32px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-3.5 py-1 text-xs font-extrabold text-text transition-all duration-250 cursor-pointer hover:bg-card-alt hover:border-accent/40 whitespace-nowrap max-[480px]:w-9 max-[480px]:px-0"
-              >
-                <Power size={14} aria-hidden="true" />
-                <span className="max-[480px]:hidden">All On</span>
-              </button>
-              <button
-                onClick={turnAllDevicesOff}
-                aria-label="Turn all devices off"
-                title="Turn all devices off"
-                className="inline-flex min-h-[32px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-3.5 py-1 text-xs font-extrabold text-text transition-all duration-250 cursor-pointer hover:bg-card-alt hover:border-accent/40 whitespace-nowrap max-[480px]:w-9 max-[480px]:px-0"
-              >
-                <PowerOff size={14} aria-hidden="true" />
-                <span className="max-[480px]:hidden">All Off</span>
-              </button>
-            </div>
-           <div className="flex gap-3">
-             {isAdminEmail(user?.email) && (
-              <Link
-                href="/admin"
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Open VikaTech admin console"
-                title="Open VikaTech admin console"
-                className="inline-flex min-h-[32px] items-center justify-center gap-2 rounded-lg border border-accent/40 bg-accent-bg px-3.5 py-1 text-xs font-extrabold text-accent transition-all hover:border-accent whitespace-nowrap max-[480px]:w-9 max-[480px]:px-0"
-              >
-                <ShieldCheck size={14} aria-hidden="true" />
-                <span className="max-[480px]:hidden">Admin</span>
-              </Link>
-            )}
-            <button
-              onClick={() => setShowAddBoardModal(true)}
-              aria-label="Add a board"
-              title="Add a board"
-              className="inline-flex min-h-[32px] items-center justify-center gap-2 rounded-lg bg-accent px-3.5 py-1 text-xs font-extrabold text-[var(--btn-text)] transition-all duration-250 cursor-pointer hover:bg-accent-hover shadow-gold-glow whitespace-nowrap max-[480px]:w-9 max-[480px]:px-0"
-            >
-              <Plus size={14} aria-hidden="true" />
-              <span className="max-[480px]:hidden">Add Board</span>
-            </button>
-           </div>
-          </div>
-        </div>
-
         {boards.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-[24px] border border-border border-dashed bg-card p-10 text-center animate-scale-in max-w-lg mx-auto select-none gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-accent-bg flex items-center justify-center text-accent border border-accent/20 shadow-gold-glow">
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-(--pg-line) bg-(--pg-card) p-10 text-center animate-scale-in max-w-lg mx-auto select-none gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-(--pg-brand-faint) flex items-center justify-center text-(--pg-brand) border border-(--pg-brand-soft)">
               <Cpu size={24} className="stroke-[2.5px]" />
             </div>
             <div className="flex flex-col gap-1">
-              <h3 className="text-base font-extrabold text-text tracking-tight">
-                No Boards Registered Yet
+              <h3 className="text-base font-extrabold text-(--pg-ink) tracking-tight">
+                No Rooms Registered Yet
               </h3>
-              <p className="text-xs text-text-muted font-semibold leading-relaxed px-4">
-                To start controlling your appliances, add your first ESP32
-                Board. You will be able to configure up to 4 relay switches per
-                board.
+              <p className="text-xs text-(--pg-muted) font-medium leading-relaxed px-4">
+                To start controlling your PG, add your first room controller
+                (ESP32 board). You will be able to configure up to 4 devices
+                per room.
               </p>
             </div>
             <button
               onClick={() => setShowAddBoardModal(true)}
-              className="inline-flex min-h-[36px] items-center justify-center rounded-xl bg-accent px-5 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer mt-1"
+              className="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-(--pg-brand) px-5 text-xs font-extrabold text-(--pg-onbrand) transition-all hover:bg-(--pg-brand-hover) cursor-pointer mt-1"
             >
-              Add Your First Board
+              Add Your First Room
             </button>
           </div>
         ) : (
-          <div className="flex flex-col gap-3">
-            {boards.map((board) => (
-              <BoardCard
-                key={board.id}
-                board={board}
-                boardDevices={getDevicesForBoard(board.id)}
-                expandedBoards={expandedBoards}
-                toggleBoard={toggleBoard}
-                turnBoardDevicesOn={turnBoardDevicesOn}
-                turnBoardDevicesOff={turnBoardDevicesOff}
-                getFeedbackStatus={getFeedbackStatus}
-                toggleDevice={toggleDevice}
-                openFullEditBoard={openFullEditBoard}
-              />
-            ))}
-          </div>
+          <>
+            <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)] items-start">
+
+
+
+              {/* RIGHT on desktop: selected room devices (wide). Mobile order unchanged. */}
+              <section
+                aria-label="Rooms and devices"
+                className="boards-section-selector min-w-0 rounded-2xl border border-(--pg-line) bg-(--pg-card) p-4 sm:p-5 lg:order-2"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                  <div className="min-w-0 flex-1">
+                    <h2 className="text-lg font-extrabold text-(--pg-ink) tracking-tight truncate" title={selectedBoard ? selectedBoard.name : "Rooms & Devices"}>
+                      {selectedBoard ? selectedBoard.name : "Rooms & Devices"}
+                    </h2>
+                    <p className="text-xs font-semibold text-(--pg-muted) mt-0.5">
+                      {selectedDevices.length} device{selectedDevices.length === 1 ? "" : "s"}
+                      {selectedBoard && (
+                        <> · {isBoardOnline(selectedBoard) ? "Online" : "Offline"}</>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {bulkBtn("room-on", "Room On", Power, () =>
+                      withConfirm("room-on", () =>
+                        turnBoardDevicesOn(selectedBoard.id, selectedBoard.name),
+                      ),
+                    )}
+                    {bulkBtn("room-off", "Room Off", PowerOff, () =>
+                      withConfirm("room-off", () =>
+                        turnBoardDevicesOff(selectedBoard.id, selectedBoard.name),
+                      ),
+                    )}
+                    <button
+                      onClick={() => selectedBoard && openFullEditBoard(selectedBoard)}
+                      title="Rename room & devices"
+                      aria-label="Rename room and devices"
+                      className="inline-flex min-h-[36px] w-9 items-center justify-center rounded-xl border border-(--pg-line) bg-(--pg-card) text-(--pg-muted) hover:border-(--pg-brand-line) hover:text-(--pg-brand) transition-all cursor-pointer"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      onClick={() => toggleRoomCollapsed(selectedBoard.id)}
+                      title={expandedBoards[selectedBoard.id] === false ? "Expand room" : "Collapse room"}
+                      aria-label={expandedBoards[selectedBoard.id] === false ? "Expand room" : "Collapse room"}
+                      aria-expanded={expandedBoards[selectedBoard.id] !== false}
+                      className="inline-flex min-h-[36px] w-9 items-center justify-center rounded-xl border border-(--pg-line) bg-(--pg-card) text-(--pg-muted) hover:border-(--pg-brand-line) hover:text-(--pg-brand) transition-all cursor-pointer"
+                    >
+                      <ChevronDown
+                        size={15}
+                        className={`transition-transform duration-300 ${expandedBoards[selectedBoard.id] === false ? "-rotate-90" : ""}`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {expandedBoards[selectedBoard.id] !== false && (
+                  <>
+                    {selectedDevices.length === 0 ? (
+                      <p className="py-8 text-center text-(--pg-muted) text-xs font-semibold">
+                        No devices in this room.
+                      </p>
+                    ) : (
+                      <div
+                        id="device-carousel"
+                        ref={deviceCarouselRef}
+                        className="board-card-selector flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth pb-1 sm:grid sm:grid-cols-2 sm:gap-2.5 sm:overflow-visible sm:pb-0"
+                        aria-label="Local devices carousel"
+                      >
+                        {selectedDevices.map((device) => (
+                          <DeviceCard
+                            key={device.id}
+                            device={device}
+                            roomName={selectedBoard.name}
+                            boardOnline={isBoardOnline(selectedBoard)}
+                            pending={pending[device.id] !== undefined}
+                            onToggle={() => toggleDevice(device)}
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-(--pg-line)">
+                      <span className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-(--pg-muted) mr-1">
+                        Property
+                      </span>
+                      {bulkBtn("all-on", "All On", Power, () =>
+                        withConfirm("all-on", turnAllDevicesOn),
+                      )}
+                      {bulkBtn("all-off", "All Off", PowerOff, () =>
+                        withConfirm("all-off", turnAllDevicesOff),
+                      )}
+                      <div className="ml-auto flex items-center gap-1.5 sm:hidden">
+                        <button
+                          type="button"
+                          onClick={() => scrollDeviceCarousel(-1)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-(--pg-line) bg-(--pg-card) text-(--pg-muted) transition hover:border-(--pg-brand-line) hover:text-(--pg-brand) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--pg-brand)"
+                          aria-label="Previous device"
+                          aria-controls="device-carousel"
+                        >
+                          <ChevronLeft size={16} aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => scrollDeviceCarousel(1)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-(--pg-line) bg-(--pg-card) text-(--pg-muted) transition hover:border-(--pg-brand-line) hover:text-(--pg-brand) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--pg-brand)"
+                          aria-label="Next device"
+                          aria-controls="device-carousel"
+                        >
+                          <ChevronRight size={16} aria-hidden="true" />
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </section>
+
+
+
+              {/* LEFT on desktop: rooms list (narrow). Mobile order unchanged. */}
+              <div className="lg:order-1 lg:sticky lg:top-20 min-w-0 rounded-2xl border border-(--pg-line) bg-(--pg-card) p-3">
+                <RoomList
+                  boards={boards}
+                  devices={devices}
+                  selectedId={selectedBoard?.id}
+                  onSelect={setSelectedBoardId}
+                />
+                <button
+                  onClick={() => setShowAddBoardModal(true)}
+                  className="mt-2 w-full inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-dashed border-(--pg-line) text-xs font-extrabold text-(--pg-brand) hover:border-(--pg-brand-line) hover:bg-(--pg-brand)/[0.06] transition-all cursor-pointer"
+                >
+                  <Plus size={14} aria-hidden="true" />
+                  Add Room
+                </button>
+              </div>
+
+            </div>
+
+            {(hasPresets || hasEnergyHistory) && (
+              <div className="grid gap-4 lg:grid-cols-2 mt-4 items-start">
+                {hasPresets && (
+                  <div className="min-w-0 rounded-2xl border border-(--pg-line) bg-(--pg-card) p-4 sm:p-5">
+                    <QuickPresets
+                      presets={presets}
+                      isPresetActive={isPresetActive}
+                      applyPreset={applyPreset}
+                      deletePreset={deletePreset}
+                    />
+                  </div>
+                )}
+                {hasEnergyHistory && (
+                  <div className="min-w-0">
+                    <EnergyPanel dailyRows={dailyRows} />
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="mt-4">
+              <ActivityFeed logs={todayLogs} deviceRoom={deviceRoom} />
+            </div>
+          </>
         )}
       </div>
 
@@ -540,6 +919,8 @@ export default function Dashboard() {
         boards={boards}
         presets={presets}
         applyPreset={applyPreset}
+        controlDevice={controlDevice}
+        controlAll={controlAll}
         onToast={showToast}
       />
       <Toast message={toast} onClose={() => setToast("")} />

@@ -2,10 +2,22 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Mic, X } from 'lucide-react';
+import { useVoiceAgentVisible } from '@/lib/agentVisibility';
 
 export default function CardVoiceButton({ onCommand, onToast }) {
   const [listening, setListening] = useState(false);
   const recognitionRef = useRef(null);
+  const agentVisible = useVoiceAgentVisible();
+
+  useEffect(() => {
+    if (!agentVisible) {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch (e) {}
+        recognitionRef.current = null;
+      }
+      setListening(false);
+    }
+  }, [agentVisible]);
 
   const startListening = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -67,6 +79,9 @@ export default function CardVoiceButton({ onCommand, onToast }) {
       startListening();
     }
   };
+
+  // Hidden via Profile → Voice Agent setting.
+  if (!agentVisible) return null;
 
   return (
     <div className="relative">

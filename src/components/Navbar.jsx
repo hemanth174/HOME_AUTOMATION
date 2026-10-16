@@ -32,6 +32,111 @@ import {
 import useLocalConnection from "@/hooks/useLocalConnection";
 import { checkInternet } from "@/lib/netCheck";
 import { isAdminEmail } from "@/lib/admin";
+import {
+  playNotificationTone,
+  requestBrowserNotificationPermission,
+} from "@/lib/browserNotifications";
+
+const READ_ANNOUNCEMENTS_KEY = "vikatech_read_feature_announcements";
+
+function FeatureNotificationBell({
+  announcements,
+  unreadCount,
+  open,
+  onToggle,
+  onClose,
+  notificationPermission,
+  onEnableNotifications,
+  mobile = false,
+}) {
+  return (
+    <div className={mobile ? "relative" : "relative"}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`relative flex items-center justify-center rounded-xl border border-border bg-card text-text-muted transition-all hover:bg-accent-bg hover:text-accent hover:border-accent/30 ${mobile ? "h-9 w-9" : "h-9 w-9"}`}
+        title="Notifications"
+        aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
+        aria-expanded={open}
+      >
+        <Bell size={15} />
+        {unreadCount > 0 && (
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-(--pg-error) px-1 text-[9px] font-black text-white">
+            {unreadCount > 9 ? "9+" : unreadCount}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div
+          className={`${mobile ? "fixed right-4 top-[70px] w-[min(340px,calc(100vw-32px))]" : "absolute right-0 top-full mt-2 w-[340px]"} z-[60] rounded-2xl border border-border bg-card p-3 text-left shadow-2xl`}
+          role="dialog"
+          aria-label="Notifications"
+        >
+          <div className="flex items-center justify-between border-b border-border px-2 pb-3">
+            <div>
+              <p className="text-sm font-black text-text">Notifications</p>
+              <p className="mt-0.5 text-[10px] font-semibold text-text-muted">Product updates from VikaTech</p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-1.5 text-text-muted transition hover:bg-accent-bg hover:text-text"
+              aria-label="Close notifications"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          <div className="mt-2 flex max-h-72 flex-col gap-1 overflow-y-auto">
+            {announcements.length === 0 ? (
+              <p className="px-2 py-8 text-center text-xs font-semibold text-text-muted">No new updates.</p>
+            ) : (
+              announcements.map((announcement) => (
+                <Link
+                  key={announcement.id}
+                  href={announcement.action_url || "/"}
+                  onClick={onClose}
+                  className="rounded-xl px-2.5 py-3 transition hover:bg-accent-bg"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-(--pg-brand)" aria-hidden="true" />
+                    <span className="min-w-0">
+                      <span className="block text-xs font-black text-text">{announcement.title}</span>
+                      <span className="mt-1 block text-[11px] leading-5 text-text-muted">{announcement.message}</span>
+                      <span className="mt-1.5 block text-[10px] font-semibold text-accent">
+                        {new Date(announcement.created_at).toLocaleDateString()}
+                      </span>
+                    </span>
+                  </div>
+                </Link>
+              ))
+            )}
+          </div>
+          {notificationPermission !== "granted" && (
+            <div className="mt-2 border-t border-border pt-3">
+              {notificationPermission === "denied" || notificationPermission === "unsupported" ? (
+                <p className="px-2 text-[10px] font-semibold leading-4 text-text-muted">
+                  {notificationPermission === "unsupported"
+                    ? "Browser notifications are not supported here."
+                    : "Browser notifications are blocked. Allow them in your browser settings."}
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onEnableNotifications}
+                  className="w-full rounded-xl border border-accent/30 bg-accent-bg px-3 py-2.5 text-left text-[11px] font-extrabold text-accent transition hover:border-accent/60"
+                >
+                  Enable browser notifications and sound
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // A custom sub-component for pixel-perfect dynamic Wi-Fi bars
 // signalColor: '#00ff41' (green) | '#f59e0b' (yellow) | '#ef4444' (red)
@@ -39,7 +144,7 @@ const WifiSignalIcon = ({
   percentage,
   online,
   size = 15,
-  signalColor = "#00ff41",
+  signalColor = "var(--pg-success)",
 }) => {
   if (!online) {
     return (
@@ -153,6 +258,11 @@ export default function Navbar() {
   const [user, setUser] = useState(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState("default");
+  const [announcements, setAnnouncements] = useState([]);
+  const [readAnnouncementIds, setReadAnnouncementIds] = useState([]);
   const [showFaqModal, setShowFaqModal] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
 
@@ -192,6 +302,78 @@ export default function Navbar() {
 
   // Offline toast notification state
   const [offlineToast, setOfflineToast] = useState(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      setNotificationPermission(window.Notification.permission);
+    } else {
+      setNotificationPermission("unsupported");
+    }
+  }, []);
+
+  const enableNotifications = async () => {
+    const permission = await requestBrowserNotificationPermission();
+    setNotificationPermission(permission);
+    if (permission === "granted") playNotificationTone();
+  };
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(READ_ANNOUNCEMENTS_KEY) || "[]");
+      if (Array.isArray(saved)) setReadAnnouncementIds(saved);
+    } catch {
+      // Invalid local notification state is ignored.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    let active = true;
+
+    const loadAnnouncements = async () => {
+      const { data, error } = await supabase
+        .from("feature_announcements")
+        .select("id, title, message, action_url, created_at")
+        .order("created_at", { ascending: false })
+        .limit(8);
+      if (active && !error) setAnnouncements(data || []);
+    };
+
+    loadAnnouncements();
+    const channel = supabase
+      .channel(`navbar-announcements-${Date.now()}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "feature_announcements" },
+        ({ new: announcement }) => {
+          if (!active) return;
+          setAnnouncements((current) => [
+            announcement,
+            ...current.filter((item) => item.id !== announcement.id),
+          ].slice(0, 8));
+        },
+      );
+    channel.subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
+  const unreadAnnouncementCount = announcements.filter(
+    (announcement) => !readAnnouncementIds.includes(announcement.id),
+  ).length;
+
+  const openNotifications = () => {
+    setShowNotifications(true);
+    const ids = announcements.map((announcement) => announcement.id);
+    setReadAnnouncementIds((current) => {
+      const next = [...new Set([...current, ...ids])];
+      localStorage.setItem(READ_ANNOUNCEMENTS_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
 
   const handleOfflineLinkClick = (e, link) => {
     const localOffline = !isClientOnline;
@@ -345,10 +527,10 @@ export default function Navbar() {
   const wifiIconColor = !wifiRouterOnline
     ? "currentColor"
     : clientNetQuality.bars >= 4
-      ? "#00ff41"
+      ? "var(--pg-success)"
       : clientNetQuality.bars === 3
         ? "#f59e0b"
-        : "#ef4444";
+        : "var(--pg-error)";
 
   const wifiIsWeak = wifiRouterOnline && clientNetQuality.bars < 4;
   const wifiIsCritical = wifiRouterOnline && clientNetQuality.bars <= 2;
@@ -625,14 +807,18 @@ export default function Navbar() {
 
   const links = [
     { href: "/", label: "Dashboard", icon: LayoutGrid },
-    { href: "/local", label: "Local Control", icon: Zap },
+    { href: "/boards", label: "Rooms & Devices", icon: Cpu },
     { href: "/presets", label: "Presets", icon: SlidersHorizontal },
-    { href: "/boards", label: "Boards", icon: Cpu },
     { href: "/schedules", label: "Schedules", icon: CalendarDays },
+    { href: "/analytics", label: "Energy", icon: TrendingUp },
+    { href: "/logs", label: "Activity Logs", icon: History },
+    ...(isAdminEmail(user?.email) ? [{ href: "/admin", label: "Admin Settings", icon: ShieldCheck }] : []),
+  ];
+
+  // Secondary device-management routes, kept reachable under MANAGE.
+  const manageLinks = [
+    { href: "/local", label: "Local Control", icon: Zap },
     { href: "/alarms", label: "Alarms", icon: AlarmClock },
-    { href: "/analytics", label: "Analytics", icon: TrendingUp },
-    { href: "/logs", label: "Logs", icon: History },
-    ...(isAdminEmail(user?.email) ? [{ href: "/admin", label: "Admin Console", icon: ShieldCheck }] : []),
   ];
 
   // User metadata fallback info
@@ -652,13 +838,13 @@ export default function Navbar() {
       "/": "Dashboard - Overview",
       "/local": "Local Mesh - Sub-30ms Control",
       "/presets": "Presets - Overview",
-      "/boards": "Boards - Overview",
+      "/boards": "Rooms & Devices - Overview",
       "/schedules": "Schedules - Overview",
       "/alarms": "Alarms - Overview",
-      "/analytics": "Analytics - Overview",
-      "/logs": "Logs - Overview",
+      "/analytics": "Energy - Overview",
+      "/logs": "Activity Logs - Overview",
       "/profile": "Profile - Account",
-      "/admin": "VikaTech Admin Console",
+      "/admin": "Admin Settings",
     };
     return pathMap[pathname] || "Dashboard - Admin Overview";
   };
@@ -694,80 +880,113 @@ export default function Navbar() {
     return null;
   }
 
-  // First 4 links go to bottom navigation bar on mobile
-  const bottomBarLinks = links.slice(0, 4);
+  // First 4 links go to bottom navigation bar on mobile.
+  // Mobile keeps the original order; the desktop sidebar uses the
+  // PG grouped layout below and is unaffected by this list.
+  const mobileLinks = [
+    { href: "/", label: "Dashboard", icon: LayoutGrid },
+    { href: "/local", label: "Local Control", icon: Zap },
+    { href: "/presets", label: "Presets", icon: SlidersHorizontal },
+    { href: "/boards", label: "Boards", icon: Cpu },
+    { href: "/schedules", label: "Schedules", icon: CalendarDays },
+    { href: "/alarms", label: "Alarms", icon: AlarmClock },
+    { href: "/analytics", label: "Analytics", icon: TrendingUp },
+    { href: "/logs", label: "Logs", icon: History },
+    ...(isAdminEmail(user?.email) ? [{ href: "/admin", label: "Admin Console", icon: ShieldCheck }] : []),
+  ];
+  const bottomBarLinks = mobileLinks.slice(0, 4);
   // Rest of the links go to bottom sheet menu
-  const sheetLinks = links.slice(4);
+  const sheetLinks = mobileLinks.slice(4);
+
+  // Desktop sidebar link (PG theme: lime active pill, forest text).
+  // Offline behavior mirrors the previous sidebar: cloud routes show an
+  // Offline badge and are inert without connectivity.
+  const renderSidebarLink = (link) => {
+    const active = pathname === link.href;
+    const Icon = link.icon;
+    const isCloudDisabled = !isClientOnline && link.href !== "/local";
+
+    return (
+      <Link
+        key={link.href}
+        href={link.href}
+        target={link.href === "/admin" ? "_blank" : undefined}
+        rel={link.href === "/admin" ? "noopener noreferrer" : undefined}
+        onClick={(e) => handleOfflineLinkClick(e, link)}
+        aria-current={active ? "page" : undefined}
+        className={`rounded-xl px-3 py-2.5 text-sm font-bold transition-all duration-200 ease-out flex items-center justify-between ${
+          isCloudDisabled
+            ? "opacity-40 cursor-not-allowed text-(--pg-muted) bg-transparent hover:bg-transparent"
+             : active
+               ? link.href === "/local"
+                 ? "bg-[#F0E1D2] text-[#8D5B30] border-l-2 border-[#A86F3D]"
+                 : "bg-[#CFFF79]/50 text-[#063B20]"
+              : "text-(--pg-navtext) bg-transparent hover:bg-black/[0.04] hover:text-(--pg-deep)"
+        }`}
+      >
+        <div className="flex items-center gap-3">
+          <Icon size={16} className="stroke-[2.5px] shrink-0" />
+          <span>{link.label}</span>
+        </div>
+        {isCloudDisabled && (
+          <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-(--pg-error-faint) text-(--pg-error) border border-(--pg-error-line)">
+            Offline
+          </span>
+        )}
+      </Link>
+    );
+  };
 
   // Sidebar contents (desktop only)
   const SidebarContent = () => (
     <div className="flex flex-col h-full justify-between py-6 px-4 select-none">
       {/* Top: Branding & Navigation */}
       <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between px-2">
+        <div className="flex items-center px-2">
           <Link
             href="/"
-            className="flex items-center gap-2.5 font-black text-accent tracking-tight hover:opacity-90 transition-opacity"
+            className="flex items-center gap-2.5 hover:opacity-90 transition-opacity"
           >
-            <Crown className="text-accent fill-accent/10 shrink-0" size={20} />
-            <span className="text-xl">VikaTech</span>
+            <span className="w-8 h-8 rounded-xl bg-[#063B20] flex items-center justify-center shrink-0">
+              <Crown className="text-[#CFFF79]" size={16} />
+            </span>
+            <span className="flex flex-col leading-none">
+              <span className="text-lg font-black text-(--pg-deep) tracking-tight">VikaTech</span>
+            </span>
           </Link>
         </div>
 
         {/* Links */}
-        <nav className="flex flex-col gap-1.5">
-          <span className="text-[9px] font-extrabold uppercase tracking-widest text-text-muted px-2 mb-1">
+        <nav className="flex flex-col gap-1.5" aria-label="Primary">
+          <span className="text-[9px] font-extrabold uppercase tracking-widest text-(--pg-muted) px-2 mb-1">
             MAIN MENU
           </span>
-          {links.map((link) => {
-            const active = pathname === link.href;
-            const Icon = link.icon;
-            const isCloudDisabled = !isClientOnline && link.href !== "/local";
+          {links.map((link) => renderSidebarLink(link))}
+        </nav>
 
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                target={link.href === "/admin" ? "_blank" : undefined}
-                rel={link.href === "/admin" ? "noopener noreferrer" : undefined}
-                onClick={(e) => handleOfflineLinkClick(e, link)}
-                className={`rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all duration-200 ease-out flex items-center justify-between ${
-                  isCloudDisabled
-                    ? "opacity-40 cursor-not-allowed text-text-muted/60 bg-transparent hover:bg-transparent"
-                    : active
-                      ? "bg-accent-bg text-accent"
-                      : "text-text-muted bg-transparent hover:-translate-y-px hover:bg-accent-bg hover:text-accent"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <Icon size={16} className="stroke-[2.5px]" />
-                  <span>{link.label}</span>
-                </div>
-                {isCloudDisabled && (
-                  <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
-                    Offline
-                  </span>
-                )}
-              </Link>
-            );
-          })}
+        {/* Secondary device-management routes */}
+        <nav className="flex flex-col gap-1.5" aria-label="Device management">
+          <span className="text-[9px] font-extrabold uppercase tracking-widest text-(--pg-muted) px-2 mb-1">
+            MANAGE
+          </span>
+          {manageLinks.map((link) => renderSidebarLink(link))}
         </nav>
 
         {/* Support & Legal Section */}
         <div className="flex flex-col gap-1.5 mt-2">
-          <span className="text-[9px] font-extrabold uppercase tracking-widest text-text-muted px-2 mb-1">
+          <span className="text-[9px] font-extrabold uppercase tracking-widest text-(--pg-muted) px-2 mb-1">
             SUPPORT & LEGAL
           </span>
           <Link
             href="/faq"
-            className="rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all duration-200 text-text-muted hover:bg-accent-bg hover:text-accent flex items-center gap-3"
+            className="rounded-xl px-3 py-2.5 text-sm font-bold transition-all duration-200 text-(--pg-navtext) hover:bg-black/[0.04] hover:text-(--pg-deep) flex items-center gap-3"
           >
             <HelpCircle size={16} className="stroke-[2.5px]" />
             <span>FAQ&apos;s</span>
           </Link>
           <Link
             href="/terms"
-            className="rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all duration-200 text-text-muted hover:bg-accent-bg hover:text-accent flex items-center gap-3"
+            className="rounded-xl px-3 py-2.5 text-sm font-bold transition-all duration-200 text-(--pg-navtext) hover:bg-black/[0.04] hover:text-(--pg-deep) flex items-center gap-3"
           >
             <FileText size={16} className="stroke-[2.5px]" />
             <span>Terms & Conditions</span>
@@ -776,12 +995,12 @@ export default function Navbar() {
       </div>
 
       {/* Bottom: User & Info */}
-      <div className="flex flex-col gap-4 border-t border-border pt-4">
+      <div className="flex flex-col gap-4 border-t border-(--pg-line) pt-4">
         {/* Install Web App */}
         {showInstallBtn && (
           <button
             onClick={handleInstallClick}
-            className="mx-2 px-3 py-2.5 rounded-xl text-xs font-extrabold bg-accent text-[var(--btn-text)] hover:bg-accent-hover cursor-pointer flex items-center justify-center gap-2"
+            className="mx-2 px-3 py-2.5 rounded-xl text-xs font-extrabold bg-(--pg-brand) text-(--pg-onbrand) hover:bg-(--pg-brand-hover) cursor-pointer flex items-center justify-center gap-2 transition-colors"
           >
             <Download size={14} />
             <span>Install Web App</span>
@@ -790,11 +1009,11 @@ export default function Navbar() {
 
         {/* Timezone */}
         <div className="flex flex-col gap-0.5 px-2">
-          <span className="text-[9px] font-extrabold uppercase tracking-wider text-text-muted block">
+          <span className="text-[9px] font-extrabold uppercase tracking-wider text-(--pg-muted) block">
             Timezone
           </span>
           <span
-            className="text-[10px] font-bold text-text truncate"
+            className="text-[10px] font-bold text-(--pg-ink) truncate"
             title={timezone}
           >
             Auto ({timezone})
@@ -804,9 +1023,9 @@ export default function Navbar() {
         {/* User Card */}
         <Link
           href="/profile"
-          className="flex items-center gap-3 p-2 rounded-xl bg-card-alt/50 border border-border hover:border-accent/40 transition-all"
+          className="flex items-center gap-3 p-2 rounded-xl bg-(--pg-card) border border-(--pg-line) hover:border-(--pg-brand-line) transition-all"
         >
-          <div className="w-8 h-8 rounded-full border border-border bg-accent-bg flex items-center justify-center text-xs font-black text-accent overflow-hidden shrink-0">
+          <div className="w-8 h-8 rounded-full border border-(--pg-line) bg-(--pg-brand-faint) flex items-center justify-center text-xs font-black text-(--pg-brand) overflow-hidden shrink-0">
             {avatarUrl ? (
               <img
                 src={avatarUrl}
@@ -819,10 +1038,10 @@ export default function Navbar() {
             )}
           </div>
           <div className="flex flex-col min-w-0 flex-1">
-            <span className="text-xs font-black text-text truncate leading-none mb-1">
+            <span className="text-xs font-black text-(--pg-ink) truncate leading-none mb-1">
               {fullName}
             </span>
-            <span className="text-[10px] text-text-muted truncate leading-none">
+            <span className="text-[10px] text-(--pg-muted) truncate leading-none">
               {email}
             </span>
           </div>
@@ -834,7 +1053,7 @@ export default function Navbar() {
   return (
     <>
       {/* Desktop Fixed Sidebar */}
-      <aside className="w-64 fixed left-0 top-0 bottom-0 h-screen border-r border-border bg-card/50 backdrop-blur-md z-50 max-md:hidden">
+      <aside className="w-64 fixed left-0 top-0 bottom-0 h-screen border-r border-(--pg-line) bg-(--pg-side) z-50 max-md:hidden">
         <SidebarContent />
       </aside>
 
@@ -909,7 +1128,7 @@ export default function Navbar() {
                           ? "bg-red-500/10 text-red-500 border border-red-500/20"
                           : wifiIsWeak
                             ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                            : "bg-[rgba(0,255,65,0.08)] text-[#00ff41] border border-[#00ff41]/20"
+                            : "bg-(--pg-brand-faint) text-(--pg-success) border border-(--pg-brand-soft)"
                     }`}
                   >
                     {!wifiRouterOnline
@@ -976,7 +1195,7 @@ export default function Navbar() {
                               ? "text-red-400"
                               : wifiIsWeak
                                 ? "text-amber-400"
-                                : "text-[#00ff41]"
+                                : "text-(--pg-success)"
                           }`}
                         >
                           {clientNetQuality.downlink !== null
@@ -1021,7 +1240,7 @@ export default function Navbar() {
                                     ? "bg-red-500"
                                     : wifiIsWeak
                                       ? "bg-amber-400"
-                                      : "bg-[#00ff41]"
+                                      : "bg-(--pg-success)"
                                   : "bg-border"
                               }`}
                               style={{ width: 4, height: 4 + i * 3 }}
@@ -1034,7 +1253,7 @@ export default function Navbar() {
                               ? "text-red-400"
                               : wifiIsWeak
                                 ? "text-amber-400"
-                                : "text-[#00ff41]"
+                                : "text-(--pg-success)"
                           }`}
                         >
                           {clientNetQuality.bars * 25}%
@@ -1067,7 +1286,7 @@ export default function Navbar() {
                   ? "border-border bg-transparent text-text-muted/40 hover:text-text-muted hover:border-border/80"
                   : boards.some((b) => !isBoardOnline(b.last_seen))
                     ? "border-red-500/30 bg-red-500/5 text-red-500 hover:bg-red-500/10 hover:border-red-500/50"
-                    : "border-[#00ff41]/30 bg-[#00ff41]/5 text-[#00ff41] hover:bg-[#00ff41]/10 hover:border-[#00ff41]/50"
+                    : "border-(--pg-brand-line) bg-(--pg-brand-ghost) text-(--pg-success) hover:bg-(--pg-brand-faint) hover:border-(--pg-brand-line)"
               }`}
               title="Hardware Board Range"
             >
@@ -1094,7 +1313,7 @@ export default function Navbar() {
                         ? "bg-border text-text-muted"
                         : boards.some((b) => !isBoardOnline(b.last_seen))
                           ? "bg-red-500/10 text-red-500 border border-red-500/20"
-                          : "bg-[#00ff41]/10 text-[#00ff41] border border-[#00ff41]/20"
+                          : "bg-(--pg-brand-faint) text-(--pg-success) border border-(--pg-brand-soft)"
                     }`}
                   >
                     {boards.length === 0
@@ -1295,16 +1514,74 @@ export default function Navbar() {
 
           <ThemeToggle size={15} />
 
-          <button
-            className="p-2 rounded-xl border border-border bg-accent-bg/5 hover:bg-accent-bg hover:text-accent hover:border-accent text-text-muted transition-all cursor-pointer flex items-center justify-center"
-            title="Notifications"
-          >
-            <Bell size={15} />
-          </button>
+          <FeatureNotificationBell
+            announcements={announcements}
+            unreadCount={unreadAnnouncementCount}
+            open={showNotifications}
+            notificationPermission={notificationPermission}
+            onEnableNotifications={enableNotifications}
+            onToggle={() => (showNotifications ? setShowNotifications(false) : openNotifications())}
+            onClose={() => setShowNotifications(false)}
+          />
+
+          {/* User avatar + profile menu */}
+          <div className="relative" onMouseLeave={() => setShowProfileMenu(false)}>
+            <button
+              onClick={() => setShowProfileMenu((v) => !v)}
+              onMouseEnter={() => setShowProfileMenu(true)}
+              className="w-9 h-9 rounded-full border border-border bg-card hover:border-accent/50 transition-all cursor-pointer flex items-center justify-center overflow-hidden text-xs font-black text-accent"
+              title={fullName}
+              aria-label="Profile menu"
+              aria-expanded={showProfileMenu}
+            >
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt={fullName}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <span>{initial}</span>
+              )}
+            </button>
+            {showProfileMenu && (
+              <div className="absolute right-0 top-full mt-2 w-60 rounded-2xl border border-border bg-card p-2 shadow-2xl z-50 animate-scale-in">
+                <div className="px-3 py-2.5 border-b border-border mb-1">
+                  <p className="text-xs font-black text-text truncate">{fullName}</p>
+                  <p className="text-[11px] text-text-muted truncate mt-0.5">{email}</p>
+                </div>
+                <Link
+                  href="/profile"
+                  onClick={() => setShowProfileMenu(false)}
+                  className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-bold text-text-muted hover:bg-accent-bg hover:text-accent transition-all"
+                >
+                  <span className="w-7 h-7 rounded-full bg-accent-bg text-accent flex items-center justify-center text-[11px] font-black shrink-0 overflow-hidden">
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      <span>{initial}</span>
+                    )}
+                  </span>
+                  View Profile
+                </Link>
+                <button
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    setShowLogoutModal(true);
+                  }}
+                  className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-bold text-(--pg-error) hover:bg-(--pg-error-faint) transition-all cursor-pointer"
+                >
+                  <LogOut size={14} />
+                  Log Out
+                </button>
+              </div>
+            )}
+          </div>
 
           <button
             onClick={() => setShowLogoutModal(true)}
-            className="px-4 py-1.5 rounded-xl text-xs font-extrabold border border-red-500/40 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all duration-200 cursor-pointer"
+            className="px-4 py-1.5 rounded-xl text-xs font-extrabold border border-(--pg-error-line) bg-(--pg-error-faint) text-(--pg-error) hover:bg-(--pg-error) hover:text-white transition-all duration-200 cursor-pointer"
           >
             Log Out
           </button>
@@ -1395,7 +1672,7 @@ export default function Navbar() {
                               ? "text-red-400"
                               : wifiIsWeak
                                 ? "text-amber-400"
-                                : "text-[#00ff41]"
+                                : "text-(--pg-success)"
                           }`}
                         >
                           {clientNetQuality.downlink !== null
@@ -1440,7 +1717,7 @@ export default function Navbar() {
                                     ? "bg-red-500"
                                     : wifiIsWeak
                                       ? "bg-amber-400"
-                                      : "bg-[#00ff41]"
+                                      : "bg-(--pg-success)"
                                   : "bg-border"
                               }`}
                               style={{ width: 4, height: 4 + i * 3 }}
@@ -1453,7 +1730,7 @@ export default function Navbar() {
                               ? "text-red-400"
                               : wifiIsWeak
                                 ? "text-amber-400"
-                                : "text-[#00ff41]"
+                                : "text-(--pg-success)"
                           }`}
                         >
                           {clientNetQuality.bars * 25}%
@@ -1503,7 +1780,7 @@ export default function Navbar() {
                   ? "border-border bg-transparent text-text-muted/40"
                   : boards.some((b) => !isBoardOnline(b.last_seen))
                     ? "border-red-500/30 bg-red-500/5 text-red-500 hover:bg-red-500/10 hover:border-red-500/50"
-                    : "border-[#00ff41]/30 bg-[#00ff41]/5 text-[#00ff41] hover:bg-[#00ff41]/10 hover:border-[#00ff41]/50"
+                    : "border-(--pg-brand-line) bg-(--pg-brand-ghost) text-(--pg-success) hover:bg-(--pg-brand-faint) hover:border-(--pg-brand-line)"
               }`}
             >
               <BoardSignalIcon
@@ -1529,7 +1806,7 @@ export default function Navbar() {
                         ? "bg-border text-text-muted"
                         : boards.some((b) => !isBoardOnline(b.last_seen))
                           ? "bg-red-500/10 text-red-500 border border-red-500/20"
-                          : "bg-[#00ff41]/10 text-[#00ff41] border border-[#00ff41]/20"
+                          : "bg-(--pg-brand-faint) text-(--pg-success) border border-(--pg-brand-soft)"
                     }`}
                   >
                     {boards.length === 0
@@ -1705,6 +1982,16 @@ export default function Navbar() {
             )}
           </div>
 
+          <FeatureNotificationBell
+            announcements={announcements}
+            unreadCount={unreadAnnouncementCount}
+            open={showNotifications}
+            mobile
+            notificationPermission={notificationPermission}
+            onEnableNotifications={enableNotifications}
+            onToggle={() => (showNotifications ? setShowNotifications(false) : openNotifications())}
+            onClose={() => setShowNotifications(false)}
+          />
           <ThemeToggle size={14} />
         </div>
       </header>
@@ -1729,8 +2016,10 @@ export default function Navbar() {
               className={`flex flex-col items-center justify-center gap-1 flex-1 py-1 transition-all ${
                 isCloudDisabled
                   ? "opacity-35 cursor-not-allowed text-text-muted/40"
-                  : active
-                    ? "text-accent"
+                   : active
+                     ? link.href === "/local"
+                       ? "text-[#A86F3D]"
+                       : "text-accent"
                     : "text-text-muted"
               }`}
             >

@@ -5,7 +5,8 @@ import { supabase } from '@/lib/supabase';
 import Toast from '@/components/Toast';
 import Loader from '@/components/Loader';
 import Link from 'next/link';
-import { X, KeyRound, Zap, LogOut } from 'lucide-react';
+import { X, KeyRound, Zap, LogOut, Mic } from 'lucide-react';
+import { isVoiceAgentVisible, setVoiceAgentVisible } from '@/lib/agentVisibility';
 
 export default function ProfilePage() {
   const [user, setUser] = useState(null);
@@ -21,6 +22,12 @@ export default function ProfilePage() {
   const [voltage, setVoltage] = useState('230');
   const [currency, setCurrency] = useState('INR');
   const [savingEnergy, setSavingEnergy] = useState(false);
+
+  // Voice agent visibility (floating mic + per-card mic buttons)
+  const [agentVisible, setAgentVisible] = useState(true);
+  useEffect(() => {
+    setAgentVisible(isVoiceAgentVisible());
+  }, []);
 
   // Password states
   const [newPassword, setNewPassword] = useState('');
@@ -542,6 +549,54 @@ export default function ProfilePage() {
               {savingEnergy ? 'Saving...' : 'Save Energy Settings'}
             </button>
           </form>
+        </div>
+
+        {/* Voice Agent Visibility Card */}
+        <div className="relative overflow-hidden rounded-2xl border border-border bg-card p-4 sm:p-8 shadow-lg">
+          <div className="flex items-center gap-3 mb-4 sm:mb-6">
+            <div className="w-10 h-10 rounded-xl bg-accent-bg flex items-center justify-center text-accent border border-accent/20 shadow-gold-glow shrink-0">
+              <Mic size={18} className="stroke-[2.5px]" />
+            </div>
+            <div>
+              <h2 className="text-sm sm:text-base font-extrabold text-text tracking-tight">Voice Agent</h2>
+              <p className="text-[11px] sm:text-xs font-semibold text-text-muted">Show or hide the AI voice assistant across the app.</p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 max-w-md rounded-xl border border-border bg-input px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm font-extrabold text-text">Voice assistant button</p>
+              <p className="text-[11px] font-semibold text-text-muted mt-0.5 leading-relaxed">
+                {agentVisible
+                  ? 'Visible — floating mic and schedule/alarm voice buttons are shown.'
+                  : 'Hidden — all voice controls are removed from every page.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={agentVisible}
+              aria-label="Show voice agent"
+              title={agentVisible ? 'Hide voice agent' : 'Show voice agent'}
+              onClick={() => {
+                const next = !agentVisible;
+                setAgentVisible(next);
+                setVoiceAgentVisible(next);
+                setToast(next ? 'Voice agent shown.' : 'Voice agent hidden.');
+              }}
+              className={`relative h-8 w-14 shrink-0 rounded-full border transition-colors duration-200 cursor-pointer ${
+                agentVisible
+                  ? 'bg-accent border-accent'
+                  : 'bg-toggle-track border-toggle-track'
+              }`}
+            >
+              <span
+                className={`absolute top-1/2 -translate-y-1/2 h-6 w-6 rounded-full bg-white shadow transition-all duration-200 ${
+                  agentVisible ? 'left-[calc(100%-1.75rem)]' : 'left-1'
+                }`}
+              />
+            </button>
+          </div>
         </div>
 
         {/* MFA Verification Modal */}

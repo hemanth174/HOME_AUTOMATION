@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "impeccable": {
+      "source": "pbakaus/impeccable",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/impeccable/SKILL.md",
+      "computedHash": "cdbc7dd8df1b13c4a0ed9c64317cea0fbbab45a0b383f605e152a8fc3bf5add0"
+    },
+    "responsive-craft": {
+      "source": "kylezantos/responsive-craft",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "10e1d8b1eae6412a0d59879bd0f6d10ab3792b424c8738c833eac6d655d4f2b5"
+    }
+  }
+}

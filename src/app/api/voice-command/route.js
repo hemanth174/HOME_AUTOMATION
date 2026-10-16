@@ -1,4 +1,79 @@
 import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
+const ACTION_TYPES = new Set([
+  'TOGGLE_DEVICE', 'TOGGLE_ALL', 'APPLY_PRESET', 'CREATE_ALARM',
+  'CREATE_SCHEDULE', 'DELETE_ALL_ALARMS', 'DELETE_ALL_SCHEDULES',
+  'GUIDANCE', 'ANSWER', 'UNKNOWN',
+]);
+const ALLOWED_REDIRECTS = new Set(['/faq', '/terms', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/boards', '/presets', '/']);
+
+function getAuthenticatedClient(request) {
+  const token = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!token || !url || !key) return null;
+  return createClient(url, key, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
+function validateAction(result, devices, presets) {
+  if (!result || !ACTION_TYPES.has(result.actionType)) return null;
+  if (result.actionType === 'UNKNOWN' || result.actionType === 'ANSWER') {
+    return typeof result.message === 'string' && result.message.trim()
+      ? { ...result, message: result.message.trim().slice(0, 500) }
+      : null;
+  }
+  if (result.actionType === 'GUIDANCE') {
+    return { ...result, redirectTo: ALLOWED_REDIRECTS.has(result.redirectTo) ? result.redirectTo : undefined };
+  }
+  if (result.actionType === 'TOGGLE_ALL' || result.actionType === 'DELETE_ALL_ALARMS' || result.actionType === 'DELETE_ALL_SCHEDULES') {
+    if (result.actionType === 'TOGGLE_ALL' && typeof result.isOn !== 'boolean') return null;
+    return result;
+  }
+  if (result.actionType === 'APPLY_PRESET') {
+    const preset = presets.find((item) => item.id === result.presetId);
+    if (!preset || typeof result.deactivate !== 'boolean') return null;
+    return { ...result, presetId: preset.id, presetName: preset.name };
+  }
+  const device = devices.find((item) => item.id === result.deviceId);
+  if (!device || typeof result.isOn !== 'boolean') return null;
+  if (result.actionType === 'CREATE_ALARM' && (!result.triggerAt || Number.isNaN(new Date(result.triggerAt).getTime()) || new Date(result.triggerAt).getTime() <= Date.now())) return null;
+  if (result.actionType === 'CREATE_SCHEDULE' && !/^\d{2}:\d{2}$/.test(result.time || '')) return null;
+  if (result.actionType === 'CREATE_SCHEDULE' && (!Array.isArray(result.days) || result.days.some((day) => !Number.isInteger(day) || day < 0 || day > 6))) return null;
+  return { ...result, deviceId: device.id, deviceName: device.name };
+}
+
+const ORDINALS = {
+  one: 0, first: 0, two: 1, second: 1, three: 2, third: 2,
+  four: 3, fourth: 3, five: 4, fifth: 4, six: 5, sixth: 5,
+};
+
+function resolveExplicitToggle(transcript, devices, language) {
+  const norm = String(transcript || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const on = /\b(?:turn|switch|power|activate)\s+(?:the\s+)?(?:device|relay|channel)?\s*(?:one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|\d+)\s+on\b|\b(?:turn|switch|power|activate)\s+on\b/.test(norm);
+  const off = /\b(?:turn|switch|power|deactivate)\s+(?:the\s+)?(?:device|relay|channel)?\s*(?:one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|\d+)\s+off\b|\b(?:turn|switch|power|deactivate)\s+off\b/.test(norm);
+  if (!on && !off) return null;
+
+  const match = norm.match(/\b(?:device|relay|channel)\s*(one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|\d+)\b/);
+  if (!match) return null;
+  const requestedIndex = /^\d+$/.test(match[1]) ? Number(match[1]) - 1 : ORDINALS[match[1]];
+  if (!Number.isInteger(requestedIndex) || requestedIndex < 0) return null;
+
+  const matches = devices.filter((device) => Number(device.relay_index) === requestedIndex);
+  if (matches.length !== 1) return null;
+  const device = matches[0];
+  return {
+    actionType: 'TOGGLE_DEVICE',
+    deviceId: device.id,
+    deviceName: device.name,
+    isOn: on,
+    message: `${device.name} turned ${on ? 'on' : 'off'}`,
+    language,
+  };
+}
 
 // Robust helper to extract and clean JSON from any LLM response
 function extractJsonFromText(rawText) {
@@ -47,6 +122,13 @@ function fallbackParseCommand(transcript, devices = [], presets = [], requestedL
   const local = (english, hindi, telugu) => isHindi ? hindi : isTelugu ? telugu : english;
   const isOn = norm.includes('turn on') || norm.includes('switch on') || norm.includes('activate') || norm.includes(' on') || norm.includes('चालू') || norm.includes('जलाओ') || norm.includes('जला');
   const isOff = norm.includes('turn off') || norm.includes('switch off') || norm.includes('deactivate') || norm.includes(' off') || norm.includes('बंद') || norm.includes('बुझा');
+
+  if (/^(hi|hello|hey|good morning|good afternoon|good evening|नमस्ते|हैलो)$/.test(norm)) {
+    return { actionType: 'ANSWER', message: local('Hello. How can I help with your smart home?', 'नमस्ते। मैं आपके स्मार्ट होम में कैसे मदद करूँ?', 'నమస్కారం. మీ స్మార్ట్ హోమ్‌లో నేను ఎలా సహాయపడగలను?'), language };
+  }
+  if (norm.includes('what can you do') || norm.includes('how can you help') || norm.includes('capabilities')) {
+    return { actionType: 'ANSWER', message: local('I can control devices, presets, alarms, schedules, and explain your smart home.', 'मैं डिवाइस, प्रीसेट, अलार्म और शेड्यूल नियंत्रित कर सकती हूँ।', 'నేను పరికరాలు, ప్రీసెట్లు, అలారాలు మరియు షెడ్యూళ్లను నియంత్రించగలను.'), language };
+  }
 
   // 1. Toggle All
   if (norm.includes('all on') || norm.includes('turn on all') || norm.includes('all off') || norm.includes('turn off all') || norm.includes('sab on') || norm.includes('sab bandh') || norm.includes('सभी') || norm.includes('सब') || norm.includes('सारे')) {
@@ -115,7 +197,12 @@ function fallbackParseCommand(transcript, devices = [], presets = [], requestedL
 
 export async function POST(request) {
   try {
-    const { transcript, devices = [], presets = [], currentTime, language = 'en-US' } = await request.json();
+    const authClient = getAuthenticatedClient(request);
+    if (!authClient) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    const { data: { user }, error: authError } = await authClient.auth.getUser();
+    if (authError || !user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+
+    const { transcript, currentTime, language = 'en-US', context = [] } = await request.json();
 
     const apiKey = process.env.OPENROUTER_API_KEY;
     const model = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
@@ -127,8 +214,24 @@ export async function POST(request) {
       );
     }
 
-    const deviceList = devices.map(d => ({ id: d.id, name: d.name, board_id: d.board_id }));
-    const presetList = presets.map(p => ({ id: p.id, name: p.name }));
+    const [{ data: ownedDevices }, { data: ownedPresets }, { data: ownedBoards }] = await Promise.all([
+      authClient.from('devices').select('id, name, is_on, relay_index, board_id').eq('user_id', user.id),
+      authClient.from('presets').select('id, name').eq('user_id', user.id),
+      authClient.from('boards').select('id, name, board_identifier').eq('user_id', user.id),
+    ]);
+    const deviceList = (ownedDevices || []).map(d => ({ id: d.id, name: d.name, board_id: d.board_id, relay_index: d.relay_index, is_on: d.is_on }));
+    const presetList = (ownedPresets || []).map(p => ({ id: p.id, name: p.name }));
+    const boardList = (ownedBoards || []).map((board) => ({ id: board.id, name: board.name }));
+    const safeContext = Array.isArray(context)
+      ? context.slice(-6).map((item) => ({
+        role: item?.role === 'assistant' ? 'assistant' : 'user',
+        content: String(item?.content || '').slice(0, 240),
+      }))
+      : [];
+
+    // Explicit relay ordinals must not be left to an LLM to guess.
+    const explicitToggle = resolveExplicitToggle(transcript, deviceList, language);
+    if (explicitToggle) return NextResponse.json(explicitToggle, { headers: { 'Cache-Control': 'no-store' } });
 
     // If no API key configured, use intelligent local fallback
     if (!apiKey || apiKey.trim() === '') {
@@ -139,10 +242,15 @@ export async function POST(request) {
     const systemPrompt = `You parse smart home voice commands and return ONLY a valid JSON object. Do not include markdown, thoughts, or explanations.
 
 Available Devices: ${JSON.stringify(deviceList)}
+Available Rooms/Boards: ${JSON.stringify(boardList)}
 Available Presets: ${JSON.stringify(presetList)}
 Current Local Time: ${currentTime || new Date().toISOString()}
+Recent conversation context (use only to resolve references such as "it" or "that room"):
+${JSON.stringify(safeContext)}
 
-Use the requested language: ${language}. Detect the transcript language only when it clearly differs. Always return the message and language in the requested language unless the user clearly spoke another language. Hindi must use natural Devanagari (not English fallback text). English -> "en-US", Hindi -> "hi-IN", Telugu -> "te-IN". Keep output "message" short (under 10 words) in that language.
+Use the requested language: ${language}. Detect the transcript language only when it clearly differs. Always return the message and language in the requested language unless the user clearly spoke another language. Hindi must use natural Devanagari (not English fallback text). English -> "en-US", Hindi -> "hi-IN", Telugu -> "te-IN". Keep command confirmations under 10 words; conversational answers may use up to 60 words.
+
+For greetings, capability questions, general questions, explanations, or questions about the current device states, return ANSWER. Use only the supplied device and room data for live states; never invent telemetry. ANSWER never executes an action.
 
 Return EXACTLY ONE of these JSON formats:
 1. Toggle Single Device:
@@ -169,12 +277,18 @@ Return EXACTLY ONE of these JSON formats:
 8. Navigation & Guidance (FAQ, Terms, Analytics, Schedules, Alarms, Boards, Profile):
 {"actionType":"GUIDANCE","message":"...","language":"...","redirectTo":"/faq|/terms|/schedules|/alarms|/analytics|/logs|/profile|/boards|/presets|/"}
 
-9. Unrecognized / Out of scope:
+9. Conversational answer (no device action):
+{"actionType":"ANSWER","message":"...","language":"..."}
+
+10. Unrecognized / Out of scope:
 {"actionType":"UNKNOWN","message":"...","language":"..."}`;
 
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12000);
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
@@ -188,9 +302,11 @@ Return EXACTLY ONE of these JSON formats:
             { role: 'user', content: `Parse this voice command: "${transcript}"` }
           ],
           temperature: 0.1,
-          max_tokens: 500
+          max_tokens: 500,
+          response_format: { type: 'json_object' },
         })
       });
+      clearTimeout(timeout);
 
       if (response.ok) {
         const data = await response.json();
@@ -198,8 +314,9 @@ Return EXACTLY ONE of these JSON formats:
         const rawContent = choice?.message?.content || choice?.text || choice?.message?.reasoning || '';
         
         const extracted = extractJsonFromText(rawContent);
-        if (extracted && extracted.actionType) {
-          return NextResponse.json(extracted);
+        const validated = validateAction(extracted, deviceList, presetList);
+        if (validated) {
+          return NextResponse.json(validated, { headers: { 'Cache-Control': 'no-store' } });
         }
       }
     } catch (aiErr) {
@@ -216,7 +333,7 @@ Return EXACTLY ONE of these JSON formats:
     return NextResponse.json({
       actionType: 'UNKNOWN',
       message: 'Could not process voice command. Please try again.',
-      language,
+      language: 'en-US',
     });
   }
 }

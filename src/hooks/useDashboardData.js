@@ -56,9 +56,13 @@ export default function useDashboardData() {
       if (cachedBoards) {
         const parsed = JSON.parse(cachedBoards);
         setBoards(parsed);
-        const exp = {};
-        parsed.forEach(b => { exp[b.id] = true; });
-        setExpandedBoards(exp);
+        setExpandedBoards((previous) => {
+          const next = { ...(previous || {}) };
+          parsed.forEach((board) => {
+            if (next[board.id] === undefined) next[board.id] = true;
+          });
+          return next;
+        });
       }
       if (cachedDevices) setDevices(JSON.parse(cachedDevices));
       if (cachedPresets) setPresets(JSON.parse(cachedPresets));
@@ -124,9 +128,13 @@ export default function useDashboardData() {
         if (boardsRes.data) {
           setBoards(boardsRes.data);
           try { localStorage.setItem(LOCAL_STORAGE_BOARDS, JSON.stringify(boardsRes.data)); } catch {}
-          const expanded = {};
-          boardsRes.data.forEach(b => { expanded[b.id] = true; });
-          setExpandedBoards(expanded);
+          setExpandedBoards((previous) => {
+            const next = { ...(previous || {}) };
+            boardsRes.data.forEach((board) => {
+              if (next[board.id] === undefined) next[board.id] = true;
+            });
+            return next;
+          });
         }
 
         if (devicesRes.data) {
@@ -353,12 +361,15 @@ export default function useDashboardData() {
     }
 
     // 3. Sync to Supabase if internet / session is available
+    let cloudSynced = false;
     if (user && isClientOnline) {
       try {
-        await supabase
+        const { error } = await supabase
           .from('devices')
           .update({ is_on: newState, last_changed: new Date().toISOString() })
           .eq('id', device.id);
+        if (error) throw error;
+        cloudSynced = true;
 
         await supabase.from('activity_logs').insert({
           user_id: user.id,
@@ -372,7 +383,7 @@ export default function useDashboardData() {
       }
     }
 
-    return { success: true, localDispatched, newState };
+    return { success: localDispatched || cloudSynced, localDispatched, cloudSynced, newState };
   }, [isLocalConnected, user, isClientOnline, boards]);
 
   /**
@@ -401,11 +412,15 @@ export default function useDashboardData() {
     }
 
     // 3. Cloud update
+    let cloudSynced = false;
     if (user && isClientOnline) {
       try {
-        await Promise.all(devices.map(d =>
+        const results = await Promise.all(devices.map(d =>
           supabase.from('devices').update({ is_on: targetState, last_changed: new Date().toISOString() }).eq('id', d.id)
         ));
+        const syncError = results.find(({ error }) => error)?.error;
+        if (syncError) throw syncError;
+        cloudSynced = true;
 
         await supabase.from('activity_logs').insert({
           user_id: user.id,
@@ -418,6 +433,7 @@ export default function useDashboardData() {
         console.warn('Supabase global sync error:', err);
       }
     }
+    return { success: localDispatched || cloudSynced, localDispatched, cloudSynced, newState: targetState };
   }, [isLocalConnected, user, isClientOnline, devices]);
 
   return {

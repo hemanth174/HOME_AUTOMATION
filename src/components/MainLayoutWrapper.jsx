@@ -10,7 +10,7 @@ import LocalModeBanner from './LocalModeBanner';
 import useLocalConnection from '@/hooks/useLocalConnection';
 import { checkInternet } from '@/lib/netCheck';
 
-export default function MainLayoutWrapper({ children }) {
+export default function MainLayoutWrapper({ children, className = "" }) {
   const pathname = usePathname();
   const router = useRouter();
   const cleanPath = (pathname || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '') || '/';
@@ -169,8 +169,8 @@ export default function MainLayoutWrapper({ children }) {
   }
 
   return (
-    <div className={fullWidthPage ? "w-full min-h-screen" : "w-full min-h-screen md:pl-64 pb-20 md:pb-8 transition-all duration-300"}>
-      {!fullWidthPage && (
+    <div className={`${fullWidthPage ? "w-full min-h-screen" : "w-full min-h-screen md:pl-64 pb-20 md:pb-8 transition-all duration-300"} ${className}`}>
+      {!fullWidthPage && cleanPath !== '/local' && (
           <LocalModeBanner
             isClientOnline={isClientOnline}
             isLocalConnected={isLocalConnected}

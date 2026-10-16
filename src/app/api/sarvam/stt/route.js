@@ -1,7 +1,27 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+async function isAuthenticated(request) {
+  const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!token || !url || !key) return false;
+  const client = createClient(url, key, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const { data: { user } } = await client.auth.getUser();
+  return Boolean(user);
+}
 
 export async function POST(request) {
   try {
+    if (!(await isAuthenticated(request))) {
+      return NextResponse.json({ success: false, error: "Authentication required" }, { status: 401 });
+    }
+    if (!process.env.SARVAM_API_KEY) {
+      return NextResponse.json({ success: false, error: "Sarvam STT is not configured" }, { status: 503 });
+    }
     const formData = await request.formData();
 
     const audioFile = formData.get("audio");

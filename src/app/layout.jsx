@@ -1,32 +1,36 @@
-import './globals.css';
-import Navbar from '@/components/Navbar';
-import MainLayoutWrapper from '@/components/MainLayoutWrapper';
-import Script from 'next/script';
-import { Sora, JetBrains_Mono } from 'next/font/google';
+import "./globals.css";
+import Navbar from "@/components/Navbar";
+import MainLayoutWrapper from "@/components/MainLayoutWrapper";
+import PGShellScope from "@/components/PGShellScope";
+import PGDrawerEnhancer from "@/components/PGDrawerEnhancer";
+import MobileModalEnhancer from "@/components/MobileModalEnhancer";
+import FeatureAnnouncementNotifier from "@/components/FeatureAnnouncementNotifier";
+import Script from "next/script";
+import { Sora, JetBrains_Mono } from "next/font/google";
 
 const sora = Sora({
-  subsets: ['latin'],
-  weight: ['400', '600', '700', '800'],
-  variable: '--font-sora',
-  display: 'swap',
+  subsets: ["latin"],
+  weight: ["400", "600", "700", "800"],
+  variable: "--font-sora",
+  display: "swap",
 });
 
 const jetbrainsMono = JetBrains_Mono({
-  subsets: ['latin'],
-  weight: ['400', '500', '700'],
-  variable: '--font-jetbrains-mono',
-  display: 'swap',
+  subsets: ["latin"],
+  weight: ["400", "500", "700"],
+  variable: "--font-jetbrains-mono",
+  display: "swap",
 });
 
 export const metadata = {
-  title: 'VikaTech',
-  description: 'VikaTech Automation Control Panel',
-  manifest: '/manifest.json',
+  title: "VikaTech",
+  description: "VikaTech Automation Control Panel",
+  manifest: "/manifest.json",
 };
 
 export const viewport = {
-  themeColor: '#060606',
-  width: 'device-width',
+  themeColor: "#060606",
+  width: "device-width",
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
@@ -34,20 +38,42 @@ export const viewport = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${sora.variable} ${jetbrainsMono.variable}`}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${sora.variable} ${jetbrainsMono.variable}`}
+    >
       <head>
         <link rel="manifest" href="/manifest.json" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block" rel="stylesheet" />
+        <meta
+          name="apple-mobile-web-app-status-bar-style"
+          content="black-translucent"
+        />
+        <link
+          rel="preconnect"
+          href="https://fonts.gstatic.com"
+          crossOrigin="anonymous"
+        />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block"
+          rel="stylesheet"
+        />
       </head>
       <body>
-        <Script src="https://unpkg.com/@dotlottie/player-component@2.7.12/dist/dotlottie-player.mjs" type="module" strategy="beforeInteractive" />
+        <Script
+          src="https://unpkg.com/@dotlottie/player-component@2.7.12/dist/dotlottie-player.mjs"
+          type="module"
+          strategy="beforeInteractive"
+        />
         <ThemeInit />
+        <PGShellScope />
+        <PGDrawerEnhancer />
+        <MobileModalEnhancer />
+        <FeatureAnnouncementNotifier />
         <Navbar />
-        <MainLayoutWrapper>{children}</MainLayoutWrapper>
+        <MainLayoutWrapper className="scrollbar-hidden">{children}</MainLayoutWrapper>
       </body>
     </html>
   );

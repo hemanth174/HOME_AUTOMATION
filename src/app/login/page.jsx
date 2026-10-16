@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import ThemeToggle from '@/components/ThemeToggle';
 import Toast from '@/components/Toast';
-import { Eye, EyeClosed, ArrowLeft } from 'lucide-react';
+import { Eye, EyeOff, ArrowLeft, Zap, Timer, Activity } from 'lucide-react';
 import SignupForm from '@/components/SignupForm';
 import ForgotQuestionsForm from '@/components/ForgotQuestionsForm';
 
@@ -288,24 +288,85 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="relative min-h-screen w-full flex items-center justify-center p-6">
-      <div className="absolute top-5 left-5 z-50">
-        <Link 
-          href="/" 
-          className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border bg-card text-xs font-extrabold text-text hover:bg-card-alt hover:border-accent/40 transition-all cursor-pointer select-none"
-        >
+    <div
+      className="relative w-full grid lg:grid-cols-[1.05fr_1fr] min-h-screen overflow-x-clip"
+      style={{ minHeight: '100svh' }}
+    >
+      {/* Desktop brand panel — fixed dark surface. Colors are locked via .login-brand in globals.css so the light-theme global override can't turn them dark. */}
+      <aside className="login-brand hidden lg:flex relative flex-col justify-between overflow-hidden px-12 py-10">
+        <div
+          className="pointer-events-none absolute inset-0"
+          aria-hidden="true"
+          style={{
+            background:
+              'radial-gradient(90% 60% at 20% 10%, rgba(0,255,65,0.12) 0%, transparent 60%), radial-gradient(70% 55% at 85% 90%, rgba(0,227,253,0.12) 0%, transparent 60%)',
+          }}
+        />
+        <Link href="/" className="login-brand-back relative z-10 flex items-center gap-2 text-xs font-extrabold tracking-widest transition-colors w-fit min-h-[44px]">
           <ArrowLeft size={14} />
-          <span>Back to Home</span>
+          <span>BACK TO HOME</span>
         </Link>
-      </div>
+        <div className="relative z-10 max-w-md">
+          <p className="login-brand-kicker text-[11px] font-extrabold uppercase tracking-[0.25em] mb-4">VIKA TECH · V4 PLATFORM</p>
+          <h2 className="login-brand-title text-4xl xl:text-5xl font-extrabold leading-[1.05] tracking-tight">
+            One login.
+            <br />
+            Every switchboard.
+          </h2>
+          <p className="login-brand-sub mt-4 text-sm leading-relaxed">
+            Sign in to monitor relays live, run presets and alarms, and audit energy across home and commercial sites.
+          </p>
+          <ul className="login-brand-list mt-8 space-y-3 text-[13px] font-semibold">
+            <li className="flex items-center gap-3">
+              <span className="login-brand-icon login-brand-icon-1 w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                <Zap size={17} />
+              </span>
+              Live relay state with AC feedback
+            </li>
+            <li className="flex items-center gap-3">
+              <span className="login-brand-icon login-brand-icon-2 w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                <Timer size={17} />
+              </span>
+              Presets, alarms & offline schedules
+            </li>
+            <li className="flex items-center gap-3">
+              <span className="login-brand-icon login-brand-icon-3 w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                <Activity size={17} />
+              </span>
+              Per-device energy analytics
+            </li>
+          </ul>
+        </div>
+        <p className="login-brand-foot relative z-10 text-[11px] font-semibold">© 2026 Electric Warriors. Shock, Inspire, Lead.</p>
+      </aside>
 
-      <div className="absolute top-5 right-5 z-50">
-        <ThemeToggle />
-      </div>
-    
-      <div className="bg-auth-card px-8 py-9 rounded-[22px] shadow-2xl shadow-gold-glow w-full max-w-[420px]  border border-border">
-        <h1 className="text-center text-5xl font-extrabold mb-2 text-accent ">Smart Home</h1>
-        <p className="text-center text-xs text-text-muted mb-6 font-bold uppercase tracking-wider">
+      {/* Task column */}
+      <div className="relative flex items-center justify-center px-4 sm:px-6 py-20 sm:py-10 min-w-0">
+        <div className="absolute top-4 left-4 z-50 lg:hidden" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+          <Link
+            href="/"
+            className="flex items-center gap-2 px-3 min-h-[44px] rounded-xl border border-border bg-card text-xs font-extrabold text-text hover:bg-card-alt hover:border-accent/40 transition-all cursor-pointer select-none"
+            aria-label="Back to home"
+          >
+            <ArrowLeft size={14} />
+            <span>Back</span>
+          </Link>
+        </div>
+
+        <div className="absolute top-4 right-4 z-50" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+          <ThemeToggle />
+        </div>
+
+        <div className="w-full max-w-[440px] min-w-0">
+          {/* Mobile brand header — compact, no kicker per craft-floor */}
+          <div className="lg:hidden text-center mb-5">
+            <p className="text-[11px] font-extrabold uppercase tracking-[0.25em] text-accent mb-2">VIKA TECH</p>
+            <h1 className="text-[32px] leading-[1.1] font-extrabold tracking-tight text-text">Smart Home</h1>
+          </div>
+
+          <div className="bg-auth-card px-5 sm:px-8 py-7 sm:py-9 rounded-2xl shadow-2xl shadow-gold-glow w-full border border-border">
+            <h1 className="hidden lg:block text-center text-[40px] leading-none font-extrabold mb-2 text-accent tracking-tight">Smart Home</h1>
+        <p className="text-center text-[13px] text-text-muted mb-6 font-bold uppercase tracking-wider">
           {view === 'login' && 'Sign in to your account'}
           {view === 'signup' && 'Create a new account'}
           {view === 'forgot' && 'Reset your password'}
@@ -313,34 +374,47 @@ export default function LoginPage() {
         </p>
 
         {view === 'login' && (
-          <form className="flex flex-col gap-4" onSubmit={handleLogin}>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-extrabold tracking-wide text-text-muted">Email</label>
+          <form className="flex flex-col gap-4" onSubmit={handleLogin} noValidate={false}>
+            <div className="flex flex-col gap-1.5 min-w-0">
+              <label htmlFor="login-email" className="text-xs font-extrabold tracking-wide text-text-muted">Email</label>
               <input
-                className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
+                id="login-email"
+                className="w-full px-4 min-h-[48px] rounded-xl border-[1.5px] border-border bg-input text-text text-base outline-none transition-all focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/40 focus:shadow-[0_0_0_3px_var(--accent-bg)]"
                 type="email"
+                autoComplete="email"
+                inputMode="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 required
               />
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-extrabold tracking-wide text-text-muted">Password</label>
-             <div className='flex rounded-lg border-[1.5px] border-border'>
-               <input
-                className="w-full px-4 py-2.5  bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                type={showPass ? "password" : "text"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Your password"
-                required
-              />
-              <button className='border-[1.5px] border-border p-2' onClick={()=>setShowPass(!showPass)} type="button">{showPass ? <EyeClosed />:<Eye/>}</button>
-             </div>
+            <div className="flex flex-col gap-1.5 min-w-0">
+              <label htmlFor="login-password" className="text-xs font-extrabold tracking-wide text-text-muted">Password</label>
+              <div className="flex rounded-xl border-[1.5px] border-border bg-input overflow-hidden focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--accent-bg)] transition-all">
+                <input
+                  id="login-password"
+                  className="w-full min-w-0 flex-1 px-4 min-h-[48px] bg-transparent text-text text-base outline-none"
+                  type={showPass ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Your password"
+                  required
+                />
+                <button
+                  className="w-[52px] min-h-[48px] flex items-center justify-center text-text-muted hover:text-text active:scale-95 transition-all cursor-pointer shrink-0"
+                  onClick={() => setShowPass(!showPass)}
+                  type="button"
+                  aria-label={showPass ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPass}
+                >
+                  {showPass ? <Eye size={20} /> : <EyeOff size={20} />}
+                </button>
+              </div>
             </div>
             <button
-              className="w-full py-3 rounded-lg text-sm font-bold bg-accent text-[var(--btn-text)] transition-all hover:bg-accent-hover active:translate-y-0 cursor-pointer shadow-gold-glow mt-2"
+              className="w-full min-h-[52px] py-3 rounded-xl text-[15px] font-bold bg-accent text-[var(--btn-text)] transition-all hover:bg-accent-hover active:translate-y-0 cursor-pointer shadow-gold-glow mt-1 disabled:opacity-60"
               type="submit"
               disabled={loading}
             >
@@ -356,7 +430,7 @@ export default function LoginPage() {
                 type="button"
                 onClick={handleGoogleSignIn}
                 disabled={loading}
-                className="flex items-center justify-center gap-3 w-full py-2.5 rounded-lg text-sm font-semibold border-[1.5px] border-border bg-card text-text transition-all hover:bg-card-alt hover:border-accent/40 active:scale-[0.99] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center justify-center gap-3 w-full min-h-[48px] py-3 rounded-xl text-[15px] font-semibold border-[1.5px] border-border bg-card text-text transition-all hover:bg-card-alt hover:border-accent/40 active:scale-[0.99] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {/* Google SVG */}
                 <svg width="18" height="18" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
@@ -373,7 +447,7 @@ export default function LoginPage() {
                 type="button"
                 onClick={handleGithubSignIn}
                 disabled={loading}
-                className="flex items-center justify-center gap-3 w-full py-2.5 rounded-lg text-sm font-semibold border-[1.5px] border-border bg-card text-text transition-all hover:bg-card-alt hover:border-accent/40 active:scale-[0.99] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center justify-center gap-3 w-full min-h-[48px] py-3 rounded-xl text-[15px] font-semibold border-[1.5px] border-border bg-card text-text transition-all hover:bg-card-alt hover:border-accent/40 active:scale-[0.99] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {/* GitHub SVG */}
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
@@ -387,7 +461,7 @@ export default function LoginPage() {
                 type="button"
                 onClick={handleMicrosoftSignIn}
                 disabled={loading}
-                className="flex items-center justify-center gap-3 w-full py-2.5 rounded-lg text-sm font-semibold border-[1.5px] border-border bg-card text-text transition-all hover:bg-card-alt hover:border-accent/40 active:scale-[0.99] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center justify-center gap-3 w-full min-h-[48px] py-3 rounded-xl text-[15px] font-semibold border-[1.5px] border-border bg-card text-text transition-all hover:bg-card-alt hover:border-accent/40 active:scale-[0.99] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {/* Microsoft SVG */}
                 <svg width="18" height="18" viewBox="0 0 23 23" xmlns="http://www.w3.org/2000/svg">
@@ -400,18 +474,18 @@ export default function LoginPage() {
               </button>
             </div>
 
-            <div className="text-center mt-2 flex flex-col gap-2">
+            <div className="text-center mt-2 flex flex-col gap-1">
               <button
-                className="bg-transparent text-xs font-bold text-accent hover:underline cursor-pointer inline-block mx-auto"
+                className="bg-transparent min-h-[44px] px-4 text-[13px] font-bold text-accent hover:underline cursor-pointer inline-block mx-auto"
                 type="button"
                 onClick={() => switchView('forgot')}
               >
                 Forgot password?
               </button>
-              <span className="text-xs text-text-muted">
+              <span className="text-[13px] text-text-muted">
                 Don&apos;t have an account?{' '}
                 <button
-                  className="bg-transparent font-bold text-accent hover:underline cursor-pointer"
+                  className="bg-transparent min-h-[44px] px-1 font-bold text-accent hover:underline cursor-pointer"
                   type="button"
                   onClick={() => switchView('signup')}
                 >
@@ -447,11 +521,14 @@ export default function LoginPage() {
 
         {view === 'forgot' && (
           <form className="flex flex-col gap-4" onSubmit={handleForgotSubmitEmail}>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-extrabold tracking-wide text-text-muted">Email Address</label>
+            <div className="flex flex-col gap-1.5 min-w-0">
+              <label htmlFor="forgot-email" className="text-xs font-extrabold tracking-wide text-text-muted">Email Address</label>
               <input
-                className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
+                id="forgot-email"
+                className="w-full px-4 min-h-[48px] rounded-xl border-[1.5px] border-border bg-input text-text text-base outline-none transition-all focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/40"
                 type="email"
+                autoComplete="email"
+                inputMode="email"
                 value={forgotEmail}
                 onChange={(e) => setForgotEmail(e.target.value)}
                 placeholder="you@example.com"
@@ -459,15 +536,15 @@ export default function LoginPage() {
               />
             </div>
             <button
-              className="w-full py-3 rounded-lg text-sm font-bold bg-accent text-[var(--btn-text)] transition-all hover:bg-accent-hover active:translate-y-0 cursor-pointer shadow-gold-glow mt-2"
+              className="w-full min-h-[52px] py-3 rounded-xl text-[15px] font-bold bg-accent text-[var(--btn-text)] transition-all hover:bg-accent-hover active:translate-y-0 cursor-pointer shadow-gold-glow mt-1 disabled:opacity-60"
               type="submit"
               disabled={loading}
             >
               {loading ? 'Looking up...' : 'Continue'}
             </button>
-            <div className="text-center mt-2">
+            <div className="text-center mt-1">
               <button
-                className="bg-transparent text-xs font-bold text-accent hover:underline cursor-pointer"
+                className="bg-transparent min-h-[44px] px-4 text-[13px] font-bold text-accent hover:underline cursor-pointer"
                 type="button"
                 onClick={() => switchView('login')}
               >
@@ -494,6 +571,8 @@ export default function LoginPage() {
             switchView={switchView}
           />
         )}
+        </div>
+        </div>
       </div>
       {error && <Toast message={error} onClose={() => setError('')} />}
       {success && <Toast message={success} onClose={() => setSuccess('')} />}

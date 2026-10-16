@@ -140,6 +140,393 @@
     --lp-outline-variant: #e4e4e7;
 }
 
+/* -------- VikaTech PG component tokens (global, both themes) --------
+   Reusable surface/ink/accent tokens for PG components, which render on
+   desktop AND mobile. Light values by default, deep-forest dark values
+   under data-theme="dark". The full app-shell palette stays scoped to
+   body.pg-shell (desktop >=1024px) below. */
+:root {
+    --pg-card: #FFFFFF;
+    --pg-ink: #202522;
+    --pg-muted: #69736D;
+    --pg-line: #E5E9E5;
+    --pg-faint: #EDF2ED;
+    --pg-deep: #063B20;
+    --pg-brand: #087443;
+    --pg-brand-hover: #063B20;
+    --pg-onbrand: #FFFFFF;
+    --pg-side: #EFF3EF;
+    --pg-navtext: #43503F;
+    --pg-nav-active-bg: rgba(207, 255, 121, 0.5);
+    --pg-nav-active-text: #063B20;
+    --pg-success: #16834A;
+    --pg-track: #D8DED8;
+    --pg-track-hover: #C4CFC4;
+    --pg-brand-line: rgba(8, 116, 67, 0.4);
+    --pg-brand-soft: rgba(8, 116, 67, 0.2);
+    --pg-brand-faint: rgba(8, 116, 67, 0.08);
+    --pg-brand-ghost: rgba(8, 116, 67, 0.06);
+    --pg-error: #DC4545;
+    --pg-error-faint: rgba(220, 69, 69, 0.1);
+    --pg-error-line: rgba(220, 69, 69, 0.2);
+    --pg-tile-ico: #CFFF79;
+}
+html[data-theme="dark"] {
+    --pg-card: #101A13;
+    --pg-ink: #EAF3EA;
+    --pg-muted: #93A393;
+    --pg-line: #223026;
+    --pg-faint: #16241A;
+    --pg-deep: #EAF3EA;
+    --pg-brand: #43A865;
+    --pg-brand-hover: #5CC578;
+    --pg-onbrand: #062012;
+    --pg-side: #0D150F;
+    --pg-navtext: #A9BCA9;
+    --pg-nav-active-bg: rgba(207, 255, 121, 0.16);
+    --pg-nav-active-text: #CFFF79;
+    --pg-success: #4ADE80;
+    --pg-track: #2A3A2E;
+    --pg-track-hover: #35473A;
+    --pg-brand-line: rgba(67, 168, 101, 0.45);
+    --pg-brand-soft: rgba(67, 168, 101, 0.25);
+    --pg-brand-faint: rgba(67, 168, 101, 0.12);
+    --pg-brand-ghost: rgba(67, 168, 101, 0.08);
+    --pg-error: #F06666;
+    --pg-error-faint: rgba(240, 102, 102, 0.12);
+    --pg-error-line: rgba(240, 102, 102, 0.25);
+    --pg-tile-ico: #CFFF79;
+}
+
+/* -------- VikaTech Smart PG desktop shell palette --------
+   App-wide tokens scoped to body.pg-shell (viewports >=1024px). Toggles
+   with ThemeToggle between the light and deep-forest dark variants. */
+html[data-theme="light"] body.pg-shell {
+    --bg: #F5F7F5;
+    --bg-card: #FFFFFF;
+    --bg-card-alt: #EDF2ED;
+    --bg-input: #FFFFFF;
+    --bg-header: rgba(245, 247, 245, 0.9);
+    --text: #202522;
+    --text-muted: #69736D;
+    --accent: #087443;
+    --accent-hover: #063B20;
+    --accent-bg: rgba(8, 116, 67, 0.08);
+    --accent-glow: rgba(8, 116, 67, 0.16);
+    --border: #E5E9E5;
+    --toggle-track: #D8DED8;
+    --toggle-on: #087443;
+    --shadow: rgba(32, 37, 34, 0.06);
+    --on-bg: rgba(8, 116, 67, 0.08);
+    --on-border: rgba(8, 116, 67, 0.3);
+    --divider: #E5E9E5;
+    --auth-bg: #F5F7F5;
+    --auth-card: #FFFFFF;
+    --card-shadow: 0 1px 3px rgba(32, 37, 34, 0.07);
+    --gold-glow: 0 1px 2px rgba(6, 59, 32, 0.1);
+    --btn-text: #FFFFFF;
+    --pg-lime: #CFFF79;
+    --pg-forest: #063B20;
+    --pg-error: #DC4545;
+}
+
+/* -------- VikaTech Smart PG dark theme (deep forest) --------
+   Same component tokens, dark values — ThemeToggle switches between
+   the two designed themes instead of breaking the layout. */
+html[data-theme="dark"] body.pg-shell {
+    --bg: #0B120D;
+    --bg-card: #101A13;
+    --bg-card-alt: #16241A;
+    --bg-input: #101A13;
+    --bg-header: rgba(11, 18, 13, 0.9);
+    --text: #EAF3EA;
+    --text-muted: #93A393;
+    --accent: #43A865;
+    --accent-hover: #5CC578;
+    --accent-bg: rgba(67, 168, 101, 0.12);
+    --accent-glow: rgba(67, 168, 101, 0.2);
+    --border: #223026;
+    --toggle-track: #2A3A2E;
+    --toggle-on: #43A865;
+    --shadow: rgba(0, 0, 0, 0.4);
+    --on-bg: rgba(67, 168, 101, 0.12);
+    --on-border: rgba(67, 168, 101, 0.35);
+    --divider: #223026;
+    --auth-bg: #0B120D;
+    --auth-card: #101A13;
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --gold-glow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --btn-text: #062012;
+    --pg-lime: #CFFF79;
+    --pg-forest: #EAF3EA;
+    --pg-error: #F06666;
+    /* Desktop dark topbar: pure black, not green-tinted. */
+    --bg-header: rgba(0, 0, 0, 0.92);
+}
+
+/* -------- Mobile warm minimal theme (terracotta + sage) --------
+   body.m-shell is applied below 1024px: a bright premium mobile design
+   that stays bright in both data-themes. Desktop (.pg-shell) untouched. */
+body.m-shell {
+    --bg: #F5F3EF;
+    --bg-card: #FFFFFF;
+    --bg-card-alt: #F0EEE9;
+    --bg-input: #FFFFFF;
+    --bg-header: rgba(245, 243, 239, 0.92);
+    --text: #26382C;
+    --text-muted: #858780;
+    --accent: #A86F3D;
+    --accent-hover: #8F5C30;
+    --accent-bg: #E4ECE4;
+    --accent-glow: rgba(168, 111, 61, 0.16);
+    --border: #E8E5DF;
+    --toggle-track: #E0DCD4;
+    --toggle-on: #A86F3D;
+    --btn-text: #FFFFFF;
+    --gold-glow: 0 4px 14px rgba(168, 111, 61, 0.12);
+    --card-shadow: 0 1px 3px rgba(38, 56, 44, 0.06);
+    --shadow: rgba(38, 56, 44, 0.08);
+    --on-bg: rgba(168, 111, 61, 0.1);
+    --on-border: rgba(168, 111, 61, 0.3);
+    --divider: #E8E5DF;
+    --auth-bg: #F5F3EF;
+    --auth-card: #FFFFFF;
+    --pg-card: #FFFFFF;
+    --pg-ink: #26382C;
+    --pg-muted: #858780;
+    --pg-line: #E8E5DF;
+    --pg-faint: #E4ECE4;
+    --pg-deep: #26382C;
+    --pg-brand: #A86F3D;
+    --pg-brand-hover: #8F5C30;
+    --pg-onbrand: #FFFFFF;
+    --pg-side: #F0EEE9;
+    --pg-navtext: #5A6157;
+    --pg-nav-active-bg: rgba(168, 111, 61, 0.12);
+    --pg-nav-active-text: #A86F3D;
+    --pg-success: #39845A;
+    --pg-track: #E3DED4;
+    --pg-track-hover: #D5CFC1;
+    --pg-brand-line: rgba(168, 111, 61, 0.4);
+    --pg-brand-soft: rgba(168, 111, 61, 0.22);
+    --pg-brand-faint: rgba(168, 111, 61, 0.1);
+    --pg-brand-ghost: rgba(168, 111, 61, 0.06);
+    --pg-error: #D94B4B;
+    --pg-error-faint: rgba(217, 75, 75, 0.1);
+    --pg-error-line: rgba(217, 75, 75, 0.22);
+    --pg-tile-ico: #FFFFFF;
+    /* Sans-serif product type on mobile; mono kept for data values. */
+    --font-body-md: var(--font-sora), 'Sora', sans-serif;
+    --font-body-lg: var(--font-sora), 'Sora', sans-serif;
+    --font-label-caps: var(--font-sora), 'Sora', sans-serif;
+}
+
+/* Mobile dark-warm theme: ThemeToggle works on mobile too, switching
+   between the bright warm design above and this cozy dark variant. */
+html[data-theme="dark"] body.m-shell {
+    --bg: #171310;
+    --bg-card: #221D16;
+    --bg-card-alt: #2A231B;
+    --bg-input: #221D16;
+    --bg-header: rgba(23, 19, 16, 0.92);
+    --text: #F2EDE3;
+    --text-muted: #A39E93;
+    --accent: #D99A5B;
+    --accent-hover: #E8B07A;
+    --accent-bg: rgba(217, 154, 91, 0.12);
+    --accent-glow: rgba(217, 154, 91, 0.2);
+    --border: #38322A;
+    --toggle-track: #3A342C;
+    --toggle-on: #D99A5B;
+    --btn-text: #241708;
+    --gold-glow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow: rgba(0, 0, 0, 0.4);
+    --on-bg: rgba(217, 154, 91, 0.12);
+    --on-border: rgba(217, 154, 91, 0.35);
+    --divider: #38322A;
+    --auth-bg: #171310;
+    --auth-card: #221D16;
+    --pg-card: #221D16;
+    --pg-ink: #F2EDE3;
+    --pg-muted: #A39E93;
+    --pg-line: #38322A;
+    --pg-faint: #2C2620;
+    --pg-deep: #F2EDE3;
+    --pg-brand: #D99A5B;
+    --pg-brand-hover: #E8B07A;
+    --pg-onbrand: #241708;
+    --pg-side: #1D1813;
+    --pg-navtext: #B7AFA2;
+    --pg-nav-active-bg: rgba(217, 154, 91, 0.16);
+    --pg-nav-active-text: #E8B07A;
+    --pg-success: #62A875;
+    --pg-track: #38322A;
+    --pg-track-hover: #453D32;
+    --pg-brand-line: rgba(217, 154, 91, 0.45);
+    --pg-brand-soft: rgba(217, 154, 91, 0.25);
+    --pg-brand-faint: rgba(217, 154, 91, 0.12);
+    --pg-brand-ghost: rgba(217, 154, 91, 0.08);
+    --pg-error: #E06A6A;
+    --pg-error-faint: rgba(224, 106, 106, 0.12);
+    --pg-error-line: rgba(224, 106, 106, 0.25);
+    --pg-tile-ico: #E8B07A;
+}
+
+/* Mobile top header: clear the notch. */
+body.m-shell header.fixed.top-0 {
+    padding-top: env(safe-area-inset-top);
+    height: auto;
+    min-height: 3.5rem;
+}
+
+/* Mobile bottom nav: light bar, terracotta active dot, safe-area aware. */
+body.m-shell nav.fixed.bottom-0 {
+    background: rgba(255, 255, 255, 0.94);
+    border-top: 1px solid var(--border);
+    height: auto;
+    min-height: 4rem;
+    padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 -4px 16px rgba(38, 56, 44, 0.06);
+}
+html[data-theme="dark"] body.m-shell nav.fixed.bottom-0 {
+    background: rgba(34, 29, 22, 0.94);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.4);
+}
+body.m-shell nav.fixed.bottom-0 .text-accent {
+    position: relative;
+}
+body.m-shell nav.fixed.bottom-0 .text-accent::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -1px;
+    width: 4px;
+    height: 4px;
+    border-radius: 999px;
+    background: #A86F3D;
+    transform: translateX(-50%);
+}
+html[data-theme="dark"] body.m-shell nav.fixed.bottom-0 .text-accent::after {
+    background: #D99A5B;
+}
+
+/* Voice mic on mobile: flat terracotta disc, no neon glow. */
+body.m-shell #voice-control-mic-btn {
+    background: #A86F3D;
+    box-shadow: 0 6px 18px rgba(168, 111, 61, 0.35);
+}
+html[data-theme="dark"] body.m-shell #voice-control-mic-btn {
+    background: #D99A5B;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+/* -------- Overview summary cards --------
+   Only the status VALUE carries state color (green Normal / red
+   Attention). Labels and supporting lines stay neutral in every theme. */
+.ov-label,
+.ov-sub {
+    color: #69736D;
+}
+html[data-theme="dark"] .ov-label,
+html[data-theme="dark"] .ov-sub {
+    color: #93A393;
+}
+
+/* PG shell polish: readable focus, calm scrollbars, restrained motion */
+body.pg-shell :focus-visible {
+    outline: 2px solid #087443;
+    outline-offset: 2px;
+}
+body.pg-shell ::-webkit-scrollbar-thumb {
+    background: #C4CFC4;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+body.pg-shell * {
+    scrollbar-color: #C4CFC4 transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+    body.pg-shell *, body.pg-shell *::before, body.pg-shell *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* -------- Desktop right-drawer for site modals --------
+   Every dialog backdrop in the app uses a translucent black fixed layer
+   (bg-black/xx); the Loader uses a solid bg and is excluded. On desktop
+   (>=1024px) dialogs dock to the right as a sidebar panel instead of a
+   centered card. Mobile bottom-sheets (max-md:*) are untouched. */
+@keyframes pg-drawer-in {
+    from { transform: translateX(48px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+/* Drag-to-close grabber pill (pure CSS, always visible like the
+   reference sheet). The drag gesture itself is wired by
+   PGDrawerEnhancer from the panel's top strip. */
+@media (min-width: 1024px) {
+    div.fixed[class*="bg-black/"] > div:first-child::before,
+    div.fixed[class*="z-[10000]"] > div:first-child::before {
+        content: "";
+        display: block;
+        width: 48px;
+        height: 5px;
+        border-radius: 999px;
+        background: var(--border);
+        margin: 2px auto 10px;
+        cursor: grab;
+        flex-shrink: 0;
+    }
+    div.fixed[class*="bg-black/"],
+    div.fixed[class*="z-[10000]"] {
+        justify-content: flex-end;
+        align-items: stretch;
+        padding: 0;
+    }
+    div.fixed[class*="bg-black/"] > div:first-child,
+    div.fixed[class*="z-[10000]"] > div:first-child {
+        height: 100%;
+        max-height: none;
+        width: min(420px, 94vw);
+        margin: 0;
+        border-radius: 18px 0 0 18px;
+        border-top: 0;
+        border-bottom: 0;
+        border-right: 0;
+        overflow-y: auto;
+        animation: pg-drawer-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+}
+
+/* Hide scrollbars while keeping scrollability (used via className). */
+.scrollbar-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+    display: none;
+}
+
+/* No visible scrollbars anywhere on Windows: page, drawers, dropdowns,
+   lists, sheets. Wheel / touch / keyboard scrolling keeps working —
+   only the thumb visuals are removed. Placed last so it wins over the
+   themed scrollbar rules above. */
+html, body {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+    display: none;
+}
+*::-webkit-scrollbar {
+    display: none !important;
+}
+* {
+    scrollbar-width: none;
+}
+
 /* Keyframe definitions */
 @keyframes fade-up {
     from {
@@ -162,7 +549,7 @@
 main.animate-fade-in > div > section:first-of-type > div:last-child {
   max-height: 560px;
   overflow: auto;
-  scrollbar-width: thin;
+  scrollbar-width: none;
 }
 
 main.animate-fade-in > div > section:first-of-type thead {
@@ -274,17 +661,18 @@ body,
     transition: background-color 0.35s ease, color 0.35s ease, border-color 0.35s ease;
 }
 
-/* Scrollbar styles matching esp.css */
+/* Scrollbars are hidden globally (see the no-scrollbar block above);
+   these selectors are intentionally left empty so no white thumb can
+   reappear on Windows. */
 ::-webkit-scrollbar {
-    width: 6px;
-    height: 5px;
+    display: none;
 }
 ::-webkit-scrollbar-track {
     background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-    background: #ffffff;
-    border-radius: 6px;
+    background: transparent;
+    border: none;
 }
 
 /* Scoped Landing Page Utilities */
@@ -325,19 +713,87 @@ body,
     }
 }
 
+/* -------- Login brand panel: fixed dark surface in every theme --------
+   Must sit AFTER the light-theme overrides above. The global
+   `[data-theme="light"] h1..h6, .text-white { color: ... !important }`
+   rule was forcing this dark panel's heading black-on-dark.
+   Higher specificity + later position wins it back. */
+.login-brand {
+    background-color: #0c1118;
+    color: #ffffff;
+}
+.login-brand .login-brand-title { color: #ffffff; }
+.login-brand .login-brand-kicker { color: #4ade80; }
+.login-brand .login-brand-sub { color: rgba(255, 255, 255, 0.7); }
+.login-brand .login-brand-list { color: rgba(255, 255, 255, 0.85); }
+.login-brand .login-brand-back { color: rgba(255, 255, 255, 0.8); }
+.login-brand .login-brand-foot { color: rgba(255, 255, 255, 0.4); }
+.login-brand .login-brand-icon-1 { color: #fbbf24; background-color: rgba(251, 191, 36, 0.1); border-color: rgba(251, 191, 36, 0.25); }
+.login-brand .login-brand-icon-2 { color: #38bdf8; background-color: rgba(56, 189, 248, 0.1); border-color: rgba(56, 189, 248, 0.25); }
+.login-brand .login-brand-icon-3 { color: #a78bfa; background-color: rgba(167, 139, 250, 0.1); border-color: rgba(167, 139, 250, 0.25); }
+[data-theme="light"] .login-brand,
+[data-theme="light"] .login-brand h2,
+[data-theme="light"] .login-brand p,
+[data-theme="light"] .login-brand li,
+[data-theme="light"] .login-brand a,
+[data-theme="light"] .login-brand span {
+    color: #ffffff !important;
+}
+[data-theme="light"] .login-brand .login-brand-kicker {
+    color: #4ade80 !important;
+}
+[data-theme="light"] .login-brand .login-brand-icon-1 {
+    color: #fbbf24 !important;
+    background-color: rgba(251, 191, 36, 0.1) !important;
+    border-color: rgba(251, 191, 36, 0.25) !important;
+}
+[data-theme="light"] .login-brand .login-brand-icon-2 {
+    color: #38bdf8 !important;
+    background-color: rgba(56, 189, 248, 0.1) !important;
+    border-color: rgba(56, 189, 248, 0.25) !important;
+}
+[data-theme="light"] .login-brand .login-brand-icon-3 {
+    color: #a78bfa !important;
+    background-color: rgba(167, 139, 250, 0.1) !important;
+    border-color: rgba(167, 139, 250, 0.25) !important;
+}
+[data-theme="light"] .login-brand .login-brand-sub {
+    color: rgba(255, 255, 255, 0.7) !important;
+}
+[data-theme="light"] .login-brand .login-brand-list {
+    color: rgba(255, 255, 255, 0.85) !important;
+}
+[data-theme="light"] .login-brand .login-brand-back {
+    color: rgba(255, 255, 255, 0.8) !important;
+}
+[data-theme="light"] .login-brand .login-brand-foot {
+    color: rgba(255, 255, 255, 0.4) !important;
+}
+
 /* -------- Premium Dashboard Spacious Container -------- */
 .dashboard-container {
     margin-left: auto;
     margin-right: auto;
     width: min(100% - 48px, 1280px);
-    padding-top: 104px;
+    padding-top: 88px;
     padding-bottom: 32px;
+}
+
+/* Desktop density: use the available width on wide screens instead of
+   centering a narrow column in a void (responsive-craft structural layer). */
+@media (min-width: 1280px) {
+    .dashboard-container {
+        width: min(100% - 64px, 1440px);
+        padding-top: 84px;
+    }
 }
 
 @media (max-width: 768px) {
     .dashboard-container {
         width: min(100% - 24px, 620px);
         padding-top: 92px;
+        /* Keep content clear of the bottom nav + home indicator. */
+        padding-bottom: calc(48px + env(safe-area-inset-bottom));
     }
 }
 
@@ -368,8 +824,8 @@ body {
     background-clip: padding-box;
 }
 * {
-    scrollbar-width: thin;
-    scrollbar-color: #ffffff transparent;
+    scrollbar-width: none;
+    scrollbar-color: transparent transparent;
 }
 
 /* Voice agent motion: calm idle breathing and an energetic listening state. */

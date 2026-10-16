@@ -18,6 +18,18 @@ export default function LandingPage() {
   const [cartPop, setCartPop] = useState(false);
   const [cartShake, setCartShake] = useState(false);
   const [flyItem, setFlyItem] = useState(null);
+  const [activeNav, setActiveNav] = useState('home');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  const NAV_ITEMS = [
+    { id: 'home', label: 'Home', target: 'top' },
+    { id: 'commercial', label: 'Commercial', target: 'commercial' },
+    { id: 'v4', label: 'The V4', target: 'v4' },
+    { id: 'dual-plane', label: 'Dual-Plane', target: 'dual-plane' },
+    { id: 'showcase3d', label: '3D Explorer', target: 'showcase3d' },
+    { id: 'analytics', label: 'Analytics', target: 'analytics' },
+    { id: 'journey', label: 'Our Journey', target: 'journey' },
+  ];
 
   // Cart add-to-cart handler with fly-to-cart animation
   const handleAddToCart = (e, navigateTo) => {
@@ -44,11 +56,51 @@ export default function LandingPage() {
 
   // Smooth scroll helper
   const handleScroll = (id) => {
+    setActiveNav(id === 'top' ? 'home' : id);
+    setMobileNavOpen(false);
+    if (id === 'top') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     const el = document.getElementById(id);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth' });
     }
   };
+
+  // Scroll-spy: underline the nav item of the section currently in view.
+  useEffect(() => {
+    const sectionIds = ['commercial', 'v4', 'dual-plane', 'showcase3d', 'analytics', 'journey'];
+    const onScrollTop = () => {
+      if (window.scrollY < 150) setActiveNav((prev) => (prev === 'home' ? prev : 'home'));
+    };
+    onScrollTop();
+    window.addEventListener('scroll', onScrollTop, { passive: true });
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) setActiveNav(entry.target.id);
+        });
+      },
+      { rootMargin: '-40% 0px -55% 0px', threshold: 0 }
+    );
+    sectionIds.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) observer.observe(el);
+    });
+    return () => {
+      window.removeEventListener('scroll', onScrollTop);
+      observer.disconnect();
+    };
+  }, []);
+
+  const navLinkClass = (id) =>
+    `relative pb-1 cursor-pointer transition-colors after:absolute after:left-0 after:bottom-0 after:h-[2px] after:bg-lp-primary-container after:transition-all after:duration-300 ${
+      activeNav === id
+        ? 'text-lp-primary font-bold after:w-full'
+        : 'text-lp-secondary hover:text-lp-primary after:w-0 hover:after:w-full'
+    }`;
 
   // Social share helper
   const handleShare = async () => {
@@ -77,29 +129,40 @@ export default function LandingPage() {
 
       {/* Top Navbar */}
       <header className="fixed top-0 w-full z-50 flex justify-between items-center px-4 md:px-6 py-3 md:py-4 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant">
-        <div className="text-base md:text-xl font-headline-md font-black tracking-tighter text-white uppercase select-none">
-          VIKA TECH
+        <div className="flex items-center gap-2 min-w-0">
+          {/* Mobile hamburger — 44px touch target */}
+          <button
+            onClick={() => setMobileNavOpen((v) => !v)}
+            aria-label={mobileNavOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={mobileNavOpen}
+            className="md:hidden w-11 h-11 -ml-1 rounded-lg border border-lp-outline-variant bg-lp-surface-low/60 flex items-center justify-center text-white active:scale-95 cursor-pointer shrink-0"
+          >
+            <span className="material-symbols-outlined text-xl">{mobileNavOpen ? 'close' : 'menu'}</span>
+          </button>
+          <div className="text-base md:text-xl font-headline-md font-black tracking-tighter text-white uppercase select-none truncate">
+            VIKA TECH
+          </div>
         </div>
         <nav className="hidden md:flex gap-8 font-label-caps text-[12px] tracking-tight items-center">
-          <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="text-lp-primary font-bold border-b-2 border-lp-primary-container pb-1 cursor-pointer">
+          <button onClick={() => handleScroll('top')} className={navLinkClass('home')}>
             Home
           </button>
-          <button onClick={() => handleScroll('commercial')} className="text-lp-secondary hover:text-lp-primary transition-colors cursor-pointer">
+          <button onClick={() => handleScroll('commercial')} className={navLinkClass('commercial')}>
             Commercial
           </button>
-          <button onClick={() => handleScroll('v4')} className="text-lp-secondary hover:text-lp-primary transition-colors cursor-pointer">
+          <button onClick={() => handleScroll('v4')} className={navLinkClass('v4')}>
             The V4
           </button>
-          <button onClick={() => handleScroll('dual-plane')} className="text-lp-secondary hover:text-lp-primary transition-colors cursor-pointer">
+          <button onClick={() => handleScroll('dual-plane')} className={navLinkClass('dual-plane')}>
             Dual-Plane
           </button>
-          <button onClick={() => handleScroll('showcase3d')} className="text-lp-secondary hover:text-lp-primary transition-colors cursor-pointer">
+          <button onClick={() => handleScroll('showcase3d')} className={navLinkClass('showcase3d')}>
             3D Explorer
           </button>
-          <button onClick={() => handleScroll('analytics')} className="text-lp-secondary hover:text-lp-primary transition-colors cursor-pointer">
+          <button onClick={() => handleScroll('analytics')} className={navLinkClass('analytics')}>
             Analytics
           </button>
-          <button onClick={() => handleScroll('journey')} className="text-lp-secondary hover:text-lp-primary transition-colors cursor-pointer">
+          <button onClick={() => handleScroll('journey')} className={navLinkClass('journey')}>
             Our Journey
           </button>
         </nav>
@@ -131,6 +194,62 @@ export default function LandingPage() {
         </div>
       </header>
 
+      {/* Mobile nav drawer — mobile only, desktop untouched */}
+      {mobileNavOpen && (
+        <div className="md:hidden fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="Site navigation">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setMobileNavOpen(false)}
+          />
+          <nav className="absolute top-[64px] left-2 right-2 rounded-2xl border border-lp-outline-variant bg-lp-surface-lowest/95 backdrop-blur-xl shadow-2xl p-2 max-h-[70svh] overflow-y-auto">
+            {NAV_ITEMS.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => handleScroll(item.target)}
+                className={`w-full min-h-[48px] flex items-center justify-between px-4 py-3 rounded-xl font-label-caps text-[13px] tracking-wide transition-colors cursor-pointer ${
+                  activeNav === item.id
+                    ? 'bg-lp-primary-container/10 text-lp-primary font-bold'
+                    : 'text-lp-on-surface-variant hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                <span className="flex items-center gap-3">
+                  <span
+                    className={`h-5 w-1 rounded-full ${activeNav === item.id ? 'bg-lp-primary-container' : 'bg-transparent'}`}
+                  />
+                  {item.label}
+                </span>
+                <span className="material-symbols-outlined text-base opacity-60">arrow_forward</span>
+              </button>
+            ))}
+            <button
+              onClick={() => router.push('/login')}
+              className="w-full min-h-[48px] mt-2 px-4 py-3 rounded-xl border border-lp-primary-container/40 text-lp-primary font-label-caps text-[13px] font-bold hover:bg-lp-primary-container/10 transition-all cursor-pointer"
+            >
+              Login
+            </button>
+          </nav>
+        </div>
+      )}
+
+      {/* Mobile quick section chips — horizontal scroll, mobile only */}
+      <div className="md:hidden fixed top-[64px] left-0 right-0 z-30 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant/60">
+        <div className="flex gap-2 overflow-x-auto px-3 py-2 scrollbar-none" style={{ scrollbarWidth: 'none' }}>
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => handleScroll(item.target)}
+              className={`shrink-0 min-h-[36px] px-3.5 rounded-full border text-[11px] font-label-caps font-bold whitespace-nowrap transition-all cursor-pointer ${
+                activeNav === item.id
+                  ? 'bg-lp-primary-container text-lp-on-primary-container border-lp-primary-container'
+                  : 'bg-lp-surface-low text-lp-on-surface-variant border-lp-outline-variant'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {flyItem && (
         <span
           key={flyItem.id}
@@ -145,34 +264,34 @@ export default function LandingPage() {
       )}
       <CursorGlow />
 
-      <main className="pt-20">
+      <main className="pt-28 md:pt-20 overflow-x-clip">
 
-        {/* Hero Section */}
-        <section className="relative min-h-[85vh] flex flex-col items-center justify-center overflow-hidden px-6 lg:px-24">
+        {/* Hero Section — svh fallback per responsive-craft (100vh clips on mobile chrome) */}
+        <section className="relative flex flex-col items-center justify-center overflow-hidden px-5 md:px-6 lg:px-24 min-h-[85vh] md:min-h-[85vh] py-10 md:py-0" style={{ minHeight: '92svh' }}>
           <div className="absolute inset-0 lp-grid-pattern pointer-events-none"></div>
 
-          <div className="relative z-10 text-center max-w-4xl mx-auto pt-12">
-            <div className="inline-block px-3 py-1 mb-6 border border-lp-primary-container/30 bg-lp-primary-container/5 rounded-full">
+          <div className="relative z-10 text-center max-w-4xl mx-auto pt-8 md:pt-12 min-w-0">
+            <div className="inline-block px-3 py-1 mb-5 md:mb-6 border border-lp-primary-container/30 bg-lp-primary-container/5 rounded-full">
               <span className="font-label-caps text-[10px] text-lp-primary-container tracking-[0.2em] uppercase">Enterprise IoT Architecture</span>
             </div>
-            <h1 className="font-display-lg text-[48px] leading-tight md:text-[64px] text-white mb-6 font-extrabold">
+            <h1 className="font-display-lg font-extrabold text-white mb-5 md:mb-6 leading-[1.1] text-[32px] sm:text-[40px] md:text-[64px]">
               Automate Your Space.<br />
               <span className="text-lp-primary-container">Optimize Your Energy.</span>
             </h1>
-            <p className="font-body-lg text-lp-secondary max-w-2xl mx-auto mb-10 opacity-80 leading-relaxed text-sm md:text-base">
+            <p className="font-body-lg text-lp-secondary max-w-2xl mx-auto mb-8 md:mb-10 opacity-80 leading-relaxed text-[15px] md:text-base px-1">
               Distributed smart architecture for modern homes and data-driven commercial operations. Experience the power of V4 hardware precision.
             </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <div className="flex flex-col sm:flex-row gap-3 md:gap-4 justify-center px-1">
               <button
                 onClick={() => handleScroll('commercial')}
-                className="px-8 py-4 bg-lp-primary-container text-lp-on-primary-container font-label-caps font-bold text-sm flex items-center justify-center gap-2 group cursor-pointer hover:shadow-[0_0_20px_rgba(0,255,65,0.45)] transition-all rounded"
+                className="w-full sm:w-auto min-h-[52px] px-8 py-4 bg-lp-primary-container text-lp-on-primary-container font-label-caps font-bold text-sm flex items-center justify-center gap-2 group cursor-pointer hover:shadow-[0_0_20px_rgba(0,255,65,0.45)] transition-all rounded"
               >
                 Book a Commercial Demo
                 <span className="material-symbols-outlined text-sm group-hover:translate-x-1 transition-transform">arrow_forward</span>
               </button>
               <button
                 onClick={() => handleScroll('showcase3d')}
-                className="px-8 py-4 border border-lp-outline text-on-surface font-label-caps text-sm hover:bg-white/5 transition-all cursor-pointer rounded text-white"
+                className="w-full sm:w-auto min-h-[52px] px-8 py-4 border border-lp-outline text-on-surface font-label-caps text-sm hover:bg-white/5 transition-all cursor-pointer rounded text-white flex items-center justify-center"
               >
                 Explore 3D Models
               </button>
@@ -181,14 +300,14 @@ export default function LandingPage() {
         </section>
 
         {/* Dual Target Split */}
-        <section className="flex flex-col md:flex-row border-y border-lp-outline-variant min-h-[60vh]">
+        <section className="flex flex-col md:flex-row border-y border-lp-outline-variant md:min-h-[60vh]">
           {/* Homeowners */}
-          <div className="flex-1 p-12 md:p-20 bg-lp-surface-low border-r border-lp-outline-variant group relative overflow-hidden flex flex-col justify-center">
+          <div className="flex-1 p-6 sm:p-8 md:p-20 bg-lp-surface-low border-b md:border-b-0 md:border-r border-lp-outline-variant group relative overflow-hidden flex flex-col justify-center min-w-0">
             <div className="relative z-10">
-              <span className="font-label-caps text-xs text-lp-primary mb-4 block">FOR INDIVIDUALS</span>
-              <h2 className="font-headline-md text-3xl mb-6 font-extrabold text-white">Home Automation<br /><span className="text-lp-secondary">Without the Mess.</span></h2>
-              <p className="font-body-md text-lp-on-surface-variant mb-8 max-w-md text-sm leading-relaxed">Focus on day-to-day convenience, aesthetics, and reliability. Our V4 architecture ensures your house stays clean with no bulky central hub wiring or complex server racks.</p>
-              <ul className="space-y-4 mb-10 text-sm">
+              <span className="font-label-caps text-xs text-lp-primary mb-3 md:mb-4 block">FOR INDIVIDUALS</span>
+              <h2 className="font-headline-md text-2xl md:text-3xl mb-4 md:mb-6 font-extrabold text-white">Home Automation<br /><span className="text-lp-secondary">Without the Mess.</span></h2>
+              <p className="font-body-md text-lp-on-surface-variant mb-6 md:mb-8 max-w-md text-[15px] md:text-sm leading-relaxed">Focus on day-to-day convenience, aesthetics, and reliability. Our V4 architecture ensures your house stays clean with no bulky central hub wiring or complex server racks.</p>
+              <ul className="space-y-3 md:space-y-4 mb-8 md:mb-10 text-sm">
                 <li className="flex items-center gap-3 font-data-point text-white">
                   <span className="material-symbols-outlined text-lp-primary-container text-lg">check_circle</span> Zero Hub Latency
                 </li>
@@ -208,12 +327,12 @@ export default function LandingPage() {
             </div>
           </div>
           {/* Commercial */}
-          <div className="flex-1 p-12 md:p-20 bg-lp-surface-lowest group relative overflow-hidden flex flex-col justify-center" id="commercial">
+          <div className="flex-1 p-6 sm:p-8 md:p-20 bg-lp-surface-lowest group relative overflow-hidden flex flex-col justify-center min-w-0" id="commercial">
             <div className="relative z-10">
-              <span className="font-label-caps text-xs text-lp-secondary mb-4 block">FOR ENTERPRISE</span>
-              <h2 className="font-headline-md text-3xl mb-6 font-extrabold text-white">Commercial Operations<br /><span className="text-lp-primary-container">Energy Analytics.</span></h2>
-              <p className="font-body-md text-lp-on-surface-variant mb-8 max-w-md text-sm leading-relaxed">Real-time analytics and automated scheduling to eliminate wasted electricity. Track device on/off times to map store foot-traffic and optimize utility spending.</p>
-              <ul className="space-y-4 mb-10 text-sm">
+              <span className="font-label-caps text-xs text-lp-secondary mb-3 md:mb-4 block">FOR ENTERPRISE</span>
+              <h2 className="font-headline-md text-2xl md:text-3xl mb-4 md:mb-6 font-extrabold text-white">Commercial Operations<br /><span className="text-lp-primary-container">Energy Analytics.</span></h2>
+              <p className="font-body-md text-lp-on-surface-variant mb-6 md:mb-8 max-w-md text-[15px] md:text-sm leading-relaxed">Real-time analytics and automated scheduling to eliminate wasted electricity. Track device on/off times to map store foot-traffic and optimize utility spending.</p>
+              <ul className="space-y-3 md:space-y-4 mb-8 md:mb-10 text-sm">
                 <li className="flex items-center gap-3 font-data-point text-white">
                   <span className="material-symbols-outlined text-lp-primary-container text-lg">monitoring</span> Real-time Foot-traffic Mapping
                 </li>
@@ -235,40 +354,40 @@ export default function LandingPage() {
         </section>
 
         {/* Hardware Advantage Feature Grid */}
-        <section className="py-24 px-6 lg:px-24 bg-lp-surface relative overflow-hidden" id="v4">
+        <section className="py-12 md:py-24 px-5 md:px-6 lg:px-24 bg-lp-surface relative overflow-hidden" id="v4">
           <div className="absolute top-0 right-0 w-1/3 h-1/3 bg-lp-primary-container/5 blur-[120px] rounded-full pointer-events-none"></div>
-          <div className="mb-20">
-            <h2 className="font-headline-md text-4xl mb-4 font-extrabold text-white">The V4 Hardware Advantage</h2>
-            <p className="font-body-md text-lp-on-surface-variant text-sm max-w-2xl leading-relaxed">What you get with every Electric Warriors switchboard — engineered hardware, truthful feedback, and automation that never sleeps.</p>
+          <div className="mb-10 md:mb-20">
+            <h2 className="font-headline-md text-2xl md:text-4xl mb-3 md:mb-4 font-extrabold text-white">The V4 Hardware Advantage</h2>
+            <p className="font-body-md text-lp-on-surface-variant text-[15px] md:text-sm max-w-2xl leading-relaxed">What you get with every Electric Warriors switchboard — engineered hardware, truthful feedback, and automation that never sleeps.</p>
             <div className="w-24 h-1 bg-lp-primary-container mt-4"></div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
             {/* Distributed Architecture */}
-            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
+            <div className="p-5 md:p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
               <span className="material-symbols-outlined text-lp-primary-container text-4xl mb-6 block">account_tree</span>
               <h3 className="font-label-caps text-sm mb-4 tracking-wider uppercase text-white font-bold">Distributed Architecture</h3>
               <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">No central hub. Each switchboard has its own ESP32 communicating via Wi-Fi, drastically reducing wiring costs and eliminating single points of failure.</p>
             </div>
             {/* Fail-Safe Redundancy */}
-            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
+            <div className="p-5 md:p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
               <span className="material-symbols-outlined text-lp-primary-container text-4xl mb-6 block">verified_user</span>
               <h3 className="font-label-caps text-sm mb-4 tracking-wider uppercase text-white font-bold">Fail-Safe Redundancy</h3>
               <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">True bi-directional control. The physical wall switches continue to work flawlessly even if the Wi-Fi drops or the ESP32 chip is damaged.</p>
             </div>
             {/* Infinitely Expandable */}
-            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
+            <div className="p-5 md:p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
               <span className="material-symbols-outlined text-lp-primary-container text-4xl mb-6 block">add_circle</span>
               <h3 className="font-label-caps text-sm mb-4 tracking-wider uppercase text-white font-bold">Infinitely Expandable</h3>
               <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">Powered by shift registers, freeing up GPIO pins for OLED screens, rotary encoders, and motion/mmWave sensors.</p>
             </div>
             {/* Component Agnostic */}
-            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
+            <div className="p-5 md:p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
               <span className="material-symbols-outlined text-lp-primary-container text-4xl mb-6 block">settings_input_component</span>
               <h3 className="font-label-caps text-sm mb-4 tracking-wider uppercase text-white font-bold">Component Agnostic</h3>
               <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">Custom PCB designed to accept any ESP32 variation, protecting your infrastructure against supply chain issues and chip shortages.</p>
             </div>
             {/* Ultra-Low Cost */}
-            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden lg:col-span-2 rounded">
+            <div className="p-5 md:p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden lg:col-span-2 rounded">
               <span className="material-symbols-outlined text-lp-primary-container text-4xl mb-6 block">payments</span>
               <h3 className="font-label-caps text-sm mb-4 tracking-wider uppercase text-white font-bold">Ultra-Low Cost Manufacturing</h3>
               <div className="flex flex-col md:flex-row gap-8 items-start md:items-center">
@@ -279,25 +398,25 @@ export default function LandingPage() {
               </div>
             </div>
             {/* Bi-Directional Control */}
-            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
+            <div className="p-5 md:p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
               <span className="material-symbols-outlined text-lp-primary-container text-4xl mb-6 block">sync_alt</span>
               <h3 className="font-label-caps text-sm mb-4 tracking-wider uppercase text-white font-bold">Bi-Directional Control</h3>
               <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">Flip the physical wall switch and the app updates instantly. Toggle the app and the switch follows. True two-way sync with zero confusion.</p>
             </div>
             {/* AC Current Feedback */}
-            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
+            <div className="p-5 md:p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
               <span className="material-symbols-outlined text-lp-primary-container text-4xl mb-6 block">electric_bolt</span>
               <h3 className="font-label-caps text-sm mb-4 tracking-wider uppercase text-white font-bold">AC Current Feedback</h3>
               <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">Onboard current-sensing circuits confirm the real load state — so the dashboard always shows the truth, even if a device is unplugged or the relay fails.</p>
             </div>
             {/* Real-Time Dashboard */}
-            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
+            <div className="p-5 md:p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
               <span className="material-symbols-outlined text-lp-primary-container text-4xl mb-6 block">dashboard_customize</span>
               <h3 className="font-label-caps text-sm mb-4 tracking-wider uppercase text-white font-bold">Real-Time Web Dashboard</h3>
               <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">Control every node from any browser via low-latency WebSockets. Watch state changes propagate live, from phone, tablet, or desktop.</p>
             </div>
             {/* Offline Smart Schedules */}
-            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
+            <div className="p-5 md:p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/45 transition-all group relative overflow-hidden rounded">
               <span className="material-symbols-outlined text-lp-primary-container text-4xl mb-6 block">schedule</span>
               <h3 className="font-label-caps text-sm mb-4 tracking-wider uppercase text-white font-bold">Offline Smart Schedules</h3>
               <p className="font-body-md text-lp-on-surface-variant text-xs leading-relaxed">Presets and timers are saved locally on each node. Your automation keeps running exactly on time — even through a full internet outage.</p>
@@ -306,7 +425,7 @@ export default function LandingPage() {
         </section>
 
         {/* Dual-Plane & Offline Autonomous Architecture (New Feature Showcase) */}
-        <section className="py-24 px-6 lg:px-24 bg-lp-bg border-t border-lp-outline-variant relative overflow-hidden" id="dual-plane">
+        <section className="py-12 md:py-24 px-5 md:px-6 lg:px-24 bg-lp-bg border-t border-lp-outline-variant relative overflow-hidden" id="dual-plane">
           <div className="text-center mb-16 relative z-10 max-w-3xl mx-auto">
             <div className="inline-block px-3 py-1 mb-4 border border-lp-primary-container/30 bg-lp-primary-container/5 rounded-full">
               <span className="font-label-caps text-[10px] text-lp-primary-container tracking-[0.2em] uppercase">Built for 100% Uptime</span>
@@ -321,7 +440,7 @@ export default function LandingPage() {
 
           <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6 relative z-10">
             {/* Scenario 1 */}
-            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-amber-400/50 transition-all rounded-2xl flex flex-col justify-between group relative">
+            <div className="p-5 md:p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-amber-400/50 transition-all rounded-2xl flex flex-col justify-between group relative">
               <div>
                 <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-6 group-hover:scale-110 transition-transform">
                   <span className="material-symbols-outlined text-2xl">wifi_off</span>
@@ -341,7 +460,7 @@ export default function LandingPage() {
             </div>
 
             {/* Scenario 2 */}
-            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/50 transition-all rounded-2xl flex flex-col justify-between group relative">
+            <div className="p-5 md:p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-lp-primary-container/50 transition-all rounded-2xl flex flex-col justify-between group relative">
               <div>
                 <div className="w-12 h-12 rounded-xl bg-lp-primary-container/10 border border-lp-primary-container/30 flex items-center justify-center text-lp-primary-container mb-6 group-hover:scale-110 transition-transform">
                   <span className="material-symbols-outlined text-2xl">cloud_sync</span>
@@ -361,7 +480,7 @@ export default function LandingPage() {
             </div>
 
             {/* Scenario 3 */}
-            <div className="p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-cyan-400/50 transition-all rounded-2xl flex flex-col justify-between group relative">
+            <div className="p-5 md:p-8 bg-lp-surface-low border border-lp-outline-variant hover:border-cyan-400/50 transition-all rounded-2xl flex flex-col justify-between group relative">
               <div>
                 <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 mb-6 group-hover:scale-110 transition-transform">
                   <span className="material-symbols-outlined text-2xl">electric_meter</span>
@@ -383,7 +502,7 @@ export default function LandingPage() {
         </section>
 
         {/* 3D Model Showcase Section */}
-        <section className="py-24 px-6 lg:px-24 bg-lp-surface-lowest border-t border-lp-outline-variant relative overflow-hidden" id="showcase3d">
+        <section className="py-12 md:py-24 px-5 md:px-6 lg:px-24 bg-lp-surface-lowest border-t border-lp-outline-variant relative overflow-hidden" id="showcase3d">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2/3 h-2/3 bg-lp-secondary/5 blur-[140px] rounded-full pointer-events-none"></div>
 
           <div className="text-center mb-16 relative z-10 max-w-3xl mx-auto">
@@ -396,7 +515,7 @@ export default function LandingPage() {
             </p>
 
             {/* Interactive Toggle Tabs */}
-            <div className="flex justify-center gap-4 mt-8">
+            <div className="flex flex-wrap justify-center gap-2 md:gap-4 mt-6 md:mt-8 px-1">
               <button
                 onClick={() => setActiveTab3D('pcb')}
                 className={`px-5 py-2.5 rounded font-label-caps text-xs font-bold transition-all duration-200 cursor-pointer flex items-center gap-2 border ${activeTab3D === 'pcb'
@@ -428,7 +547,7 @@ export default function LandingPage() {
                 <span className="px-2 py-0.5 rounded bg-lp-bg/85 border border-lp-outline-variant text-[9px] font-label-caps text-lp-primary-container uppercase tracking-wide select-none">3D Interactive</span>
                 <span className="px-2 py-0.5 rounded bg-lp-bg/85 border border-lp-outline-variant text-[9px] font-label-caps text-lp-secondary uppercase tracking-wide select-none">Drag to Orbit</span>
               </div>
-              <div className="w-full aspect-[4/3] min-h-[350px] md:min-h-[450px] rounded-xl overflow-hidden bg-[#0d0e12]/90 relative">
+              <div className="w-full aspect-[4/3] min-h-[280px] md:min-h-[450px] rounded-xl overflow-hidden bg-[#0d0e12]/90 relative">
                 {activeTab3D === 'pcb' ? (
                   <ThreeModelViewer
                     key="pcb-viewer"
@@ -523,7 +642,7 @@ export default function LandingPage() {
         </section>
 
         {/* Software & Analytics Showcase */}
-        <section className="py-24 bg-lp-surface-low border-t border-lp-outline-variant px-6 lg:px-24" id="analytics">
+        <section className="py-12 md:py-24 bg-lp-surface-low border-t border-lp-outline-variant px-5 md:px-6 lg:px-24" id="analytics">
           <div className="flex flex-col lg:flex-row gap-16 items-center max-w-6xl mx-auto">
             <div className="flex-1">
               <span className="font-label-caps text-xs text-lp-primary mb-4 block">POWERED BY SUPABASE</span>
@@ -576,7 +695,7 @@ export default function LandingPage() {
         </section>
 
         {/* Our Journey Timeline */}
-        <section className="py-24 bg-lp-surface px-6 lg:px-24 border-t border-lp-outline-variant" id="journey">
+        <section className="py-12 md:py-24 bg-lp-surface px-5 md:px-6 lg:px-24 border-t border-lp-outline-variant" id="journey">
           <div className="text-center mb-20">
             <h2 className="font-headline-md text-4xl mb-4 font-extrabold text-white">Our Journey</h2>
             <p className="font-body-md text-lp-on-surface-variant text-sm">The evolution from basic automation to industrial-grade V4 architecture.</p>
@@ -585,7 +704,7 @@ export default function LandingPage() {
           <div className="max-w-4xl mx-auto relative py-12">
 
             {/* Phase 1 */}
-            <div className="flex flex-col md:flex-row gap-8 mb-24 relative">
+            <div className="flex flex-col md:flex-row gap-6 md:gap-8 mb-10 md:mb-24 relative">
               <div className="w-12 h-12 rounded-full bg-lp-slate-gray border-2 border-lp-outline flex items-center justify-center shrink-0 z-10 lp-timeline-node">
                 <span className="font-label-caps text-xs text-white">P1</span>
               </div>
@@ -596,7 +715,7 @@ export default function LandingPage() {
             </div>
 
             {/* Phase 2 */}
-            <div className="flex flex-col md:flex-row gap-8 mb-24 relative">
+            <div className="flex flex-col md:flex-row gap-6 md:gap-8 mb-10 md:mb-24 relative">
               <div className="w-12 h-12 rounded-full bg-lp-slate-gray border-2 border-lp-outline flex items-center justify-center shrink-0 z-10 lp-timeline-node">
                 <span className="font-label-caps text-xs text-white">P2</span>
               </div>
@@ -607,7 +726,7 @@ export default function LandingPage() {
             </div>
 
             {/* Phase 3 */}
-            <div className="flex flex-col md:flex-row gap-8 mb-24 relative">
+            <div className="flex flex-col md:flex-row gap-6 md:gap-8 mb-10 md:mb-24 relative">
               <div className="w-12 h-12 rounded-full bg-lp-slate-gray border-2 border-lp-outline flex items-center justify-center shrink-0 z-10 lp-timeline-node">
                 <span className="font-label-caps text-xs text-white">P3</span>
               </div>
@@ -632,9 +751,9 @@ export default function LandingPage() {
         </section>
 
         {/* CTA / Partner Section */}
-        <section className="py-24 bg-lp-surface-lowest border-t border-lp-outline-variant relative overflow-hidden" id="partner">
+        <section className="py-12 md:py-24 bg-lp-surface-lowest border-t border-lp-outline-variant relative overflow-hidden" id="partner">
           <div className="max-w-6xl mx-auto px-6 grid grid-cols-1 lg:grid-cols-2 gap-12 relative z-10">
-            <div className="p-12 bg-lp-surface border border-lp-outline-variant flex flex-col justify-between rounded">
+            <div className="p-6 md:p-12 bg-lp-surface border border-lp-outline-variant flex flex-col justify-between rounded">
               <div>
                 <div role="heading" aria-level="2" className="font-headline-md text-3xl mb-6 font-extrabold text-lp-on-surface">Direct Sales &amp; Retrofitting</div>
                 <p className="font-body-md text-lp-on-surface-variant text-sm mb-8 leading-relaxed">Ready to upgrade your existing space? Pre-order our 4-device relay modules designed for easy retrofitting into any standard switchboard.</p>
@@ -649,7 +768,7 @@ export default function LandingPage() {
                 </span>
               </button>
             </div>
-            <div className="p-12 bg-lp-primary-container text-lp-on-primary-container flex flex-col justify-between rounded">
+            <div className="p-6 md:p-12 bg-lp-primary-container text-lp-on-primary-container flex flex-col justify-between rounded">
               <div>
                 <div role="heading" aria-level="2" className="font-headline-md text-3xl mb-6 font-extrabold text-lp-on-primary-container">Builder Partnerships</div>
                 <p className="font-body-md text-lp-on-primary-container/80 text-sm mb-8 leading-relaxed">For real estate developers: Install Electric Warriors tech from the ground up. Offer your clients premium, integrated intelligence and command a higher market value.</p>

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Mic, X, LayoutGrid, List } from 'lucide-react';
 import { speak } from '@/utils/voice';
+import { useVoiceAgentVisible } from '@/lib/agentVisibility';
 
 // Number-word to digit map
 const WORD_TO_NUM = {
@@ -89,16 +90,32 @@ const parseTime = (timeStr) => {
 };
 
 // ---------------------------------------------------------------------------
-export default function VoiceControl({ devices: propDevices, boards: propBoards, presets: propPresets, applyPreset, onToast }) {
+export default function VoiceControl({ devices: propDevices, boards: propBoards, presets: propPresets, applyPreset, controlDevice, controlAll, onToast }) {
   const router = useRouter();
   const [selectedLang, setSelectedLang] = useState('en-US');
   const [listening, setListening] = useState(false);
+  const [agentState, setAgentState] = useState('idle');
+  const [textCommand, setTextCommand] = useState('');
+  const agentVisible = useVoiceAgentVisible();
+
+  // If the user hides the agent mid-listen, stop recognition immediately.
+  useEffect(() => {
+    if (!agentVisible) {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch (e) {}
+        recognitionRef.current = null;
+      }
+      setListening(false);
+    }
+  }, [agentVisible]);
 
   // Mutable refs so WS callbacks always see latest data without re-subscribing
   const devicesRef = useRef(propDevices ?? []);
   const boardsRef = useRef(propBoards ?? []);
   const presetsRef = useRef(propPresets ?? []);
   const recognitionRef = useRef(null);
+  const pendingActionRef = useRef(null);
+  const conversationRef = useRef([]);
 
   // Sync refs when parent state changes
   useEffect(() => { devicesRef.current = propDevices ?? []; }, [propDevices]);
@@ -201,24 +218,41 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
 
     switch (actionType) {
       case 'TOGGLE_DEVICE': {
-        await supabase.from('devices')
-          .update({ is_on: isOn, last_changed: new Date().toISOString() })
-          .eq('id', deviceId);
-
-        await supabase.from('activity_logs').insert({
-          user_id: user.id,
-          device_id: deviceId,
-          device_name: deviceName,
-          action: isOn ? 'turned ON' : 'turned OFF',
-          triggered_by: 'Voice Command (AI)'
-        });
-
-        provideFeedback(`${deviceName} turned ${isOn ? 'on' : 'off'}`);
+        const device = (await getLatestDevices()).find((item) => item.id === deviceId);
+        if (!device) {
+          provideFeedback('That device is no longer available. Please try again.');
+          break;
+        }
+        if (controlDevice) {
+          const result = await controlDevice(device, isOn, 'Voice Command (AI)');
+          if (!result?.success) {
+            provideFeedback(`Could not turn ${device.name} ${isOn ? 'on' : 'off'}. Please try again.`);
+            break;
+          }
+        } else {
+          const { error } = await supabase.from('devices')
+            .update({ is_on: isOn, last_changed: new Date().toISOString() })
+            .eq('id', device.id);
+          if (error) {
+            provideFeedback(`Could not turn ${device.name} ${isOn ? 'on' : 'off'}. Please try again.`);
+            break;
+          }
+        }
+        provideFeedback(`${device.name} turned ${isOn ? 'on' : 'off'}`);
         break;
       }
 
       case 'TOGGLE_ALL': {
         const latestDevices = await getLatestDevices();
+        if (controlAll) {
+          const result = await controlAll(isOn ? 'on' : 'off', 'Voice Command (AI)');
+          if (!result?.success) {
+            provideFeedback(`Could not turn all devices ${isOn ? 'on' : 'off'}. Please try again.`);
+            break;
+          }
+          provideFeedback(`All devices turned ${isOn ? 'on' : 'off'}`);
+          break;
+        }
         const devicesToUpdate = latestDevices.filter(d => d.is_on !== isOn);
         if (devicesToUpdate.length > 0) {
           await supabase.from('devices')
@@ -365,23 +399,50 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         break;
       }
 
+      case 'ANSWER': {
+        provideFeedback(message || 'I am here to help with your smart home.');
+        break;
+      }
+
       default:
         break;
     }
-  }, [getLatestDevices, applyPreset, router]);
+  }, [getLatestDevices, applyPreset, controlDevice, controlAll, router]);
 
   // Main command processor
   const processCommand = useCallback(async (transcript) => {
+    if (!transcript?.trim()) return;
+    setAgentState('processing');
     const text = normalizeText(transcript);
     const commandDevices = await getLatestDevices();
-    const commandBoards = boardsRef.current;
     const safeToast = onToast || ((msg) => console.log(msg));
+
+    if (pendingActionRef.current) {
+      if (/^(yes|yeah|yep|confirm|confirmed|do it|go ahead|proceed|haan|हां|हाँ)$/i.test(text)) {
+        const pending = pendingActionRef.current;
+        pendingActionRef.current = null;
+        await executeLLMAction(pending, safeToast);
+        setAgentState('idle');
+        return;
+      }
+      if (/^(no|nope|cancel|stop|नहीं|नही)$/i.test(text)) {
+        pendingActionRef.current = null;
+        safeToast('Cancelled.');
+        speak('Cancelled.', selectedLang);
+        setAgentState('idle');
+        return;
+      }
+      safeToast('Please say yes to confirm or no to cancel.');
+      setAgentState('idle');
+      return;
+    }
 
     safeToast(`Heard: "${transcript}"`);
 
-    if (commandDevices.length === 0) {
-      safeToast('No devices found. Please add a board first.');
-      speak('No devices found. Please add a board first.');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      safeToast('Please sign in before using voice control.');
+      setAgentState('idle');
       return;
     }
 
@@ -389,26 +450,49 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     try {
       const response = await fetch('/api/voice-command', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({
           transcript: transcript,
           devices: commandDevices,
           presets: presetsRef.current,
           currentTime: getLocalISOString(),
-          language: selectedLang
+          language: selectedLang,
+          context: conversationRef.current.slice(-6),
         })
       });
 
       if (response.ok) {
         const result = await response.json();
+        conversationRef.current = [
+          ...conversationRef.current,
+          { role: 'user', content: transcript },
+          { role: 'assistant', content: result.message || result.actionType },
+        ].slice(-6);
         if (result && result.actionType && result.actionType !== 'UNKNOWN') {
-          await executeLLMAction(result, safeToast);
-          return;
+           const requiresConfirmation = [
+             'TOGGLE_ALL', 'APPLY_PRESET', 'CREATE_ALARM', 'CREATE_SCHEDULE',
+             'DELETE_ALL_ALARMS', 'DELETE_ALL_SCHEDULES',
+           ].includes(result.actionType);
+           if (requiresConfirmation) {
+             pendingActionRef.current = result;
+             const confirmation = result.message || 'This action may affect multiple devices or schedules. Confirm?';
+             safeToast(`${confirmation} Say yes to confirm.`);
+             speak(`${confirmation} Say yes to confirm.`, result.language || selectedLang);
+             setAgentState('idle');
+             return;
+           }
+           await executeLLMAction(result, safeToast);
+           setAgentState('idle');
+           return;
         } else if (result && result.actionType === 'UNKNOWN') {
           console.log('OpenRouter returned UNKNOWN action:', result.message);
           const clarifyMsg = result.message || 'Could not understand voice command.';
           safeToast(clarifyMsg);
           speak(clarifyMsg, result.language || selectedLang);
+          setAgentState('idle');
           return;
         }
       } else {
@@ -417,6 +501,13 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       }
     } catch (e) {
       console.warn('AI voice command failed, falling back to local parser:', e);
+    }
+
+    if (commandDevices.length === 0) {
+      safeToast('No devices found. Please add a board first.');
+      speak('No devices found. Please add a board first.');
+      setAgentState('idle');
+      return;
     }
 
     // Note: Local hardcoded parsing for "All on / All off" has been removed.
@@ -430,6 +521,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         safeToast('All alarms deleted');
         speak('All alarms deleted');
       }
+      setAgentState('idle');
       return;
     }
     if (text === 'delete all schedules' || text === 'clear all schedules') {
@@ -439,6 +531,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         safeToast('All schedules deleted');
         speak('All schedules deleted');
       }
+      setAgentState('idle');
       return;
     }
 
@@ -456,14 +549,16 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       if (!matchedDevice) {
         safeToast(`Device "${deviceQuery}" not found for alarm`);
         speak(`Device ${deviceQuery} not found`);
-        return;
+       setAgentState('idle');
+       return;
       }
 
       const parsedTime = parseTime(timeStr);
       if (!parsedTime) {
         safeToast(`Could not parse time "${timeStr}"`);
         speak(`Could not parse time ${timeStr}`);
-        return;
+       setAgentState('idle');
+       return;
       }
 
       const now = new Date();
@@ -477,7 +572,8 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         const pastMsg = `Cannot set an alarm in the past. "${timeStr}" has already passed. Please say a future time or date.`;
         safeToast(`⚠ ${pastMsg}`);
         speak(`Cannot set alarm in the past`);
-        return;
+       setAgentState('idle');
+       return;
       }
 
       const isAlarmOn = actionWord ? actionWord === 'on' : true;
@@ -503,7 +599,8 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         const dupMsg = `${matchedDevice.name} already has an alarm at ${existingTime} on ${existingDate}. Only one alarm per device at a time is allowed.`;
         safeToast(dupMsg);
         speak(`Duplicate alarm already exists for ${matchedDevice.name}`);
-        return;
+       setAgentState('idle');
+       return;
       }
 
       const { error } = await supabase.from('alarms').insert({
@@ -524,7 +621,8 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         safeToast(`✅ Alarm set for ${matchedDevice.name} on ${dateDisplay} at ${timeDisplay}`);
         speak(`Alarm set for ${matchedDevice.name} on ${dateDisplay} at ${timeDisplay}`);
       }
-      return;
+       setAgentState('idle');
+       return;
     }
 
     // 4. Create Schedule: e.g. "set schedule for fan 2 to turn off at 8:00 am on weekdays"
@@ -542,14 +640,16 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       if (!matchedDevice) {
         safeToast(`Device "${deviceQuery}" not found for schedule`);
         speak(`Device ${deviceQuery} not found`);
-        return;
+       setAgentState('idle');
+       return;
       }
 
       const parsedTime = parseTime(timeStr);
       if (!parsedTime) {
         safeToast(`Could not parse time "${timeStr}"`);
         speak(`Could not parse time ${timeStr}`);
-        return;
+       setAgentState('idle');
+       return;
       }
 
       // Parse days
@@ -591,7 +691,8 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         const dupMsg = `${matchedDevice.name} already has a schedule to turn ${isScheduleOn ? 'on' : 'off'} at ${timeDisplay}. Duplicate not created.`;
         safeToast(dupMsg);
         speak(`Duplicate schedule already exists for ${matchedDevice.name}`);
-        return;
+       setAgentState('idle');
+       return;
       }
 
       const { error } = await supabase.from('schedules').insert({
@@ -613,12 +714,18 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         safeToast(`✅ Schedule set for ${matchedDevice.name} at ${timeDisplay} on ${daysDisplay}`);
         speak(`Schedule set for ${matchedDevice.name} at ${timeDisplay} on ${daysDisplay}`);
       }
-      return;
+       setAgentState('idle');
+       return;
     }
 
     // 5. Delete single alarm/schedule for device
     const deleteMatch = text.match(/^(?:delete|cancel|remove)\s+(alarm|schedule)\s+for\s+(.+)$/);
     if (deleteMatch) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setAgentState('idle');
+        return;
+      }
       const type = deleteMatch[1]; // "alarm" or "schedule"
       const deviceQuery = normalizeText(deleteMatch[2]);
 
@@ -630,14 +737,14 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       }
 
       if (type === 'alarm') {
-        const { error } = await supabase.from('alarms').delete().eq('device_id', matchedDevice.id);
+        const { error } = await supabase.from('alarms').delete().eq('user_id', user.id).eq('device_id', matchedDevice.id);
         if (error) safeToast(`⚠ Could not delete alarms for ${matchedDevice.name}. Please try again.`);
         else {
           safeToast(`✅ Alarms deleted for ${matchedDevice.name}`);
           speak(`Alarms deleted for ${matchedDevice.name}`);
         }
       } else {
-        const { error } = await supabase.from('schedules').delete().eq('device_id', matchedDevice.id);
+        const { error } = await supabase.from('schedules').delete().eq('user_id', user.id).eq('device_id', matchedDevice.id);
         if (error) safeToast(`⚠ Could not delete schedules for ${matchedDevice.name}. Please try again.`);
         else {
           safeToast(`✅ Schedules deleted for ${matchedDevice.name}`);
@@ -650,6 +757,11 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     // 6. Enable/disable schedules
     const scheduleToggleMatch = text.match(/^(enable|disable|activate|deactivate|deactive)\s+schedule\s+for\s+(.+)$/);
     if (scheduleToggleMatch) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setAgentState('idle');
+        return;
+      }
       const action = scheduleToggleMatch[1]; // "enable", "disable", "deactivate", etc.
       const deviceQuery = normalizeText(scheduleToggleMatch[2]);
 
@@ -661,7 +773,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       }
 
       const enableVal = (action === 'enable' || action === 'activate');
-      const { error } = await supabase.from('schedules').update({ enabled: enableVal }).eq('device_id', matchedDevice.id);
+      const { error } = await supabase.from('schedules').update({ enabled: enableVal }).eq('user_id', user.id).eq('device_id', matchedDevice.id);
       if (error) safeToast(error.message);
       else {
         safeToast(`Schedules ${enableVal ? 'enabled' : 'disabled'} for ${matchedDevice.name}`);
@@ -681,10 +793,16 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       if (applyPreset) {
         await applyPreset(matchedPresetDirect);
       } else {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          setAgentState('idle');
+          return;
+        }
         await Promise.all(
           matchedPresetDirect.actions.map(action =>
             supabase.from('devices')
               .update({ is_on: action.is_on, last_changed: new Date().toISOString() })
+              .eq('user_id', user.id)
               .eq('id', action.device_id)
           )
         );
@@ -696,9 +814,10 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
 
     safeToast('Command not recognised. Try: "turn on fan 2", "turn off living room", "all off", or "show schedules"');
     speak('Command not recognized. Please try again.', 'en-US');
-  }, [getLatestDevices, onToast, applyPreset, selectedLang]);
+    setAgentState('idle');
+  }, [getLatestDevices, onToast, applyPreset, selectedLang, executeLLMAction]);
 
-  // Speech Recognition
+  // Browser recognition uses the browser's free speech provider and requires no API key.
   const startListening = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -717,13 +836,18 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.lang = selectedLang;
-    recognition.onstart = () => setListening(true);
+     recognition.onstart = () => {
+       setListening(true);
+       setAgentState('listening');
+     };
     recognition.onend = () => {
-      setListening(false);
+       setListening(false);
+       setAgentState((current) => current === 'listening' ? 'idle' : current);
       recognitionRef.current = null;
     };
     recognition.onerror = (event) => {
-      setListening(false);
+       setListening(false);
+       setAgentState('error');
       recognitionRef.current = null;
       if (event.error !== 'aborted') {
         onToast('Voice recognition error. Please try again.');
@@ -745,6 +869,11 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
   const startSarvamListening = async () => {
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        onToast('Please sign in before using voice control.');
+        return;
+      }
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true
@@ -777,10 +906,15 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
 
         const response = await fetch("/api/sarvam/stt", {
           method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
           body: formData
         });
 
         const data = await response.json();
+
+        if (!response.ok || !data.transcript) {
+          throw new Error(data.error || "Speech transcription failed");
+        }
 
         await processCommand(data.transcript);
 
@@ -811,6 +945,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         try { recognitionRef.current.abort(); } catch (e) { }
       }
       setListening(false);
+      setAgentState('idle');
       recognitionRef.current = null;
     } else {
       const hasIntroduced = localStorage.getItem('auraIntroPlayed');
@@ -833,6 +968,17 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
 
     }
   };
+
+  const submitTextCommand = async (event) => {
+    event.preventDefault();
+    const command = textCommand.trim();
+    if (!command) return;
+    setTextCommand('');
+    await processCommand(command);
+  };
+
+  // Hidden via Profile → Voice Agent setting.
+  if (!agentVisible) return null;
 
   return (
     <>
@@ -878,6 +1024,20 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           </span>
         </div>
       )}
+      {agentState !== 'idle' && agentState !== 'listening' && agentState !== 'error' && (
+        <div className="fixed bottom-36 max-md:bottom-36 right-7 bg-card/90 backdrop-blur-md px-5 py-3 rounded-xl border border-border shadow-lg z-[200] text-sm text-text">
+          {agentState === 'transcribing' ? 'Transcribing...' : 'Processing command...'}
+        </div>
+      )}
+      <form onSubmit={submitTextCommand} className="fixed bottom-7 right-24 max-md:bottom-20 max-md:right-24 z-[200] flex items-center gap-2">
+        <input
+          value={textCommand}
+          onChange={(event) => setTextCommand(event.target.value)}
+          aria-label="Type a voice command"
+          placeholder="Type a command"
+          className="w-40 max-md:w-32 rounded-full border border-border bg-card/90 px-3 py-2 text-xs text-text outline-none focus:border-accent"
+        />
+      </form>
       <button
         id="voice-control-mic-btn"
         onClick={toggleListening}

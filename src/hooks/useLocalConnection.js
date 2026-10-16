@@ -11,13 +11,14 @@ import { discoverLocalNode, getLocalBaseUrl } from '@/lib/localApi';
  * requests to the ESP32 every 5s). Now a single store owns the
  * connection state and all consumers subscribe to it.
  *
- * Re-checks are event-driven where possible:
- * - immediate check on window online/offline/focus/visibility events
+ * Re-checks are event-driven for real network transitions:
+ * - immediate check on window online/offline events
  * - slow background beat only while the page is visible
- *   (10s connected / 20s disconnected) - no aggressive polling.
+ *   (30 minutes) - no aggressive polling.
  */
 
-const FAST_TIMEOUT_MS = 2200;
+const FAST_TIMEOUT_MS = 5500;
+const BACKGROUND_PROBE_INTERVAL_MS = 30 * 60 * 1000;
 
 let snapshot = {
   isLocalConnected: false,
@@ -31,6 +32,21 @@ let probeInFlight = false;
 let consecutiveFailures = 0;
 let beatTimer = null;
 let eventsBound = false;
+// Mesh probing runs ONLY while explicitly enabled (the /local page enables
+// it on mount and disables on unmount). No background ESP32 polling
+// anywhere else in the app.
+let probingEnabled = false;
+
+export function setLocalProbingEnabled(on) {
+  probingEnabled = Boolean(on);
+  if (probingEnabled) {
+    consecutiveFailures = 0;
+    checkConnection();
+  } else if (beatTimer) {
+    clearTimeout(beatTimer);
+    beatTimer = null;
+  }
+}
 
 function emit() {
   listeners.forEach((l) => l());
@@ -43,12 +59,16 @@ function patch(next) {
 
 function scheduleNextBeat() {
   if (beatTimer) clearTimeout(beatTimer);
-  const interval = snapshot.isLocalConnected ? 15000 : 8000;
-  beatTimer = setTimeout(() => checkConnection(), interval);
+  beatTimer = null;
+  if (!probingEnabled) return;
+  beatTimer = setTimeout(
+    () => checkConnection(),
+    BACKGROUND_PROBE_INTERVAL_MS,
+  );
 }
 
 export async function checkConnection() {
-  if (probeInFlight) return;
+  if (probeInFlight || !probingEnabled) return;
   probeInFlight = true;
   patch({ isProbing: true });
 
@@ -76,18 +96,16 @@ function bindGlobalEvents() {
   if (eventsBound || typeof window === 'undefined') return;
   eventsBound = true;
 
-  const recheckSoon = () => setTimeout(() => checkConnection(), 250);
+  const recheckOnNetworkChange = () => {
+    if (probingEnabled) setTimeout(() => checkConnection(), 250);
+  };
 
   // Connectivity transitions are THE signal that local mode may be needed -
   // react instantly instead of waiting for the next poll tick.
-  window.addEventListener('online', () => { consecutiveFailures = 0; recheckSoon(); });
-  window.addEventListener('offline', () => { consecutiveFailures = 0; recheckSoon(); });
-  window.addEventListener('focus', recheckSoon);
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') recheckSoon();
-  });
+  window.addEventListener('online', () => { consecutiveFailures = 0; recheckOnNetworkChange(); });
+  window.addEventListener('offline', () => { consecutiveFailures = 0; recheckOnNetworkChange(); });
 
-  checkConnection();
+  if (probingEnabled) checkConnection();
 }
 
 const subscribe = (listener) => {
