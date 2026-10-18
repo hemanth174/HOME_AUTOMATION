@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Cpu,
   LoaderCircle,
+  Moon,
+  Sun,
   Power,
   Radio,
   RefreshCw,
@@ -124,6 +126,7 @@ function HardwareIllustration() {
 export default function LocalControlPage() {
   const { isLocalConnected, localUrl, checkConnection, isProbing } =
     useLocalConnection();
+  const [pageTheme, setPageTheme] = useState("dark");
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -131,6 +134,30 @@ export default function LocalControlPage() {
   const [busy, setBusy] = useState({});
   const [commandErrors, setCommandErrors] = useState({});
   const loadInFlight = useRef(false);
+
+
+  // Read and follow VikaTech's shared theme (html[data-theme]) so this
+  // page stays synchronized with the global Navbar ThemeToggle.
+  useEffect(() => {
+    const syncTheme = () => {
+      const current = document.documentElement.getAttribute("data-theme");
+      setPageTheme(current === "light" ? "light" : "dark");
+    };
+    syncTheme();
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  const togglePageTheme = () => {
+    const next = pageTheme === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("theme", next);
+    setPageTheme(next);
+  };
 
   const loadDevices = useCallback(async (rediscover = false) => {
     if (loadInFlight.current) return;
@@ -263,7 +290,7 @@ export default function LocalControlPage() {
       : "unavailable";
 
   return (
-    <main className="local-control-page min-h-screen bg-[#F5F3EF] font-sans text-[#26382C] dark:bg-[#0B120D] dark:text-[#EDF5EE]">
+    <main className={`local-control-page min-h-screen bg-[#F5F3EF] font-sans text-[#26382C] ${pageTheme === "dark" ? "page-theme-dark" : "page-theme-light"}`}>
       <div className="mx-auto w-full max-w-[1500px] px-4 pb-28 pt-[5.25rem] sm:px-6 sm:pt-[5.75rem] lg:px-8 lg:pb-10 lg:pt-[6rem] xl:px-10">
         <header className="mb-6 flex items-start justify-between gap-4 sm:mb-7">
           <div className="min-w-0">
@@ -277,16 +304,29 @@ export default function LocalControlPage() {
               Direct ESP32 device control
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => loadDevices(true)}
-            disabled={checking}
-            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl border border-[#E8E5DF] bg-white px-3 text-sm font-semibold text-[#26382C] shadow-sm transition hover:border-[#C98C66] hover:bg-[#FFFCF8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#A86F3D] disabled:cursor-wait disabled:opacity-50 sm:px-4"
-            aria-label="Refresh local connection and devices"
-          >
-            <RefreshCw size={17} className={checking ? "animate-spin" : ""} />
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={togglePageTheme}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-[#E8E5DF] bg-white px-3 text-sm font-semibold text-[#26382C] shadow-sm transition hover:border-[#C98C66] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#A86F3D] sm:px-4"
+              aria-label={pageTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              aria-pressed={pageTheme === "dark"}
+              title={pageTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              {pageTheme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+              <span className="hidden sm:inline">{pageTheme === "dark" ? "Light mode" : "Dark mode"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => loadDevices(true)}
+              disabled={checking}
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl border border-[#E8E5DF] bg-white px-3 text-sm font-semibold text-[#26382C] shadow-sm transition hover:border-[#C98C66] hover:bg-[#FFFCF8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#A86F3D] disabled:cursor-wait disabled:opacity-50 sm:px-4"
+              aria-label="Refresh local connection and devices"
+            >
+              <RefreshCw size={17} className={checking ? "animate-spin" : ""} />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
+          </div>
         </header>
 
         <section
@@ -584,127 +624,92 @@ export default function LocalControlPage() {
       </div>
 
       <style jsx global>{`
-         /* VikaTech Local Control: dark-mode layer.
-            Follows the root attribute managed by ThemeToggle. */
-         html[data-theme="dark"] .local-control-page {
+        /* Page-scoped dark palette. The theme follows html[data-theme] set by VikaTech. */
+        html[data-theme="dark"] .local-control-page {
           background: #0b120d !important;
           color: #edf5ee !important;
           color-scheme: dark;
         }
-
-         html[data-theme="dark"] .local-control-page [class*="bg-[#F5F3EF]"],
-         html[data-theme="dark"] .local-control-page [class*="bg-[#FCFBF9]"],
-         html[data-theme="dark"] .local-control-page [class*="bg-[#FFFCF8]"] {
-          background-color: #0b120d !important;
-        }
-
-         html[data-theme="dark"] .local-control-page [class*="bg-white"],
-         html[data-theme="dark"] .local-control-page [class~="bg-white"] {
+        html[data-theme="dark"] .local-control-page section[aria-labelledby="local-devices-title"],
+        html[data-theme="dark"] .local-control-page article,
+        html[data-theme="dark"] .local-control-page .bg-white,
+        html[data-theme="dark"] .local-control-page [class*="bg-white"] {
           background-color: #142018 !important;
         }
-
-         html[data-theme="dark"] .local-control-page [class*="bg-[#F0EEE9]"],
-         html[data-theme="dark"] .local-control-page [class*="bg-[#F0E1D4]"] {
-          background-color: #263329 !important;
+        html[data-theme="dark"] .local-control-page [class*="bg-[#F5F3EF]"],
+        html[data-theme="dark"] .local-control-page [class*="bg-[#FCFBF9]"] {
+          background-color: #0b120d !important;
         }
-
-         html[data-theme="dark"] .local-control-page [class*="bg-[#F0F6EF]"],
-         html[data-theme="dark"] .local-control-page [class*="bg-[#F7FBF6]"],
-         html[data-theme="dark"] .local-control-page [class*="bg-[#EAF1E8]"],
-         html[data-theme="dark"] .local-control-page [class*="bg-[#DDEEE0]"],
-         html[data-theme="dark"] .local-control-page [class*="bg-[#E0EFE1]"] {
-          background-color: #172b1d !important;
-        }
-
-         html[data-theme="dark"] .local-control-page [class*="bg-[#FFF5F3]"],
-         html[data-theme="dark"] .local-control-page [class*="bg-[#FFFAF9]"],
-         html[data-theme="dark"] .local-control-page [class*="bg-[#FCE4E2]"],
-         html[data-theme="dark"] .local-control-page [class*="bg-[#FCEDEC]"] {
+        html[data-theme="dark"] .local-control-page [class*="bg-[#FFF5F3]"],
+        html[data-theme="dark"] .local-control-page [class*="bg-[#FFFAF9]"],
+        html[data-theme="dark"] .local-control-page [class*="bg-[#FCE4E2]"],
+        html[data-theme="dark"] .local-control-page [class*="bg-[#FCEDEC]"] {
           background-color: #2b1918 !important;
         }
-
-         html[data-theme="dark"] .local-control-page [class*="bg-[#F3D9CA]"],
-         html[data-theme="dark"] .local-control-page [class*="bg-[#F3DCD4]"],
-         html[data-theme="dark"] .local-control-page [class*="bg-[#F0E1D4]"] {
+        html[data-theme="dark"] .local-control-page [class*="bg-[#F0EEE9]"],
+        html[data-theme="dark"] .local-control-page [class*="bg-[#EAF1E8]"],
+        html[data-theme="dark"] .local-control-page [class*="bg-[#DDEEE0]"],
+        html[data-theme="dark"] .local-control-page [class*="bg-[#E0EFE1]"],
+        html[data-theme="dark"] .local-control-page [class*="bg-[#F7FBF6]"],
+        html[data-theme="dark"] .local-control-page [class*="bg-[#F0F6EF]"] {
+          background-color: #172b1d !important;
+        }
+        html[data-theme="dark"] .local-control-page [class*="bg-[#F3D9CA]"],
+        html[data-theme="dark"] .local-control-page [class*="bg-[#F3DCD4]"],
+        html[data-theme="dark"] .local-control-page [class*="bg-[#F0E1D4]"] {
           background-color: #35271f !important;
         }
-
-         html[data-theme="dark"] .local-control-page [class*="text-[#26382C]"],
-         html[data-theme="dark"] .local-control-page [class*="text-[#173D2D]"],
-         html[data-theme="dark"] .local-control-page [class*="text-[#6F2822]"] {
+        html[data-theme="dark"] .local-control-page [class*="text-[#26382C]"],
+        html[data-theme="dark"] .local-control-page [class*="text-[#173D2D]"],
+        html[data-theme="dark"] .local-control-page [class*="text-[#6F2822]"] {
           color: #edf5ee !important;
         }
-
-         html[data-theme="dark"] .local-control-page [class*="text-[#69736D]"],
-         html[data-theme="dark"] .local-control-page [class*="text-[#858780]"] {
+        html[data-theme="dark"] .local-control-page [class*="text-[#69736D]"],
+        html[data-theme="dark"] .local-control-page [class*="text-[#858780]"] {
           color: #aab8ae !important;
         }
-
-         html[data-theme="dark"] .local-control-page [class*="text-[#39845A]"],
-         html[data-theme="dark"] .local-control-page [class*="text-[#287247]"] {
+        html[data-theme="dark"] .local-control-page [class*="text-[#39845A]"],
+        html[data-theme="dark"] .local-control-page [class*="text-[#287247]"] {
           color: #91d6a4 !important;
         }
-
-         html[data-theme="dark"] .local-control-page [class*="text-[#A86F3D]"],
-         html[data-theme="dark"] .local-control-page [class*="text-[#8D5B30]"],
-         html[data-theme="dark"] .local-control-page [class*="text-[#8D4C20]"],
-         html[data-theme="dark"] .local-control-page [class*="text-[#C28A62]"] {
+        html[data-theme="dark"] .local-control-page [class*="text-[#A86F3D]"],
+        html[data-theme="dark"] .local-control-page [class*="text-[#8D5B30]"],
+        html[data-theme="dark"] .local-control-page [class*="text-[#8D4C20]"],
+        html[data-theme="dark"] .local-control-page [class*="text-[#C28A62]"] {
           color: #e6b27c !important;
         }
-
-         html[data-theme="dark"] .local-control-page [class*="text-[#8E211D]"],
-         html[data-theme="dark"] .local-control-page [class*="text-[#D62828]"],
-         html[data-theme="dark"] .local-control-page [class*="text-[#D94B4B]"] {
+        html[data-theme="dark"] .local-control-page [class*="text-[#8E211D]"],
+        html[data-theme="dark"] .local-control-page [class*="text-[#D62828]"],
+        html[data-theme="dark"] .local-control-page [class*="text-[#D94B4B]"] {
           color: #ff8e87 !important;
         }
-
-         html[data-theme="dark"] .local-control-page [class*="border-[#E8E5DF]"],
-         html[data-theme="dark"] .local-control-page [class*="border-[#DADFD7]"],
-         html[data-theme="dark"] .local-control-page [class*="border-[#E4C4B9]"],
-         html[data-theme="dark"] .local-control-page [class*="border-white/80"] {
+        html[data-theme="dark"] .local-control-page [class*="border-[#E8E5DF]"],
+        html[data-theme="dark"] .local-control-page [class*="border-[#DADFD7]"],
+        html[data-theme="dark"] .local-control-page [class*="border-[#E4C4B9]"],
+        html[data-theme="dark"] .local-control-page [class*="border-white/80"] {
           border-color: #2b3b30 !important;
         }
-
-         html[data-theme="dark"] .local-control-page [class*="border-[#C9DDCC]"],
-         html[data-theme="dark"] .local-control-page [class*="border-[#B9D8C1]"] {
+        html[data-theme="dark"] .local-control-page [class*="border-[#C9DDCC]"],
+        html[data-theme="dark"] .local-control-page [class*="border-[#B9D8C1]"] {
           border-color: #31563b !important;
         }
-
-         html[data-theme="dark"] .local-control-page [class*="border-[#F7D0CB]"],
-         html[data-theme="dark"] .local-control-page [class*="border-[#F3D6D1]"],
-         html[data-theme="dark"] .local-control-page [class*="border-[#F3DCD4]"],
-         html[data-theme="dark"] .local-control-page [class*="border-[#F1D8D1]"] {
+        html[data-theme="dark"] .local-control-page [class*="border-[#F7D0CB]"],
+        html[data-theme="dark"] .local-control-page [class*="border-[#F3D6D1]"],
+        html[data-theme="dark"] .local-control-page [class*="border-[#F3DCD4]"],
+        html[data-theme="dark"] .local-control-page [class*="border-[#F1D8D1]"] {
           border-color: #55302d !important;
         }
-
-         html[data-theme="dark"] .local-control-page [class*="border-[#C98C66]"] {
-          border-color: #805b3d !important;
+        html[data-theme="dark"] .local-control-page [class*="from-[#F8F8F5]"] {
+          background-image: linear-gradient(135deg, #243128, #17231b) !important;
         }
-
-         html[data-theme="dark"] .local-control-page [class*="from-[#F8F8F5]"] {
-          background-image: linear-gradient(
-            135deg,
-            #243128,
-            #17231b
-          ) !important;
-        }
-
-         html[data-theme="dark"] .local-control-page [class*="to-[#D8DAD4]"] {
+        html[data-theme="dark"] .local-control-page [class*="to-[#D8DAD4]"] {
           --tw-gradient-to: #17231b var(--tw-gradient-to-position) !important;
         }
-
-         html[data-theme="dark"] .local-control-page button:focus-visible {
+        html[data-theme="dark"] .local-control-page button:focus-visible {
           outline-color: #e6b27c !important;
         }
-
-         html[data-theme="dark"] .local-control-page button:disabled {
-          opacity: 0.55;
-        }
-
         @media (prefers-reduced-motion: reduce) {
-          .local-control-page *,
-          .local-control-page *::before,
-          .local-control-page *::after {
+          .local-control-page *, .local-control-page *::before, .local-control-page *::after {
             scroll-behavior: auto !important;
             animation-duration: 0.01ms !important;
             animation-iteration-count: 1 !important;
