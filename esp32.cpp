@@ -6,6 +6,9 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <time.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
 
 // ============================================================
 //  DIRECT GPIO SETUP (4 Devices)
@@ -24,12 +27,22 @@ const int INPUT_PINS[NUM_DEVICES] = {19, 18, 5, 17};
 //  conflict markers which prevented compilation entirely.
 //  They have been resolved below.
 // ============================================================
-const char* ssid     = "";
+
+const char* ssid = "";
 const char* password = "";
 
-const char* BOARD_IDENTIFIER = "test_1_board";
-const char* SUPABASE_BASE = "YOu_url_here";
-const char* SUPABASE_SERVICE_KEY = "you_key_here";
+// const char* ssid     = "Hapy";
+// const char* password = "12345678";
+
+// const char* ssid     = "TP-Link_Guest_7AEB";
+// const char* password = "test12345";
+
+// const char* ssid     = "NxtWave_Te@m";
+// const char* password = "Nxtwave@KKH2026";
+
+const char* BOARD_IDENTIFIER = "katappa";
+const char* SUPABASE_BASE = "https://ojuvphlkzbxwjhqzexbt.supabase.co/rest/v1";
+const char* SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qdXZwaGxremJ4d2pocXpleGJ0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTg2Nzk2MiwiZXhwIjoyMDk3NDQzOTYyfQ.SN6g_bR4bpVEIGdIW-GLPTHRlqZBHF5YBUKjHDMWjLU"; 
 
 // Mesh / SoftAP Configuration for Offline Autonomous Control.
 // One elected LEADER broadcasts MESH_SSID; MEMBER boards join it
@@ -60,20 +73,20 @@ const unsigned long SERIAL_DUMP_INTERVAL = 10000;
 WiFiMulti wifiMulti;
 WebServer server(80);
 Preferences preferences;
+SemaphoreHandle_t preferencesMutex = nullptr;
+SemaphoreHandle_t offlineQueueMutex = nullptr;
+TaskHandle_t cloudSyncTaskHandle = nullptr;
 
-// HTTP Cloud Polling (unchanged behaviour when internet available)
-unsigned long lastPollTime = 0;
-const unsigned long POLL_INTERVAL = 1000;
+// Cloud polling runs in the background worker, not in the local HTTP loop.
+const unsigned long POLL_INTERVAL = 10000;
 
 // Heartbeat
-unsigned long lastHeartbeatTime = 0;
 const unsigned long HEARTBEAT_INTERVAL = 20000;
 
 // Edge Cloud Alarms
 struct Alarm { String id; String triggerAt; bool action; bool active; int deviceIndex; };
 #define MAX_ALARMS 20
 Alarm alarms[MAX_ALARMS];
-unsigned long lastAlarmPoll = 0;
 const unsigned long ALARM_POLL_INTERVAL = 30000;
 
 // Store-and-Forward Offline Queue
@@ -115,6 +128,7 @@ int meshCacheCount = 0;
 
 // Timers - deliberately SLOW. No aggressive polling anywhere.
 unsigned long lastWifiRetry     = 0;  const unsigned long WIFI_RETRY_INTERVAL      = 3000;   // Station reconnect attempts (was: every loop!)
+unsigned long lastLeaderWifiTry = 0;  const unsigned long LEADER_WIFI_RETRY_INTERVAL = 30000; // Leader home-Wi-Fi probes (non-blocking begin)
 unsigned long lastRoleEval      = 0;  const unsigned long ROLE_EVAL_INTERVAL       = 5000;   // Role decision cadence
 unsigned long lastMemberJoin    = 0;  const unsigned long MESH_JOIN_INTERVAL       = 25000;  // Member -> leader announce
 unsigned long lastHomeWifiProbe = 0;  const unsigned long HOME_WIFI_PROBE_INTERVAL = 60000;  // Member checks if home Wi-Fi returned
@@ -132,7 +146,7 @@ bool resolveBoardAndDevices();
 void setupWebServer();
 void handleDeviceToggle(int rIndex);
 void enqueueOfflineUpdate(int index, bool state, bool isFeedback);
-void flushOfflineQueue();
+bool flushOfflineQueue();
 String getIsoTime();
 void evaluateLocalRole();
 bool tryJoinMeshLeader();
@@ -147,9 +161,9 @@ void upsertMeshDeviceCache(const String& nodeId, int relayIndex, bool isOn, bool
 void pruneStaleMeshNodes();
 void buildDevicesPayload(JsonArray& arr, bool includeMesh);
 void handleToggleAllMesh(bool on);
-void syncAllStatesToDB();
 void loadOfflineQueue();
 void saveOfflineQueue();
+void cloudSyncTask(void* parameter);
 void configureHttp(HTTPClient& http, uint16_t connectTimeout = 2500, uint16_t requestTimeout = 4000);
 
 // ============================================================
@@ -192,7 +206,9 @@ void setRelay(int index, bool on, bool saveToNVS) {
   if (saveToNVS) {
     char key[8];
     sprintf(key, "r_%d", index);
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     preferences.putBool(key, on);
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   }
 
   Serial.printf(">> RELAY [%d] -> %s\n", index, on ? "ON" : "OFF");
@@ -363,6 +379,7 @@ void handleDeviceToggle(int rIndex) {
   }
   bool targetState = req["state"].as<bool>();
 
+  enqueueOfflineUpdate(rIndex, targetState, false);
   setRelay(rIndex, targetState);
 
   // Notify the leader immediately (event-driven, NOT polling) so the
@@ -379,11 +396,8 @@ void handleDeviceToggle(int rIndex) {
     http.end();
   }
 
-  if (isHomeWifiConnected() && boardUUID != "") {
-    updateDeviceInDB(rIndex, targetState);
-  } else {
-    enqueueOfflineUpdate(rIndex, targetState, false);
-  }
+  // Always ACK local control immediately. Cloud persistence is handled by
+  // cloudSyncTask, never by this HTTP request path.
 
   DynamicJsonDocument res(256);
   res["success"] = true;
@@ -418,12 +432,8 @@ bool proxyToggleToMember(const String& nodeId, int rIndex, bool targetState) {
 void handleToggleAllMesh(bool on) {
   handleCORS();
   for (int i = 0; i < NUM_DEVICES; i++) {
+    enqueueOfflineUpdate(i, on, false);
     setRelay(i, on);
-    if (isHomeWifiConnected() && boardUUID != "") {
-      updateDeviceInDB(i, on);
-    } else {
-      enqueueOfflineUpdate(i, on, false);
-    }
   }
 
   int reached = 0;
@@ -478,6 +488,8 @@ void setupWebServer() {
     doc["devicesCount"] = NUM_DEVICES;
     doc["meshNodes"] = (localRole == ROLE_LEADER) ? meshNodeCount : 0;
     doc["stationConnected"] = isHomeWifiConnected();
+    doc["apStations"] = WiFi.softAPgetStationNum();
+    doc["uptimeMs"] = millis();
 
     String res;
     serializeJson(doc, res);
@@ -509,15 +521,20 @@ void setupWebServer() {
   // e.g. POST /api/node/bedroom_board/device/2/state
   server.on(Uri("^\\/api\\/node\\/([\\w\\-]+)\\/device\\/([0-3])\\/state$"), HTTP_POST,
     []() {
-      handleCORS();
       String nodeId = server.pathArg(0);
       int rIndex = server.pathArg(1).toInt();
 
+      // Own devices: handleDeviceToggle() already emits CORS headers.
+      // Calling handleCORS() here too produced DUPLICATE
+      // "Access-Control-Allow-Origin" headers, which browsers reject -
+      // that made every toggle from the HTTPS dashboard fail with a
+      // network error while GET /api/devices (single CORS call) worked.
       if (nodeId == String(BOARD_IDENTIFIER)) {
         handleDeviceToggle(rIndex);
         return;
       }
 
+      handleCORS();
       DynamicJsonDocument req(256);
       if (!server.hasArg("plain") || deserializeJson(req, server.arg("plain")) || !req["state"].is<bool>()) {
         server.send(400, "application/json", "{\"error\":\"Invalid state payload\"}");
@@ -756,10 +773,20 @@ void becomeLeader() {
   // Leave the leader's network if we had joined one
   if (WiFi.SSID() == String(MESH_SSID)) WiFi.disconnect(false);
   // Leader needs AP + STA: AP for the phone/members, STA to keep watching
-  // for the home Wi-Fi to come back.
+  // for the home Wi-Fi to come back. Disable automatic STA reconnects here:
+  // background STA scans/reconnects can interrupt SoftAP clients on the
+  // ESP32's shared radio. The main loop retries explicitly only when no
+  // phone/member is currently attached to this AP.
   WiFi.mode(WIFI_AP_STA);
+  WiFi.setAutoReconnect(false);
+  WiFi.disconnect(false, false);
   WiFi.softAPConfig(AP_IP, AP_GATEWAY, AP_SUBNET);
-  WiFi.softAP(MESH_SSID, (strlen(MESH_PASS) >= 8) ? MESH_PASS : NULL);
+  bool apStarted = WiFi.softAP(MESH_SSID, (strlen(MESH_PASS) >= 8) ? MESH_PASS : NULL);
+  if (!apStarted) {
+    Serial.println("ERROR: SoftAP start failed; role will be retried.");
+    localRole = ROLE_IDLE;
+    return;
+  }
   Serial.print("-> SoftAP active. IP: ");
   Serial.println(WiFi.softAPIP());
 }
@@ -876,6 +903,8 @@ void evaluateLocalRole() {
 //  STORE AND FORWARD OFFLINE QUEUE
 // ============================================================
 void enqueueOfflineUpdate(int index, bool state, bool isFeedback) {
+  if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
+
   // Keep only the latest value for each device/source pair. This prevents a
   // rapid switch sequence from exhausting the queue while offline.
   for (int i = 0; i < queueCount; i++) {
@@ -883,6 +912,7 @@ void enqueueOfflineUpdate(int index, bool state, bool isFeedback) {
         offlineQueue[i].isFeedback == isFeedback) {
       offlineQueue[i].state = state;
       saveOfflineQueue();
+      if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
       return;
     }
   }
@@ -895,17 +925,24 @@ void enqueueOfflineUpdate(int index, bool state, bool isFeedback) {
     queueCount++;
     saveOfflineQueue();
     Serial.printf("Enqueued offline action: Dev [%d] State: %d (Queue: %d)\n", index, state, queueCount);
+  } else {
+    Serial.printf("Offline queue full; dropped update for device %d.\n", index);
   }
+  if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
 }
 
 void saveOfflineQueue() {
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   preferences.putUChar("q_count", (uint8_t)queueCount);
-  for (int i = 0; i < MAX_PENDING; i++) {
+  // Persist only live entries. Writing 48 unused keys for every single
+  // toggle made local command handling perform unnecessary flash work.
+  for (int i = 0; i < queueCount; i++) {
     char key[8];
-    sprintf(key, "q%d_i", i); preferences.putChar(key, i < queueCount ? offlineQueue[i].deviceIndex : -1);
-    sprintf(key, "q%d_s", i); preferences.putBool(key, i < queueCount && offlineQueue[i].state);
-    sprintf(key, "q%d_f", i); preferences.putBool(key, i < queueCount && offlineQueue[i].isFeedback);
+    sprintf(key, "q%d_i", i); preferences.putChar(key, offlineQueue[i].deviceIndex);
+    sprintf(key, "q%d_s", i); preferences.putBool(key, offlineQueue[i].state);
+    sprintf(key, "q%d_f", i); preferences.putBool(key, offlineQueue[i].isFeedback);
   }
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
 }
 
 void loadOfflineQueue() {
@@ -920,23 +957,46 @@ void loadOfflineQueue() {
   Serial.printf("Restored %d pending offline updates.\n", queueCount);
 }
 
-void flushOfflineQueue() {
-  if (queueCount == 0 || !isHomeWifiConnected() || boardUUID == "") return;
+bool flushOfflineQueue() {
+  if (!isHomeWifiConnected() || boardUUID == "") return false;
 
-  Serial.printf("Flushing %d offline updates to Supabase Cloud...\n", queueCount);
-  int remaining = 0;
+  PendingUpdate work;
+  bool found = false;
+  if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
   for (int i = 0; i < queueCount; i++) {
-    if (!offlineQueue[i].pending) continue;
-    bool delivered = offlineQueue[i].isFeedback
-      ? updateFeedbackInDB(offlineQueue[i].deviceIndex, offlineQueue[i].state)
-      : updateDeviceInDB(offlineQueue[i].deviceIndex, offlineQueue[i].state);
-    if (!delivered) {
-      offlineQueue[remaining++] = offlineQueue[i];
+    if (!offlineQueue[i].pending || offlineQueue[i].deviceIndex < 0 ||
+        offlineQueue[i].deviceIndex >= NUM_DEVICES ||
+        deviceUUIDs[offlineQueue[i].deviceIndex] == "") continue;
+    work = offlineQueue[i];
+    found = true;
+    break;
+  }
+  if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
+  if (!found) return true;
+
+  bool delivered = work.isFeedback
+    ? updateFeedbackInDB(work.deviceIndex, work.state)
+    : updateDeviceInDB(work.deviceIndex, work.state);
+  if (!delivered) {
+    Serial.printf("Cloud update pending for device %d; will retry.\n", work.deviceIndex);
+    return false;
+  }
+
+  // Remove only the exact value sent. If the user changed this device while
+  // the cloud request was in flight, retain the newer queued value.
+  if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
+  for (int i = 0; i < queueCount; i++) {
+    if (offlineQueue[i].pending && offlineQueue[i].deviceIndex == work.deviceIndex &&
+        offlineQueue[i].isFeedback == work.isFeedback && offlineQueue[i].state == work.state) {
+      for (int j = i; j < queueCount - 1; j++) offlineQueue[j] = offlineQueue[j + 1];
+      queueCount--;
+      offlineQueue[queueCount].pending = false;
+      break;
     }
   }
-  queueCount = remaining;
   saveOfflineQueue();
-  Serial.printf("Offline queue remaining: %d.\n", queueCount);
+  if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
+  return true;
 }
 
 // ============================================================
@@ -952,6 +1012,12 @@ void setup() {
   // Reduce dynamic power draw significantly with no practical
   // impact on WebServer/JSON workloads (big heat reduction).
   setCpuFrequencyMhz(160);
+
+  preferencesMutex = xSemaphoreCreateMutex();
+  offlineQueueMutex = xSemaphoreCreateMutex();
+  if (!preferencesMutex || !offlineQueueMutex) {
+    Serial.println("ERROR: Failed to create persistence/queue mutexes.");
+  }
 
   preferences.begin("smart_home", false);
   loadOfflineQueue();
@@ -984,25 +1050,26 @@ void setup() {
   // SoftAP is started later by becomeLeader() ONLY when home Wi-Fi is down.
   WiFi.mode(WIFI_STA);
 
-  wifiMulti.addAP(ssid, password);
-  Serial.print("-> Connecting to Home Wi-Fi: ");
-  Serial.println(ssid);
+  if (strlen(ssid) > 0) {
+    wifiMulti.addAP(ssid, password);
+    Serial.print("-> Connecting to Home Wi-Fi: ");
+    Serial.println(ssid);
 
-  // Initial blocking attempt so the cloud plane links immediately after
-  // power-on. If the router itself is still booting (whole-house power
-  // restore), the throttled retry in loop() connects as soon as it is up.
-  unsigned long wifiStart = millis();
-  while (wifiMulti.run() != WL_CONNECTED && millis() - wifiStart < 8000) {
-    delay(250);
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.print("-> Home Wi-Fi connected. IP: ");
-    Serial.println(WiFi.localIP());
-    WiFi.setTxPower(WIFI_POWER_15dBm);
+    // Initial bounded attempt so cloud can start immediately when available.
+    unsigned long wifiStart = millis();
+    while (wifiMulti.run() != WL_CONNECTED && millis() - wifiStart < 8000) {
+      delay(250);
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.print("-> Home Wi-Fi connected. IP: ");
+      Serial.println(WiFi.localIP());
+    } else {
+      Serial.println("-> Home Wi-Fi unavailable; local AP will start.");
+    }
   } else {
-    Serial.println("-> Home Wi-Fi not up yet (router may still be booting). Will keep retrying quietly.");
-    WiFi.setTxPower(WIFI_POWER_15dBm);
+    Serial.println("-> No Home Wi-Fi credentials configured; skipping STA scans.");
   }
+  WiFi.setTxPower(WIFI_POWER_15dBm);
 
   // mDNS responder (http://home-automation.local)
   if (MDNS.begin("home-automation")) {
@@ -1020,6 +1087,22 @@ void setup() {
     Serial.println("-> Home Wi-Fi down at boot. Electing local role now...");
     lastRoleEval = 0;
     evaluateLocalRole();
+  }
+
+  BaseType_t taskCreated = pdFAIL;
+  if (preferencesMutex && offlineQueueMutex) {
+    taskCreated = xTaskCreatePinnedToCore(
+      cloudSyncTask,
+      "cloud_sync",
+      16384,
+      nullptr,
+      1,
+      &cloudSyncTaskHandle,
+      0
+    );
+  }
+  if (taskCreated != pdPASS) {
+    Serial.println("ERROR: Cloud sync task failed to start; local control remains active.");
   }
 
   Serial.println("===========================================\n");
@@ -1061,11 +1144,7 @@ void loop() {
           http.end();
         }
 
-        if (isHomeWifiConnected() && boardUUID != "") {
-          updateFeedbackInDB(i, isSwitchOn);
-        } else {
-          enqueueOfflineUpdate(i, isSwitchOn, true);
-        }
+        enqueueOfflineUpdate(i, isSwitchOn, true);
       }
     }
     lastInputRead[i] = currentRead;
@@ -1074,21 +1153,38 @@ void loop() {
   // 2. Role / connectivity management (throttled internally)
   evaluateLocalRole();
 
-  // 3. Station reconnect attempts - THROTTLED.
-  // The old code called wifiMulti.run() every single loop iteration which
-  // caused constant reconnect storms when offline: high CPU, high RF
-  // activity, heat, and interference with our own SoftAP (slow local page).
-  if (!isHomeWifiConnected() && millis() - lastWifiRetry >= WIFI_RETRY_INTERVAL) {
-    lastWifiRetry = millis();
-    wifiMulti.run();
+  // 3. Station reconnect attempts - THROTTLED and NEVER while the SoftAP
+  // has a connected phone/member.
+  //
+  // WiFiMulti::run() performs a BLOCKING network scan (~2-4 s). In leader
+  // mode (SoftAP + STA) that scan starves server.handleClient(), so every
+  // local toggle issued during the scan window timed out (and scanning
+  // briefly disturbs SoftAP traffic). The leader now kicks a normal,
+  // WiFi.begin() attempt every 30 s, and only when the AP has no clients.
+  // Automatic STA reconnect is disabled in leader mode for the same reason.
+  // Members already probe home Wi-Fi from evaluateLocalRole(), and IDLE
+  // keeps using WiFiMulti because no SoftAP is active then.
+  if (!isHomeWifiConnected()) {
+    if (localRole == ROLE_LEADER) {
+      if (WiFi.softAPgetStationNum() == 0 && strlen(ssid) > 0 && WiFi.status() != WL_CONNECTED &&
+          millis() - lastLeaderWifiTry >= LEADER_WIFI_RETRY_INTERVAL) {
+        lastLeaderWifiTry = millis();
+        WiFi.begin(ssid, password); // non-blocking; STA only
+      }
+    } else if (localRole == ROLE_IDLE && strlen(ssid) > 0 &&
+               millis() - lastWifiRetry >= WIFI_RETRY_INTERVAL) {
+      lastWifiRetry = millis();
+      wifiMulti.run();
+    }
   }
 
   // 4. Live Serial Monitor (slowed down - serial prints cost CPU time)
   if (millis() - lastSerialDumpTime >= SERIAL_DUMP_INTERVAL) {
     lastSerialDumpTime = millis();
-    Serial.printf("\n--- NODE MONITOR | Role: %s | Home WiFi: %s ---\n",
+    Serial.printf("\n--- NODE MONITOR | Role: %s | Home WiFi: %s | AP clients: %u | Free heap: %u ---\n",
       (localRole == ROLE_LEADER) ? "LEADER" : ((localRole == ROLE_MEMBER) ? "MEMBER" : "IDLE"),
-      isHomeWifiConnected() ? "CONNECTED" : "OFFLINE"
+      isHomeWifiConnected() ? "CONNECTED" : "OFFLINE",
+      WiFi.softAPgetStationNum(), ESP.getFreeHeap()
     );
     for (int i = 0; i < NUM_DEVICES; i++) {
       Serial.printf("Device %d | Relay: %-3s | Switch: %-3s\n",
@@ -1100,78 +1196,9 @@ void loop() {
     Serial.println("-----------------------------------------\n");
   }
 
-  // ---- Everything below requires the cloud plane (home Wi-Fi + NTP) ----
-  if (!isHomeWifiConnected()) return;
-
-  static unsigned long lastNtpAttempt = 0;
-  time_t currentNtpTime = time(nullptr);
-  if (currentNtpTime < 100000) {
-    if (millis() - lastNtpAttempt > 30000) { // was 5s - way too aggressive
-      Serial.println("-> Syncing Time with NTP...");
-      configTime(0, 0, "pool.ntp.org");
-      lastNtpAttempt = millis();
-    }
-    return;
-  }
-
-  if (boardUUID == "") {
-    static unsigned long lastResolveAttempt = 0;
-    if (millis() - lastResolveAttempt > 5000) {
-      Serial.println("-> Linking Board to Supabase Database...");
-      if (resolveBoardAndDevices()) {
-        Serial.println("Board & Devices verified.");
-        // FIX (offline-state preservation): the DEVICE is the source of
-        // truth right after reconnecting. Push current relay + feedback
-        // states to the cloud FIRST, so anything the user toggled while
-        // offline stays exactly as it is (the old code called
-        // fetchInitialState() here, which reverted relays to stale cloud
-        // state and disrupted offline-toggled devices).
-        syncAllStatesToDB();
-        sendHeartbeat();
-        pollAlarms();
-        // Queue carries every toggle made while offline -> cloud catches up.
-        flushOfflineQueue();
-      } else {
-        Serial.println("FAILED to link Board/Devices. Retrying...");
-      }
-      lastResolveAttempt = millis();
-    }
-    return;
-  }
-
-  // 5. Cloud Polling, Alarms & Heartbeat (unchanged cloud behaviour)
-  if (millis() - lastPollTime >= POLL_INTERVAL) {
-    lastPollTime = millis();
-    pollDatabase();
-  }
-
-  if (millis() - lastAlarmPoll >= ALARM_POLL_INTERVAL) {
-    lastAlarmPoll = millis();
-    pollAlarms();
-  }
-
-  if (millis() - lastHeartbeatTime >= HEARTBEAT_INTERVAL) {
-    lastHeartbeatTime = millis();
-    sendHeartbeat();
-  }
-
-  flushOfflineQueue();
-
-  // Edge Alarms
-  String nowIso = getIsoTime();
-  for (int i = 0; i < MAX_ALARMS; i++) {
-    if (alarms[i].active && nowIso >= alarms[i].triggerAt) {
-      Serial.println("ALARM FIRED! ID: " + alarms[i].id);
-      alarms[i].active = false;
-      int targetDev = alarms[i].deviceIndex;
-
-      if (targetDev >= 0 && targetDev < NUM_DEVICES) {
-        setRelay(targetDev, alarms[i].action);
-        updateDeviceInDB(targetDev, alarms[i].action);
-      }
-      markAlarmFiredInDB(alarms[i].id);
-    }
-  }
+  // Cloud traffic is intentionally isolated in cloudSyncTask. This loop
+  // remains available to service local HTTP requests and physical inputs.
+  delay(1); // yield to Wi-Fi/FreeRTOS tasks without delaying local polling
 }
 
 // ============================================================
@@ -1195,10 +1222,21 @@ void pollDatabase() {
       bool dbState = doc[i]["is_on"];
 
       if (rIndex >= 0 && rIndex < NUM_DEVICES) {
-        if (dbState != isRelayOn[rIndex]) {
+        if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
+        bool updatePending = false;
+        for (int q = 0; q < queueCount; q++) {
+          if (offlineQueue[q].pending && offlineQueue[q].deviceIndex == rIndex &&
+              !offlineQueue[q].isFeedback) {
+            updatePending = true;
+            break;
+          }
+        }
+
+        if (!updatePending && dbState != isRelayOn[rIndex]) {
           Serial.printf("Cloud Toggle Dev [%d] -> %s\n", rIndex, dbState ? "ON" : "OFF");
           setRelay(rIndex, dbState);
         }
+        if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
       }
     }
   }
@@ -1273,6 +1311,10 @@ bool resolveBoardAndDevices() {
     http.end();
   }
 
+  if (!foundAny) {
+    boardUUID = "";
+    for (int i = 0; i < NUM_DEVICES; i++) deviceUUIDs[i] = "";
+  }
   return foundAny;
 }
 
@@ -1376,4 +1418,90 @@ void sendHeartbeat() {
     Serial.println("Heartbeat synced to Cloud.");
   }
   http.end();
+}
+
+// Run all potentially slow cloud traffic away from the local WebServer loop.
+// Supabase DNS/TLS/API stalls can therefore never hold up phone-to-ESP32
+// status reads or relay commands.
+void cloudSyncTask(void* parameter) {
+  (void)parameter;
+  unsigned long lastNtpAttempt = 0;
+  unsigned long lastResolveAttempt = 0;
+  unsigned long lastCloudPoll = 0;
+  unsigned long lastCloudAlarmPoll = 0;
+  unsigned long lastCloudHeartbeat = 0;
+  unsigned long nextQueueAttempt = 0;
+  unsigned long queueRetryDelay = 2000;
+
+  for (;;) {
+    if (!isHomeWifiConnected()) {
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+
+    time_t currentNtpTime = time(nullptr);
+    if (currentNtpTime < 100000 && millis() - lastNtpAttempt >= 30000) {
+      Serial.println("-> Cloud worker syncing time with NTP...");
+      configTime(0, 0, "pool.ntp.org");
+      lastNtpAttempt = millis();
+    }
+
+    if (boardUUID == "" && millis() - lastResolveAttempt >= 10000) {
+      lastResolveAttempt = millis();
+      Serial.println("-> Cloud worker linking board/devices...");
+      if (resolveBoardAndDevices()) {
+        Serial.println("-> Board & devices linked; queueing current local state.");
+        for (int i = 0; i < NUM_DEVICES; i++) {
+          enqueueOfflineUpdate(i, isRelayOn[i], false);
+          enqueueOfflineUpdate(i, confirmedInputState[i] == LOW, true);
+        }
+      }
+    }
+
+    if (boardUUID != "") {
+      if ((long)(millis() - nextQueueAttempt) >= 0) {
+        bool queueOk = flushOfflineQueue(); // one update per pass
+        if (queueOk) {
+          queueRetryDelay = 2000;
+        } else {
+          queueRetryDelay = min(queueRetryDelay * 2, (unsigned long)60000);
+        }
+        nextQueueAttempt = millis() + queueRetryDelay;
+      }
+
+      currentNtpTime = time(nullptr);
+      if (currentNtpTime >= 100000) {
+        if (millis() - lastCloudPoll >= POLL_INTERVAL) {
+          lastCloudPoll = millis();
+          pollDatabase();
+        }
+
+        if (millis() - lastCloudAlarmPoll >= ALARM_POLL_INTERVAL) {
+          lastCloudAlarmPoll = millis();
+          pollAlarms();
+        }
+
+        if (millis() - lastCloudHeartbeat >= HEARTBEAT_INTERVAL) {
+          lastCloudHeartbeat = millis();
+          sendHeartbeat();
+        }
+
+        String nowIso = getIsoTime();
+        for (int i = 0; i < MAX_ALARMS; i++) {
+          if (!alarms[i].active || nowIso < alarms[i].triggerAt) continue;
+
+          Serial.println("ALARM FIRED! ID: " + alarms[i].id);
+          alarms[i].active = false;
+          int targetDev = alarms[i].deviceIndex;
+          if (targetDev >= 0 && targetDev < NUM_DEVICES) {
+            enqueueOfflineUpdate(targetDev, alarms[i].action, false);
+            setRelay(targetDev, alarms[i].action);
+          }
+          markAlarmFiredInDB(alarms[i].id);
+        }
+      }
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(250));
+  }
 }

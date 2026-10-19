@@ -1,7 +1,7 @@
 'use client';
 
 import { useSyncExternalStore, useCallback } from 'react';
-import { discoverLocalNode, getLocalBaseUrl } from '@/lib/localApi';
+import { discoverLocalNode, fetchLocalStatus, getLocalBaseUrl } from '@/lib/localApi';
 
 /**
  * Shared local-connection store (singleton).
@@ -11,14 +11,13 @@ import { discoverLocalNode, getLocalBaseUrl } from '@/lib/localApi';
  * requests to the ESP32 every 5s). Now a single store owns the
  * connection state and all consumers subscribe to it.
  *
- * Re-checks are event-driven for real network transitions:
- * - immediate check on window online/offline events
- * - slow background beat only while the page is visible
- *   (30 minutes) - no aggressive polling.
+ * Re-checks are event-driven for network/visibility transitions and use a
+ * lightweight health probe while the local-control page is active.
  */
 
 const FAST_TIMEOUT_MS = 5500;
-const BACKGROUND_PROBE_INTERVAL_MS = 30 * 60 * 1000;
+const VISIBLE_PROBE_INTERVAL_MS = 4000;
+const HIDDEN_PROBE_INTERVAL_MS = 20000;
 
 let snapshot = {
   isLocalConnected: false,
@@ -61,9 +60,12 @@ function scheduleNextBeat() {
   if (beatTimer) clearTimeout(beatTimer);
   beatTimer = null;
   if (!probingEnabled) return;
+  const interval = typeof document !== 'undefined' && document.visibilityState === 'visible'
+    ? VISIBLE_PROBE_INTERVAL_MS
+    : HIDDEN_PROBE_INTERVAL_MS;
   beatTimer = setTimeout(
     () => checkConnection(),
-    BACKGROUND_PROBE_INTERVAL_MS,
+    interval,
   );
 }
 
@@ -73,10 +75,28 @@ export async function checkConnection() {
   patch({ isProbing: true });
 
   try {
-    const { status } = await discoverLocalNode(FAST_TIMEOUT_MS);
+    let status;
+    if (snapshot.isLocalConnected) {
+      try {
+        status = await fetchLocalStatus(1800);
+      } catch {
+        status = (await discoverLocalNode(FAST_TIMEOUT_MS)).status;
+      }
+    } else {
+      status = (await discoverLocalNode(FAST_TIMEOUT_MS)).status;
+    }
+    if (!status || status.online !== true || !status.nodeId) {
+      throw new Error('Invalid ESP32 status response');
+    }
     consecutiveFailures = 0;
     // Only notify subscribers when something actually changed.
-    if (!snapshot.isLocalConnected || snapshot.leaderNode?.nodeId !== status.nodeId) {
+    if (
+      !snapshot.isLocalConnected ||
+      snapshot.leaderNode?.nodeId !== status.nodeId ||
+      snapshot.leaderNode?.role !== status.role ||
+      snapshot.leaderNode?.stationConnected !== status.stationConnected ||
+      snapshot.leaderNode?.apStations !== status.apStations
+    ) {
       patch({ isLocalConnected: true, leaderNode: status });
     }
   } catch {
@@ -99,11 +119,18 @@ function bindGlobalEvents() {
   const recheckOnNetworkChange = () => {
     if (probingEnabled) setTimeout(() => checkConnection(), 250);
   };
+  const recheckWhenVisible = () => {
+    if (document.visibilityState === 'visible' && probingEnabled) {
+      setTimeout(() => checkConnection(), 150);
+    }
+  };
 
   // Connectivity transitions are THE signal that local mode may be needed -
   // react instantly instead of waiting for the next poll tick.
   window.addEventListener('online', () => { consecutiveFailures = 0; recheckOnNetworkChange(); });
   window.addEventListener('offline', () => { consecutiveFailures = 0; recheckOnNetworkChange(); });
+  window.addEventListener('focus', recheckOnNetworkChange);
+  document.addEventListener('visibilitychange', recheckWhenVisible);
 
   if (probingEnabled) checkConnection();
 }

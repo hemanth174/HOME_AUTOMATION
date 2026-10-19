@@ -12,6 +12,7 @@
 
 const DEFAULT_LOCAL_IP = '192.168.4.1';
 const MDNS_HOST = 'home-automation.local';
+let localGatewayNodeId = null;
 
 /**
  * Get active base URL for local ESP32 (stored in localStorage for persistence)
@@ -58,7 +59,12 @@ let addressSpaceIndex = 0;
 
 async function localFetch(url, options = {}) {
   let lastError;
-  for (let i = addressSpaceIndex; i < ADDRESS_SPACE_STRATEGIES.length; i++) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const canRetry = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+  const firstIndex = Math.min(addressSpaceIndex, ADDRESS_SPACE_STRATEGIES.length - 1);
+  const lastIndex = canRetry ? ADDRESS_SPACE_STRATEGIES.length - 1 : firstIndex;
+
+  for (let i = firstIndex; i <= lastIndex; i++) {
     const space = ADDRESS_SPACE_STRATEGIES[i];
     try {
       const res = space
@@ -80,15 +86,12 @@ async function localFetch(url, options = {}) {
 /**
  * Low-level fetch with abort timeout. Rejects on timeout / network error.
  *
- * NOTE: request bodies are sent as text/plain (CORS "simple request").
- * application/json would make every POST non-simple, forcing a CORS
- * preflight (OPTIONS) before each toggle - and Chrome's Private Network
- * Access rules block that preflight for HTTPS -> http://192.168.4.1.
- * That is exactly the "status loads fine but switching fails" symptom.
- * The ESP32 firmware reads the raw body (server.arg("plain")) and does
- * not care about the Content-Type.
+ * NOTE: request bodies are sent as text/plain (CORS-safelisted), and the
+ * ESP32 WebServer exposes the raw body as server.arg("plain"). The firmware
+ * also handles OPTIONS for browsers that perform a Local Network Access
+ * preflight.
  */
-async function fetchJson(url, { method = 'GET', body, timeoutMs = 2000, signal } = {}) {
+async function fetchJson(url, { method = 'GET', headers, body, timeoutMs = 2000, signal } = {}) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   const abortFromCaller = () => controller.abort();
@@ -96,6 +99,7 @@ async function fetchJson(url, { method = 'GET', body, timeoutMs = 2000, signal }
   try {
     const res = await localFetch(url, {
       method,
+      headers,
       signal: controller.signal,
       body,
       mode: 'cors',
@@ -132,11 +136,32 @@ export async function discoverLocalNode(timeoutMs = 900) {
 
   try {
     const winner = await Promise.any(attempts);
-    setLocalBaseUrl(winner.baseUrl);
     controllers.forEach((controller, index) => {
       if (index !== winner.index) controller.abort();
     });
-    return winner;
+    let selectedBaseUrl = winner.baseUrl;
+
+    // A leader's SoftAP address is fixed. Prefer it when this client can
+    // reach it, rather than persisting an mDNS answer that may change when
+    // the ESP32's STA/home-Wi-Fi interface changes.
+    if (winner.status.role === 'leader' && winner.status.ap_ip) {
+      const apBaseUrl = `http://${winner.status.ap_ip}`;
+      if (apBaseUrl !== winner.baseUrl) {
+        try {
+          const apStatus = await fetchJson(`${apBaseUrl}/api/status`, {
+            timeoutMs: Math.min(timeoutMs, 1200),
+          });
+          if (apStatus?.nodeId === winner.status.nodeId) selectedBaseUrl = apBaseUrl;
+        } catch {
+          // The phone may be on the home LAN rather than the ESP32 SoftAP.
+          // Keep the working discovery candidate in that case.
+        }
+      }
+    }
+
+    setLocalBaseUrl(selectedBaseUrl);
+    localGatewayNodeId = winner.status.nodeId;
+    return { ...winner, baseUrl: selectedBaseUrl };
   } catch {
     controllers.forEach((controller) => controller.abort());
     throw new Error('ESP32 not reachable');
@@ -178,11 +203,17 @@ export async function fetchLocalDevices(timeoutMs = 900) {
  */
 export async function setLocalDeviceState(relayIndex, targetState, nodeId = null) {
   const base = getLocalBaseUrl();
-  const endpoint = nodeId
+  // Use the firmware's fixed relay routes for the gateway's own devices.
+  // Its /api/node/:id/... regex route is only needed for member boards and
+  // has varied across deployed firmware builds. Apart from being simpler,
+  // this avoids an unnecessary proxy dispatch for the local leader itself.
+  const isGatewayDevice = nodeId && nodeId === localGatewayNodeId;
+  const endpoint = nodeId && !isGatewayDevice
     ? `/api/node/${encodeURIComponent(nodeId)}/device/${relayIndex}/state`
     : `/api/device/${relayIndex}/state`;
   return fetchJson(`${base}${endpoint}`, {
     method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
     body: JSON.stringify({ state: Boolean(targetState) }),
     // SoftAP round trips can be slow (400ms+ observed); leave headroom
     timeoutMs: nodeId ? 3000 : 2500,

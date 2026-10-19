@@ -22,7 +22,7 @@ import useLocalConnection, {
 } from "@/hooks/useLocalConnection";
 
 const LOCAL_DEVICES_CACHE = "home_auto_cached_local_devices";
-const LOCAL_DEVICE_REFRESH_INTERVAL = 30 * 60 * 1000;
+const LOCAL_DEVICE_REFRESH_INTERVAL = 5000;
 
 function StatusBadge({ children, state }) {
   const styles = {
@@ -73,7 +73,7 @@ function ConnectionGuidance() {
             {number}
           </span>
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#F3DCD4] bg-white text-[#26382C]">
-            <Icon size={17} aria-hidden="true" />
+            <Icon size={17} aria-hidden="true" suppressHydrationWarning />
           </span>
           <span className="min-w-0 pt-0.5">
             <span className="block text-xs font-bold text-[#26382C]">
@@ -106,7 +106,7 @@ function HardwareIllustration() {
       <div className="absolute h-36 w-36 rounded-full bg-[#F3D9CA]/55 sm:h-44 sm:w-44" />
       <div className="absolute h-28 w-28 rounded-full border border-dashed border-[#C98C66]/50 sm:h-36 sm:w-36" />
       <div className="absolute left-[15%] top-[18%] flex h-12 w-12 items-center justify-center rounded-full bg-[#D94B4B] text-white shadow-md sm:left-[10%] sm:h-14 sm:w-14">
-        <Radio size={25} />
+        <Radio size={25} suppressHydrationWarning />
       </div>
       <div className="relative flex h-24 w-36 items-center justify-center rounded-2xl border border-white/80 bg-gradient-to-br from-[#F8F8F5] to-[#D8DAD4] shadow-[0_18px_30px_rgba(87,70,53,0.18)] sm:h-28 sm:w-44">
         <div className="absolute inset-x-3 top-3 h-1 rounded-full bg-white/90" />
@@ -114,6 +114,7 @@ function HardwareIllustration() {
           size={46}
           strokeWidth={1.5}
           className="text-[#26382C] sm:h-14 sm:w-14"
+          suppressHydrationWarning
         />
         <span className="absolute bottom-3 left-4 h-2 w-2 rounded-full bg-[#39845A]" />
         <span className="absolute bottom-3 left-8 h-2 w-2 rounded-full bg-[#A86F3D]" />
@@ -134,6 +135,7 @@ export default function LocalControlPage() {
   const [busy, setBusy] = useState({});
   const [commandErrors, setCommandErrors] = useState({});
   const loadInFlight = useRef(false);
+  const hasDeviceSnapshot = useRef(false);
 
 
   // Read and follow VikaTech's shared theme (html[data-theme]) so this
@@ -162,7 +164,7 @@ export default function LocalControlPage() {
   const loadDevices = useCallback(async (rediscover = false) => {
     if (loadInFlight.current) return;
     loadInFlight.current = true;
-    setLoading(true);
+    if (!hasDeviceSnapshot.current) setLoading(true);
     setError(null);
     let failureType = "connection";
 
@@ -178,6 +180,7 @@ export default function LocalControlPage() {
         throw new Error("device-list");
       }
       setDevices(nextDevices);
+      hasDeviceSnapshot.current = true;
       localStorage.setItem(LOCAL_DEVICES_CACHE, JSON.stringify(nextDevices));
     } catch {
       if (!rediscover) {
@@ -192,6 +195,7 @@ export default function LocalControlPage() {
             throw new Error("device-list");
           }
           setDevices(nextDevices);
+          hasDeviceSnapshot.current = true;
           localStorage.setItem(
             LOCAL_DEVICES_CACHE,
             JSON.stringify(nextDevices),
@@ -203,18 +207,22 @@ export default function LocalControlPage() {
       }
 
       if (failureType === "devices") {
-        setError({
-          type: "devices",
-          message:
-            "The ESP32 responded, but the device list could not be retrieved.",
-        });
+        if (!hasDeviceSnapshot.current) {
+          setError({
+            type: "devices",
+            message:
+              "The ESP32 responded, but the device list could not be retrieved.",
+          });
+        }
       } else {
         setLocalPageConnected(false);
-        setError({
-          type: "connection",
-          message:
-            "Connect to HOME-AUTO-LEADER and allow local network access.",
-        });
+        if (!hasDeviceSnapshot.current) {
+          setError({
+            type: "connection",
+            message:
+              "Connect to HOME-AUTO-LEADER and allow local network access.",
+          });
+        }
       }
     } finally {
       loadInFlight.current = false;
@@ -230,6 +238,7 @@ export default function LocalControlPage() {
       );
       if (Array.isArray(cached) && cached.length) {
         setDevices(cached);
+        hasDeviceSnapshot.current = true;
         setLoading(false);
       }
     } catch {
@@ -261,9 +270,30 @@ export default function LocalControlPage() {
     try {
       await setLocalDeviceState(device.relay_index, nextState, device.node_id);
     } catch {
+      let actualDevice = null;
+      try {
+        const latestDevices = await fetchLocalDevices(2000);
+        actualDevice = latestDevices.find(
+          (item) =>
+            item.relay_index === device.relay_index &&
+            item.node_id === device.node_id,
+        );
+        if (actualDevice) {
+          setDevices(latestDevices);
+          hasDeviceSnapshot.current = true;
+          localStorage.setItem(LOCAL_DEVICES_CACHE, JSON.stringify(latestDevices));
+          if (actualDevice.is_on === nextState) return;
+        }
+      } catch {
+        // The response may have been lost after the relay changed. Keep the
+        // optimistic value only until a later successful device refresh.
+      }
+
       setDevices((current) =>
         current.map((item) =>
-          item.id === device.id ? { ...item, is_on: !nextState } : item,
+          item.id === device.id
+            ? { ...item, is_on: actualDevice ? actualDevice.is_on : !nextState }
+            : item,
         ),
       );
       setCommandErrors((current) => ({
@@ -277,7 +307,7 @@ export default function LocalControlPage() {
     }
   };
 
-  const checking = loading || isProbing;
+  const checking = loading || (isProbing && !isLocalConnected);
   const hasDeviceError = error?.type === "devices";
   const unavailable =
     error?.type === "connection" ||
@@ -313,7 +343,11 @@ export default function LocalControlPage() {
               aria-pressed={pageTheme === "dark"}
               title={pageTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
             >
-              {pageTheme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+              {pageTheme === "dark" ? (
+                <Sun size={17} suppressHydrationWarning />
+              ) : (
+                <Moon size={17} suppressHydrationWarning />
+              )}
               <span className="hidden sm:inline">{pageTheme === "dark" ? "Light mode" : "Dark mode"}</span>
             </button>
             <button
@@ -323,7 +357,11 @@ export default function LocalControlPage() {
               className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl border border-[#E8E5DF] bg-white px-3 text-sm font-semibold text-[#26382C] shadow-sm transition hover:border-[#C98C66] hover:bg-[#FFFCF8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#A86F3D] disabled:cursor-wait disabled:opacity-50 sm:px-4"
               aria-label="Refresh local connection and devices"
             >
-              <RefreshCw size={17} className={checking ? "animate-spin" : ""} />
+              <RefreshCw
+                size={17}
+                className={checking ? "animate-spin" : ""}
+                suppressHydrationWarning
+              />
               <span className="hidden sm:inline">Refresh</span>
             </button>
           </div>
@@ -352,11 +390,11 @@ export default function LocalControlPage() {
                   }`}
                 >
                   {statusState === "checking" ? (
-                    <LoaderCircle className="animate-spin" size={25} />
+                    <LoaderCircle className="animate-spin" size={25} suppressHydrationWarning />
                   ) : statusState === "connected" ? (
-                    <ShieldCheck size={27} />
+                    <ShieldCheck size={27} suppressHydrationWarning />
                   ) : (
-                    <WifiOff size={27} />
+                    <WifiOff size={27} suppressHydrationWarning />
                   )}
                 </span>
                 <div className="min-w-0 flex-1 pt-0.5">
@@ -408,6 +446,7 @@ export default function LocalControlPage() {
                 <RefreshCw
                   size={17}
                   className={checking ? "animate-spin" : ""}
+                  suppressHydrationWarning
                 />
                 {checking
                   ? "Checking connection..."
@@ -438,6 +477,7 @@ export default function LocalControlPage() {
                   size={17}
                   className="shrink-0 text-[#A86F3D]"
                   aria-hidden="true"
+                  suppressHydrationWarning
                 />
               </div>
               <ConnectionGuidance />
@@ -473,6 +513,7 @@ export default function LocalControlPage() {
                 className="mb-3 animate-spin text-[#A86F3D]"
                 size={28}
                 aria-hidden="true"
+                suppressHydrationWarning
               />
               <p className="text-sm font-semibold text-[#26382C]">
                 Finding your local devices…
@@ -486,7 +527,7 @@ export default function LocalControlPage() {
           {!loading && !devices.length && hasDeviceError && (
             <div className="mt-6 flex min-h-64 flex-col items-center justify-center rounded-2xl border border-[#F3D6D1] bg-[#FFFAF9] px-5 py-8 text-center sm:min-h-72 sm:px-8">
               <span className="flex h-16 w-16 items-center justify-center rounded-full bg-[#FCEDEC] text-[#858780] sm:hidden">
-                <WifiOff size={30} aria-hidden="true" />
+                <WifiOff size={30} aria-hidden="true" suppressHydrationWarning />
               </span>
               <img
                 src="/images/vikatech-local-network.png"
@@ -511,6 +552,7 @@ export default function LocalControlPage() {
                 <RefreshCw
                   size={16}
                   className={checking ? "animate-spin" : ""}
+                  suppressHydrationWarning
                 />
                 Try again
               </button>
@@ -520,7 +562,7 @@ export default function LocalControlPage() {
           {!loading && !devices.length && !error && connected && (
             <div className="mt-6 flex min-h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-[#DADFD7] bg-[#FCFBF9] px-5 py-8 text-center sm:min-h-72">
               <span className="flex h-20 w-20 items-center justify-center rounded-full bg-[#EAF1E8] text-[#536D5B] sm:hidden">
-                <WifiOff size={34} aria-hidden="true" />
+                <WifiOff size={34} aria-hidden="true" suppressHydrationWarning />
               </span>
               <img
                 src="/images/vikatech-local-network.png"
@@ -561,7 +603,7 @@ export default function LocalControlPage() {
                             : "bg-[#F0EEE9] text-[#69736D]"
                         }`}
                       >
-                        <Power size={19} aria-hidden="true" />
+                        <Power size={19} aria-hidden="true" suppressHydrationWarning />
                       </span>
                       <div className="min-w-0">
                         <p
