@@ -28,21 +28,13 @@ const int INPUT_PINS[NUM_DEVICES] = {19, 18, 5, 17};
 //  They have been resolved below.
 // ============================================================
 
-const char* ssid = "";
-const char* password = "";
+// const char* ssid = "";
+// const char* password = "";
 
-// const char* ssid     = "Hapy";
-// const char* password = "12345678";
 
-// const char* ssid     = "TP-Link_Guest_7AEB";
-// const char* password = "test12345";
-
-// const char* ssid     = "NxtWave_Te@m";
-// const char* password = "Nxtwave@KKH2026";
-
-const char* BOARD_IDENTIFIER = "katappa";
-const char* SUPABASE_BASE = "https://ojuvphlkzbxwjhqzexbt.supabase.co/rest/v1";
-const char* SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qdXZwaGxremJ4d2pocXpleGJ0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTg2Nzk2MiwiZXhwIjoyMDk3NDQzOTYyfQ.SN6g_bR4bpVEIGdIW-GLPTHRlqZBHF5YBUKjHDMWjLU"; 
+const char* BOARD_IDENTIFIER = "";
+const char* SUPABASE_BASE = "";
+const char* SUPABASE_SERVICE_KEY = ""; 
 
 // Mesh / SoftAP Configuration for Offline Autonomous Control.
 // One elected LEADER broadcasts MESH_SSID; MEMBER boards join it
@@ -68,7 +60,7 @@ const unsigned long DEBOUNCE_DELAY = 50;
 
 // Live Serial Monitor
 unsigned long lastSerialDumpTime = 0;
-const unsigned long SERIAL_DUMP_INTERVAL = 10000;
+const unsigned long SERIAL_DUMP_INTERVAL = 60000;
 
 WiFiMulti wifiMulti;
 WebServer server(80);
@@ -76,9 +68,11 @@ Preferences preferences;
 SemaphoreHandle_t preferencesMutex = nullptr;
 SemaphoreHandle_t offlineQueueMutex = nullptr;
 TaskHandle_t cloudSyncTaskHandle = nullptr;
+TaskHandle_t cloudPollTaskHandle = nullptr;
+volatile bool cloudDevicesReady = false;
 
 // Cloud polling runs in the background worker, not in the local HTTP loop.
-const unsigned long POLL_INTERVAL = 10000;
+const unsigned long POLL_INTERVAL = 1000;
 
 // Heartbeat
 const unsigned long HEARTBEAT_INTERVAL = 20000;
@@ -164,6 +158,7 @@ void handleToggleAllMesh(bool on);
 void loadOfflineQueue();
 void saveOfflineQueue();
 void cloudSyncTask(void* parameter);
+void cloudPollTask(void* parameter);
 void configureHttp(HTTPClient& http, uint16_t connectTimeout = 2500, uint16_t requestTimeout = 4000);
 
 // ============================================================
@@ -1103,6 +1098,19 @@ void setup() {
   }
   if (taskCreated != pdPASS) {
     Serial.println("ERROR: Cloud sync task failed to start; local control remains active.");
+  } else {
+    BaseType_t pollTaskCreated = xTaskCreatePinnedToCore(
+      cloudPollTask,
+      "cloud_poll",
+      12288,
+      nullptr,
+      1,
+      &cloudPollTaskHandle,
+      0
+    );
+    if (pollTaskCreated != pdPASS) {
+      Serial.println("ERROR: Cloud poll task failed to start; cloud-to-relay sync is disabled.");
+    }
   }
 
   Serial.println("===========================================\n");
@@ -1209,7 +1217,9 @@ void pollDatabase() {
 
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=relay_index,is_on");
-  configureHttp(http);
+  // This poll is the cloud-to-relay latency budget. Bound failures so a
+  // stalled endpoint cannot suppress later one-second checks indefinitely.
+  configureHttp(http, 2000, 2000);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
 
@@ -1427,7 +1437,6 @@ void cloudSyncTask(void* parameter) {
   (void)parameter;
   unsigned long lastNtpAttempt = 0;
   unsigned long lastResolveAttempt = 0;
-  unsigned long lastCloudPoll = 0;
   unsigned long lastCloudAlarmPoll = 0;
   unsigned long lastCloudHeartbeat = 0;
   unsigned long nextQueueAttempt = 0;
@@ -1450,11 +1459,8 @@ void cloudSyncTask(void* parameter) {
       lastResolveAttempt = millis();
       Serial.println("-> Cloud worker linking board/devices...");
       if (resolveBoardAndDevices()) {
-        Serial.println("-> Board & devices linked; queueing current local state.");
-        for (int i = 0; i < NUM_DEVICES; i++) {
-          enqueueOfflineUpdate(i, isRelayOn[i], false);
-          enqueueOfflineUpdate(i, confirmedInputState[i] == LOW, true);
-        }
+        Serial.println("-> Board & devices linked; one-second cloud polling enabled.");
+        cloudDevicesReady = true;
       }
     }
 
@@ -1471,11 +1477,6 @@ void cloudSyncTask(void* parameter) {
 
       currentNtpTime = time(nullptr);
       if (currentNtpTime >= 100000) {
-        if (millis() - lastCloudPoll >= POLL_INTERVAL) {
-          lastCloudPoll = millis();
-          pollDatabase();
-        }
-
         if (millis() - lastCloudAlarmPoll >= ALARM_POLL_INTERVAL) {
           lastCloudAlarmPoll = millis();
           pollAlarms();
@@ -1503,5 +1504,24 @@ void cloudSyncTask(void* parameter) {
     }
 
     vTaskDelay(pdMS_TO_TICKS(250));
+  }
+}
+
+// Poll Supabase independently from queue writes, alarms, and heartbeats.
+// This preserves the one-second cloud-to-relay response even if any other
+// cloud request is slow or being retried.
+void cloudPollTask(void* parameter) {
+  (void)parameter;
+  TickType_t nextPoll = xTaskGetTickCount();
+
+  for (;;) {
+    if (!isHomeWifiConnected() || !cloudDevicesReady) {
+      nextPoll = xTaskGetTickCount();
+      vTaskDelay(pdMS_TO_TICKS(500));
+      continue;
+    }
+
+    pollDatabase();
+    vTaskDelayUntil(&nextPoll, pdMS_TO_TICKS(POLL_INTERVAL));
   }
 }
