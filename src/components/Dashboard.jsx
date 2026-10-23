@@ -1,5 +1,4 @@
 "use client";
-
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import VoiceControl from "@/components/VoiceControl";
@@ -104,9 +103,6 @@ export default function Dashboard() {
   const [pending, setPending] = useState({});
   const deviceCarouselRef = useRef(null);
   const restoredCarouselRef = useRef("");
-  // Two-click confirm arm for bulk actions: null | 'room-on' | 'room-off' | 'all-on' | 'all-off'
-  const [confirmArm, setConfirmArm] = useState(null);
-  const confirmTimer = useRef(null);
 
   const deviceViewCookie = user?.id ? `vt_device_view_${user.id}` : null;
   const carouselCookie = useCallback(
@@ -430,18 +426,6 @@ export default function Dashboard() {
     const timer = setTimeout(() => setPending({}), 6000);
     return () => clearTimeout(timer);
   }, [pending]);
-
-  useEffect(() => {
-    return () => {
-      if (confirmTimer.current) clearTimeout(confirmTimer.current);
-    };
-  }, []);
-
-  const armConfirm = useCallback((kind) => {
-    if (confirmTimer.current) clearTimeout(confirmTimer.current);
-    setConfirmArm(kind);
-    confirmTimer.current = setTimeout(() => setConfirmArm(null), 4000);
-  }, []);
 
   const toggleDevice = useCallback(
     async (device) => {
@@ -779,35 +763,16 @@ export default function Dashboard() {
     user?.email?.split("@")[0] ||
     "there";
 
-  // Two-click confirm wrapper for bulk power actions.
-  const withConfirm = useCallback(
-    (kind, run) => {
-      if (confirmArm === kind) {
-        setConfirmArm(null);
-        if (confirmTimer.current) clearTimeout(confirmTimer.current);
-        run();
-      } else {
-        armConfirm(kind);
-      }
-    },
-    [confirmArm, armConfirm],
-  );
-
-  const bulkBtn = (kind, label, Icon, onClick) => {
-    const armed = confirmArm === kind;
+  const bulkBtn = (label, Icon, onClick) => {
     return (
       <button
         onClick={onClick}
-        title={armed ? "Click again to confirm" : label}
-        aria-label={armed ? `Confirm ${label}` : label}
-        className={`inline-flex min-h-[36px] items-center justify-center gap-2 rounded-xl border px-3.5 text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap ${
-          armed
-            ? "border-(--pg-error) bg-(--pg-error) text-white"
-            : "border-(--pg-line) bg-(--pg-card) text-(--pg-ink) hover:border-(--pg-brand-line) hover:text-(--pg-brand)"
-        }`}
+        title={label}
+        aria-label={label}
+        className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-xl border border-(--pg-line) bg-(--pg-card) px-3.5 text-xs font-extrabold text-(--pg-ink) transition-all cursor-pointer whitespace-nowrap hover:border-(--pg-brand-line) hover:text-(--pg-brand)"
       >
         <Icon size={14} aria-hidden="true" />
-        <span className="max-sm:hidden">{armed ? "Confirm?" : label}</span>
+        <span className="max-sm:hidden">{label}</span>
       </button>
     );
   };
@@ -871,20 +836,9 @@ export default function Dashboard() {
                     >
                       {selectedBoard ? selectedBoard.name : "Rooms & Devices"}
                     </h2>
-                    <p className="text-xs font-semibold text-(--pg-muted) mt-0.5">
+                    <p className="text-xs font-semibold text-(--pg-muted) mt-1">
                       {selectedDevices.length} device
-                      {selectedDevices.length === 1 ? "" : "s"}
-                      {selectedBoard && (
-                        <>
-                          {" "}
-                          ·{" "}
-                          {isBoardOnline(selectedBoard) ? <span
-              aria-label={online ? 'Online' : 'Offline'}
-              title={online ? 'Online' : 'Offline'}
-              className={`w-2.5 h-2.5 rounded-full shrink-0 ${online ? 'bg-emerald-500' : 'bg-red-500'}`}
-            /> : null}
-                        </>
-                      )}
+                     
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -913,21 +867,11 @@ export default function Dashboard() {
                       </button>
                     </div>
                     ) : null}
-                    {bulkBtn("room-on", "Room On", Power, () =>
-                      withConfirm("room-on", () =>
-                        turnBoardDevicesOn(
-                          selectedBoard.id,
-                          selectedBoard.name,
-                        ),
-                      ),
+                    {bulkBtn("Room On", Power, () =>
+                      turnBoardDevicesOn(selectedBoard.id, selectedBoard.name),
                     )}
-                    {bulkBtn("room-off", "Room Off", PowerOff, () =>
-                      withConfirm("room-off", () =>
-                        turnBoardDevicesOff(
-                          selectedBoard.id,
-                          selectedBoard.name,
-                        ),
-                      ),
+                    {bulkBtn("Room Off", PowerOff, () =>
+                      turnBoardDevicesOff(selectedBoard.id, selectedBoard.name),
                     )}
                     <button
                       onClick={() =>
@@ -995,12 +939,8 @@ export default function Dashboard() {
                       <span className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-(--pg-muted) mr-1">
                         Property
                       </span>
-                      {bulkBtn("all-on", "All On", Power, () =>
-                        withConfirm("all-on", turnAllDevicesOn),
-                      )}
-                      {bulkBtn("all-off", "All Off", PowerOff, () =>
-                        withConfirm("all-off", turnAllDevicesOff),
-                      )}
+                      {bulkBtn("All On", Power, turnAllDevicesOn)}
+                      {bulkBtn("All Off", PowerOff, turnAllDevicesOff)}
                       {deviceView === "carousel" && (
                         <div className="ml-auto flex items-center gap-1.5 sm:hidden">
                           <button
