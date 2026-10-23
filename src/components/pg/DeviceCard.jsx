@@ -61,8 +61,10 @@ export default function DeviceCard({
           aria-live="polite"
         >
           {hasFeedback
-            ? \`Relay \${isRelayOn ? "ON" : "OFF"} · Switch input \${device.feedback_on ? "ON" : "OFF"}\`
-            : (isRelayOn ? "Relay ON · switch input unavailable" : "Relay OFF · switch input unavailable")}
+            ? `Relay ${isRelayOn ? "ON" : "OFF"} · Switch input ${device.feedback_on ? "ON" : "OFF"}`
+            : isRelayOn
+              ? "Relay ON · switch input unavailable"
+              : "Relay OFF · switch input unavailable"}
         </p>
       </div>
 
