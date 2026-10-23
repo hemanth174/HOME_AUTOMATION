@@ -1,30 +1,104 @@
-const CACHE_NAME = 'smart-home-offline-v4';
-const STATIC_ASSETS = [
+const CACHE_NAME = 'smart-home-offline-v5';
+
+// These are app routes, not ESP32 endpoints. Cache their app shells while the
+// device has internet so the installed VikaTech PWA can boot without it later.
+const OFFLINE_ROUTES = [
   '/',
   '/local',
+  '/boards',
+  '/presets',
+  '/schedules',
+  '/alarms',
+  '/analytics',
+  '/logs',
+  '/profile',
+  '/settings',
+];
+
+const STATIC_ASSETS = [
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
-  '/smart_home_ui.png'
+  '/smart_home_ui.png',
+  '/images/vikatech-local-network.png',
 ];
 
+const APP_SHELL_PATHS = new Set(OFFLINE_ROUTES);
+
+function canonicalRequest(url) {
+  return new Request(new URL(url.pathname, self.location.origin).href, {
+    method: 'GET',
+    credentials: 'same-origin',
+  });
+}
+
+async function cacheResponse(cache, request, response) {
+  if (!response || !response.ok || (response.type !== 'basic' && response.type !== 'default')) return;
+  await cache.put(request, response.clone());
+}
+
+// Cache each route plus its first-party Next.js JS/CSS assets. Failed routes or
+// optional images are ignored individually so installation can still succeed.
+async function precacheRoute(cache, path) {
+  try {
+    const url = new URL(path, self.location.origin);
+    const response = await fetch(new Request(url.href, { cache: 'reload', credentials: 'same-origin' }));
+    if (!response.ok || (response.type !== 'basic' && response.type !== 'default')) return;
+    await cacheResponse(cache, canonicalRequest(url), response);
+
+    const html = await response.clone().text();
+    const assetPaths = new Set();
+    const assetPattern = /(?:src|href)=["'](\/_next\/static\/[^"'?#]+(?:\?[^"']*)?)["']/g;
+    let match;
+    while ((match = assetPattern.exec(html)) !== null) {
+      const assetUrl = new URL(match[1], self.location.origin);
+      assetUrl.search = '';
+      assetPaths.add(assetUrl.pathname);
+    }
+
+    await Promise.all([...assetPaths].map(async (assetPath) => {
+      try {
+        const assetUrl = new URL(assetPath, self.location.origin);
+        const assetResponse = await fetch(new Request(assetUrl.href, { cache: 'reload', credentials: 'same-origin' }));
+        if (assetResponse.ok && (assetResponse.type === 'basic' || assetResponse.type === 'default')) {
+          await cacheResponse(cache, assetUrl.href, assetResponse);
+        }
+      } catch {
+        // Some lazy-loaded chunks are intentionally fetched only when needed.
+      }
+    }));
+  } catch {
+    // A single unavailable route should not prevent the PWA from installing.
+  }
+}
+
 self.addEventListener('install', (event) => {
-  self.skipWaiting();
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    await Promise.all([
+      ...OFFLINE_ROUTES.map((path) => precacheRoute(cache, path)),
+      ...STATIC_ASSETS.map(async (path) => {
+        try {
+          const url = new URL(path, self.location.origin);
+          const response = await fetch(new Request(url.href, { cache: 'reload', credentials: 'same-origin' }));
+          await cacheResponse(cache, url.href, response);
+        } catch {
+          // Optional image/icon files do not block installation.
+        }
+      }),
+    ]);
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
-  );
-  self.clients.claim();
+  event.waitUntil((async () => {
+    const cacheNames = await caches.keys();
+    await Promise.all(cacheNames
+      .filter((cacheName) => cacheName !== CACHE_NAME)
+      .map((cacheName) => caches.delete(cacheName)));
+    await self.clients.claim();
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {
@@ -43,49 +117,85 @@ self.addEventListener('notificationclick', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+  const request = event.request;
+  const url = new URL(request.url);
 
-  // CRITICAL: Bypass service worker for dev server HMR, Supabase APIs, and non-GET requests
+  // This worker only caches the VikaTech web origin. Direct HTTP calls from
+  // the page to the ESP32 are cross-origin and go straight to the local board.
   if (
+    url.origin !== self.location.origin ||
     url.hostname === 'localhost' ||
     url.hostname === '127.0.0.1' ||
     url.pathname.includes('webpack') ||
     url.pathname.includes('turbopack') ||
     url.pathname.startsWith('/api/') ||
-    url.hostname.includes('supabase.co') ||
-    event.request.method !== 'GET'
+    request.method !== 'GET'
   ) {
     return;
   }
 
-  // Network-first with cache fallback strategy for JS/CSS assets and pages when offline
-  event.respondWith(
-    fetch(event.request)
-      .then((networkResponse) => {
-        if (
-          networkResponse &&
-          networkResponse.status === 200 &&
-          networkResponse.type === 'basic' &&
-          (STATIC_ASSETS.includes(url.pathname) || url.pathname.startsWith('/_next/static/'))
-        ) {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-        }
-        return networkResponse;
-      })
-      .catch(() => {
-        // Fallback to cache when network fails (e.g. connected to offline ESP32 SoftAP)
-        return caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          if (event.request.mode === 'navigate') {
-            return caches.match('/local').then((localCache) => localCache || caches.match('/'));
-          }
-          return new Response('Offline mode active.', { status: 503 });
+  // Hashed Next.js assets are immutable; prefer the cache once downloaded.
+  if (url.pathname.startsWith('/_next/static/')) {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE_NAME);
+      const cached = await caches.match(request);
+      if (cached) return cached;
+      try {
+        const response = await fetch(request);
+        if (response.ok) await cacheResponse(cache, request, response);
+        return response;
+      } catch {
+        return new Response('Required VikaTech app asset is not cached yet.', {
+          status: 503,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
         });
-      })
-  );
+      }
+    })());
+    return;
+  }
+
+  // Network-first for navigations: update cached page shells while online, and
+  // load the cached same-origin app shell when the phone is on ESP32 SoftAP.
+  if (request.mode === 'navigate') {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE_NAME);
+      try {
+        const response = await fetch(request);
+        if (response.ok && (response.type === 'basic' || response.type === 'default')) {
+          await cacheResponse(cache, canonicalRequest(url), response);
+        }
+        return response;
+      } catch {
+        const cachedPage = await caches.match(canonicalRequest(url));
+        if (cachedPage) return cachedPage;
+        const localPage = await caches.match(new URL('/local', self.location.origin).href);
+        if (localPage) return localPage;
+        const homePage = await caches.match(new URL('/', self.location.origin).href);
+        if (homePage) return homePage;
+        return new Response(
+          '<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VikaTech offline</title><body style="font-family:system-ui;padding:24px"><h1>VikaTech is not cached on this device yet</h1><p>Reconnect to the internet, open VikaTech once, then try local control again.</p></body></html>',
+          { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+        );
+      }
+    })());
+    return;
+  }
+
+  // Cache first-party app-shell routes and public assets after successful visits.
+  if (APP_SHELL_PATHS.has(url.pathname) || STATIC_ASSETS.includes(url.pathname)) {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE_NAME);
+      try {
+        const response = await fetch(request);
+        if (response.ok && (response.type === 'basic' || response.type === 'default')) {
+          await cacheResponse(cache, canonicalRequest(url), response);
+        }
+        return response;
+      } catch {
+        return (await caches.match(request)) ||
+          (await caches.match(canonicalRequest(url))) ||
+          new Response('Offline mode active.', { status: 503 });
+      }
+    })());
+  }
 });
