@@ -803,8 +803,8 @@ export default function LocalControlPage() {
                   </div>
 
                   <div className="mt-5 flex items-center justify-between gap-3 border-t border-[#E8E5DF] pt-4">
-                    <span className="text-xs font-medium text-[#69736D]">
-                      Device power
+                    <span className="text-xs font-semibold text-[#69736D]">
+                      {busy[key] ? "Syncing…" : on ? "Tap to turn off" : "Tap to turn on"}
                     </span>
                     <button
                       type="button"
@@ -813,12 +813,14 @@ export default function LocalControlPage() {
                       aria-label={`Turn ${deviceLabel} relay ${device.relay_index + 1} ${on ? "off" : "on"}`}
                       onClick={() => toggle(device)}
                       disabled={busy[key] || !connected}
-                      className={`relative h-7 w-12 shrink-0 rounded-full p-1 transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#A86F3D] disabled:cursor-not-allowed disabled:opacity-60 ${
-                        on ? "bg-[#39845A]" : "bg-[#D5D3CD]"
+                      className={`relative h-7 w-[52px] shrink-0 rounded-full border transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#A86F3D] disabled:cursor-not-allowed disabled:opacity-60 ${
+                        on
+                          ? "border-(--pg-brand) bg-(--pg-brand)"
+                          : "border-(--pg-track) bg-(--pg-track) hover:bg-(--pg-track-hover)"
                       }`}
                     >
                       <span
-                        className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${on ? "translate-x-5" : "translate-x-0"}`}
+                        className={`absolute top-1/2 h-[22px] w-[22px] -translate-y-1/2 rounded-full bg-white shadow transition-all duration-200 ${on ? "left-[calc(100%-26px)]" : "left-[3px]"}`}
                       />
                     </button>
                   </div>
