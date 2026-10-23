@@ -142,7 +142,6 @@ export default function LocalControlPage() {
   const loadInFlight = useRef(false);
   const hasDeviceSnapshot = useRef(false);
 
-
   // Read and follow VikaTech's shared theme (html[data-theme]) so this
   // page stays synchronized with the global Navbar ThemeToggle.
   useEffect(() => {
@@ -173,103 +172,118 @@ export default function LocalControlPage() {
     let cachedBoards = [];
     let cachedDevices = [];
     try {
-      cachedBoards = JSON.parse(localStorage.getItem(CLOUD_BOARDS_CACHE) || "[]");
-      cachedDevices = JSON.parse(localStorage.getItem(CLOUD_DEVICES_CACHE) || "[]");
+      cachedBoards = JSON.parse(
+        localStorage.getItem(CLOUD_BOARDS_CACHE) || "[]",
+      );
+      cachedDevices = JSON.parse(
+        localStorage.getItem(CLOUD_DEVICES_CACHE) || "[]",
+      );
     } catch {
       cachedBoards = [];
       cachedDevices = [];
     }
 
     return localDevices.map((device) => {
-      const board = cachedBoards.find((item) =>
-        item.board_identifier === device.node_id ||
-        (!device.node_id && cachedBoards.length === 1)
+      const board = cachedBoards.find(
+        (item) =>
+          item.board_identifier === device.node_id ||
+          (!device.node_id && cachedBoards.length === 1),
       );
-      const cloudDevice = cachedDevices.find((item) =>
-        Number(item.relay_index) === Number(device.relay_index) &&
-        (board ? item.board_id === board.id : false)
+      const cloudDevice = cachedDevices.find(
+        (item) =>
+          Number(item.relay_index) === Number(device.relay_index) &&
+          (board ? item.board_id === board.id : false),
       );
       return {
         ...device,
-        name: cloudDevice?.name || device.name || `Device ${Number(device.relay_index) + 1}`,
+        name:
+          cloudDevice?.name ||
+          device.name ||
+          `Device ${Number(device.relay_index) + 1}`,
         roomName: board?.name || device.node_id || "Local controller",
       };
     });
   }, []);
 
-  const saveDeviceSnapshot = useCallback((localDevices) => {
-    const enriched = enrichLocalDevices(localDevices);
-    setDevices(enriched);
-    hasDeviceSnapshot.current = true;
-    try {
-      localStorage.setItem(LOCAL_DEVICES_CACHE, JSON.stringify(enriched));
-    } catch {
-      // Browser storage may be full or disabled; live controls still work.
-    }
-    return enriched;
-  }, [enrichLocalDevices]);
-
-  const loadDevices = useCallback(async (rediscover = false) => {
-    if (loadInFlight.current) return;
-    loadInFlight.current = true;
-    if (!hasDeviceSnapshot.current) setLoading(true);
-    setError(null);
-    let failureType = "connection";
-
-    try {
-      if (rediscover) await discoverLocalNode(2500);
-      setLocalPageConnected(true);
-
-      let nextDevices;
+  const saveDeviceSnapshot = useCallback(
+    (localDevices) => {
+      const enriched = enrichLocalDevices(localDevices);
+      setDevices(enriched);
+      hasDeviceSnapshot.current = true;
       try {
-        nextDevices = await fetchLocalDevices(2500);
+        localStorage.setItem(LOCAL_DEVICES_CACHE, JSON.stringify(enriched));
       } catch {
-        failureType = "devices";
-        throw new Error("device-list");
+        // Browser storage may be full or disabled; live controls still work.
       }
-      saveDeviceSnapshot(nextDevices);
-    } catch {
-      if (!rediscover) {
-        try {
-          await discoverLocalNode(2500);
-          setLocalPageConnected(true);
-          let nextDevices;
-          try {
-            nextDevices = await fetchLocalDevices(2500);
-          } catch {
-            failureType = "devices";
-            throw new Error("device-list");
-          }
-          saveDeviceSnapshot(nextDevices);
-        } catch (retryError) {
-          failureType =
-            retryError.message === "device-list" ? "devices" : "connection";
-        }
-      }
+      return enriched;
+    },
+    [enrichLocalDevices],
+  );
 
-      if (failureType === "devices") {
-        if (!hasDeviceSnapshot.current) {
-          setError({
-            type: "devices",
-            message:
-              "The ESP32 responded, but the device list could not be retrieved.",
-          });
+  const loadDevices = useCallback(
+    async (rediscover = false) => {
+      if (loadInFlight.current) return;
+      loadInFlight.current = true;
+      if (!hasDeviceSnapshot.current) setLoading(true);
+      setError(null);
+      let failureType = "connection";
+
+      try {
+        if (rediscover) await discoverLocalNode(2500);
+        setLocalPageConnected(true);
+
+        let nextDevices;
+        try {
+          nextDevices = await fetchLocalDevices(2500);
+        } catch {
+          failureType = "devices";
+          throw new Error("device-list");
         }
-      } else {
-        setLocalPageConnected(false);
-        if (!hasDeviceSnapshot.current) {
-          setError({
-            type: "connection",
-            message:
-              "Connect to HOME-AUTO-LEADER and allow local network access.",
-          });
+        saveDeviceSnapshot(nextDevices);
+      } catch {
+        if (!rediscover) {
+          try {
+            await discoverLocalNode(2500);
+            setLocalPageConnected(true);
+            let nextDevices;
+            try {
+              nextDevices = await fetchLocalDevices(2500);
+            } catch {
+              failureType = "devices";
+              throw new Error("device-list");
+            }
+            saveDeviceSnapshot(nextDevices);
+          } catch (retryError) {
+            failureType =
+              retryError.message === "device-list" ? "devices" : "connection";
+          }
         }
+
+        if (failureType === "devices") {
+          if (!hasDeviceSnapshot.current) {
+            setError({
+              type: "devices",
+              message:
+                "The ESP32 responded, but the device list could not be retrieved.",
+            });
+          }
+        } else {
+          setLocalPageConnected(false);
+          if (!hasDeviceSnapshot.current) {
+            setError({
+              type: "connection",
+              message:
+                "Connect to HOME-AUTO-LEADER and allow local network access.",
+            });
+          }
+        }
+      } finally {
+        loadInFlight.current = false;
+        setLoading(false);
       }
-    } finally {
-      loadInFlight.current = false;
-      setLoading(false);
-    }
-  }, [saveDeviceSnapshot]);
+    },
+    [saveDeviceSnapshot],
+  );
 
   useEffect(() => {
     setLocalProbingEnabled(true);
@@ -332,7 +346,10 @@ export default function LocalControlPage() {
         if (actualDevice) {
           setDevices(latestDevices);
           hasDeviceSnapshot.current = true;
-          localStorage.setItem(LOCAL_DEVICES_CACHE, JSON.stringify(latestDevices));
+          localStorage.setItem(
+            LOCAL_DEVICES_CACHE,
+            JSON.stringify(latestDevices),
+          );
           if (actualDevice.is_on === nextState) return;
         }
       } catch {
@@ -369,16 +386,26 @@ export default function LocalControlPage() {
       const refreshed = await fetchLocalDevices(5000);
       const enriched = saveDeviceSnapshot(refreshed);
       const targetState = action === "on";
-      const failed = enriched.filter((device) => Boolean(device.is_on) !== targetState);
+      const failed = enriched.filter(
+        (device) => Boolean(device.is_on) !== targetState,
+      );
       if (failed.length) {
-        setBulkMessage(`Partial result: ${failed.length} of ${enriched.length} devices have not confirmed ${targetState ? "ON" : "OFF"}.`);
+        setBulkMessage(
+          `Partial result: ${failed.length} of ${enriched.length} devices have not confirmed ${targetState ? "ON" : "OFF"}.`,
+        );
       } else if (result?.success === false) {
-        setBulkMessage("The controller reported that the command did not complete.");
+        setBulkMessage(
+          "The controller reported that the command did not complete.",
+        );
       } else {
-        setBulkMessage(`Confirmed: all ${enriched.length} devices are ${targetState ? "ON" : "OFF"}.`);
+        setBulkMessage(
+          `Confirmed: all ${enriched.length} devices are ${targetState ? "ON" : "OFF"}.`,
+        );
       }
     } catch {
-      setBulkMessage("Could not confirm the bulk command. Check the local network and refresh device states.");
+      setBulkMessage(
+        "Could not confirm the bulk command. Check the local network and refresh device states.",
+      );
       try {
         saveDeviceSnapshot(await fetchLocalDevices(2500));
       } catch {
@@ -402,7 +429,9 @@ export default function LocalControlPage() {
       : "unavailable";
 
   return (
-    <main className={`local-control-page min-h-screen bg-[#F5F3EF] font-sans text-[#26382C] ${pageTheme === "dark" ? "page-theme-dark" : "page-theme-light"}`}>
+    <main
+      className={`local-control-page min-h-screen bg-[#F5F3EF] font-sans text-[#26382C] ${pageTheme === "dark" ? "page-theme-dark" : "page-theme-light"}`}
+    >
       <div className="mx-auto w-full max-w-[1500px] px-4 pb-28 pt-[5.25rem] sm:px-6 sm:pt-[5.75rem] lg:px-8 lg:pb-10 lg:pt-[6rem] xl:px-10">
         <header className="mb-6 flex items-start justify-between gap-4 sm:mb-7">
           <div className="min-w-0">
@@ -417,21 +446,7 @@ export default function LocalControlPage() {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={togglePageTheme}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-[#E8E5DF] bg-white px-3 text-sm font-semibold text-[#26382C] shadow-sm transition hover:border-[#C98C66] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#A86F3D] sm:px-4"
-              aria-label={pageTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-              aria-pressed={pageTheme === "dark"}
-              title={pageTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            >
-              {pageTheme === "dark" ? (
-                <Sun size={17} suppressHydrationWarning />
-              ) : (
-                <Moon size={17} suppressHydrationWarning />
-              )}
-              <span className="hidden sm:inline">{pageTheme === "dark" ? "Light mode" : "Dark mode"}</span>
-            </button>
+          
             <button
               type="button"
               onClick={() => loadDevices(true)}
@@ -472,7 +487,11 @@ export default function LocalControlPage() {
                   }`}
                 >
                   {statusState === "checking" ? (
-                    <LoaderCircle className="animate-spin" size={25} suppressHydrationWarning />
+                    <LoaderCircle
+                      className="animate-spin"
+                      size={25}
+                      suppressHydrationWarning
+                    />
                   ) : statusState === "connected" ? (
                     <ShieldCheck size={27} suppressHydrationWarning />
                   ) : (
@@ -609,7 +628,11 @@ export default function LocalControlPage() {
           {!loading && !devices.length && hasDeviceError && (
             <div className="mt-6 flex min-h-64 flex-col items-center justify-center rounded-2xl border border-[#F3D6D1] bg-[#FFFAF9] px-5 py-8 text-center sm:min-h-72 sm:px-8">
               <span className="flex h-16 w-16 items-center justify-center rounded-full bg-[#FCEDEC] text-[#858780] sm:hidden">
-                <WifiOff size={30} aria-hidden="true" suppressHydrationWarning />
+                <WifiOff
+                  size={30}
+                  aria-hidden="true"
+                  suppressHydrationWarning
+                />
               </span>
               <img
                 src="/images/vikatech-local-network.png"
@@ -644,7 +667,11 @@ export default function LocalControlPage() {
           {!loading && !devices.length && !error && connected && (
             <div className="mt-6 flex min-h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-[#DADFD7] bg-[#FCFBF9] px-5 py-8 text-center sm:min-h-72">
               <span className="flex h-20 w-20 items-center justify-center rounded-full bg-[#EAF1E8] text-[#536D5B] sm:hidden">
-                <WifiOff size={34} aria-hidden="true" suppressHydrationWarning />
+                <WifiOff
+                  size={34}
+                  aria-hidden="true"
+                  suppressHydrationWarning
+                />
               </span>
               <img
                 src="/images/vikatech-local-network.png"
@@ -666,8 +693,13 @@ export default function LocalControlPage() {
             <div className="mt-5 rounded-2xl border border-[#E8E5DF] bg-[#FCFBF9] p-3 sm:p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-sm font-extrabold text-[#26382C]">Control every connected device</p>
-                  <p className="mt-1 text-xs leading-5 text-[#69736D]">Commands go directly to the local ESP32 mesh; internet is not required.</p>
+                  <p className="text-sm font-extrabold text-[#26382C]">
+                    Control every connected device
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-[#69736D]">
+                    Commands go directly to the local ESP32 mesh; internet is
+                    not required.
+                  </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 sm:flex">
                   <button
@@ -676,7 +708,11 @@ export default function LocalControlPage() {
                     disabled={!connected || Boolean(bulkBusy) || loading}
                     className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#39845A] px-4 text-xs font-extrabold text-white transition hover:bg-[#287247] disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {bulkBusy === "on" ? <LoaderCircle size={15} className="animate-spin" /> : <Power size={15} />}
+                    {bulkBusy === "on" ? (
+                      <LoaderCircle size={15} className="animate-spin" />
+                    ) : (
+                      <Power size={15} />
+                    )}
                     All ON
                   </button>
                   <button
@@ -685,13 +721,21 @@ export default function LocalControlPage() {
                     disabled={!connected || Boolean(bulkBusy) || loading}
                     className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#DADFD7] bg-white px-4 text-xs font-extrabold text-[#26382C] transition hover:border-[#C98C66] disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {bulkBusy === "off" ? <LoaderCircle size={15} className="animate-spin" /> : <Power size={15} />}
+                    {bulkBusy === "off" ? (
+                      <LoaderCircle size={15} className="animate-spin" />
+                    ) : (
+                      <Power size={15} />
+                    )}
                     All OFF
                   </button>
                 </div>
               </div>
               {bulkMessage && (
-                <p className={`mt-3 text-xs font-semibold leading-5 ${bulkMessage.startsWith("Confirmed:") ? "text-[#287247]" : "text-[#D94B4B]"}`} role="status" aria-live="polite">
+                <p
+                  className={`mt-3 text-xs font-semibold leading-5 ${bulkMessage.startsWith("Confirmed:") ? "text-[#287247]" : "text-[#D94B4B]"}`}
+                  role="status"
+                  aria-live="polite"
+                >
                   {bulkMessage}
                 </p>
               )}
@@ -721,14 +765,24 @@ export default function LocalControlPage() {
                             : "bg-[#F0EEE9] text-[#69736D]"
                         }`}
                       >
-                        <Power size={19} aria-hidden="true" suppressHydrationWarning />
+                        <Power
+                          size={19}
+                          aria-hidden="true"
+                          suppressHydrationWarning
+                        />
                       </span>
                       <div className="min-w-0">
                         <div className="min-w-0">
-                          <p className="truncate text-[10px] font-bold uppercase tracking-wider text-[#A86F3D]" title={device.roomName || deviceLabel}>
+                          <p
+                            className="truncate text-[10px] font-bold uppercase tracking-wider text-[#A86F3D]"
+                            title={device.roomName || deviceLabel}
+                          >
                             {device.roomName || deviceLabel}
                           </p>
-                          <p className="truncate text-sm font-extrabold text-[#26382C]" title={device.name || deviceLabel}>
+                          <p
+                            className="truncate text-sm font-extrabold text-[#26382C]"
+                            title={device.name || deviceLabel}
+                          >
                             {device.name || deviceLabel}
                           </p>
                           <p className="mt-1 text-xs text-[#858780]">
@@ -792,7 +846,9 @@ export default function LocalControlPage() {
           color: #edf5ee !important;
           color-scheme: dark;
         }
-        html[data-theme="dark"] .local-control-page section[aria-labelledby="local-devices-title"],
+        html[data-theme="dark"]
+          .local-control-page
+          section[aria-labelledby="local-devices-title"],
         html[data-theme="dark"] .local-control-page article,
         html[data-theme="dark"] .local-control-page .bg-white,
         html[data-theme="dark"] .local-control-page [class*="bg-white"] {
@@ -852,17 +908,25 @@ export default function LocalControlPage() {
           border-color: #2b3b30 !important;
         }
         html[data-theme="dark"] .local-control-page [class*="border-[#C9DDCC]"],
-        html[data-theme="dark"] .local-control-page [class*="border-[#B9D8C1]"] {
+        html[data-theme="dark"]
+          .local-control-page
+          [class*="border-[#B9D8C1]"] {
           border-color: #31563b !important;
         }
         html[data-theme="dark"] .local-control-page [class*="border-[#F7D0CB]"],
         html[data-theme="dark"] .local-control-page [class*="border-[#F3D6D1]"],
         html[data-theme="dark"] .local-control-page [class*="border-[#F3DCD4]"],
-        html[data-theme="dark"] .local-control-page [class*="border-[#F1D8D1]"] {
+        html[data-theme="dark"]
+          .local-control-page
+          [class*="border-[#F1D8D1]"] {
           border-color: #55302d !important;
         }
         html[data-theme="dark"] .local-control-page [class*="from-[#F8F8F5]"] {
-          background-image: linear-gradient(135deg, #243128, #17231b) !important;
+          background-image: linear-gradient(
+            135deg,
+            #243128,
+            #17231b
+          ) !important;
         }
         html[data-theme="dark"] .local-control-page [class*="to-[#D8DAD4]"] {
           --tw-gradient-to: #17231b var(--tw-gradient-to-position) !important;
@@ -871,7 +935,9 @@ export default function LocalControlPage() {
           outline-color: #e6b27c !important;
         }
         @media (prefers-reduced-motion: reduce) {
-          .local-control-page *, .local-control-page *::before, .local-control-page *::after {
+          .local-control-page *,
+          .local-control-page *::before,
+          .local-control-page *::after {
             scroll-behavior: auto !important;
             animation-duration: 0.01ms !important;
             animation-iteration-count: 1 !important;

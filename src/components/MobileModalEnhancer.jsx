@@ -19,7 +19,12 @@ export default function MobileModalEnhancer() {
     const originalBodyOverscroll = document.body.style.overscrollBehavior;
 
     const syncBodyLock = () => {
-      const hasSheet = mediaQuery.matches && document.querySelector(OVERLAY_SELECTOR);
+      const hasSheet = mediaQuery.matches && Array.from(
+        document.querySelectorAll(OVERLAY_SELECTOR),
+      ).some((overlay) =>
+        !overlay.classList.contains('pointer-events-none') &&
+        !overlay.classList.contains('opacity-0'),
+      );
       document.body.style.overflow = hasSheet ? 'hidden' : originalBodyOverflow;
       document.body.style.overscrollBehavior = hasSheet ? 'none' : originalBodyOverscroll;
     };
