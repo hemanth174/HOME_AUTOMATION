@@ -253,7 +253,10 @@ export default function useDashboardData() {
     if (!isLocalConnected) return;
     let active = true;
 
+    let syncInFlight = false;
     const syncLocalDevices = async () => {
+      if (syncInFlight || document.visibilityState !== 'visible') return;
+      syncInFlight = true;
       try {
         const [localDevices, localNodes] = await Promise.all([
           fetchLocalDevices(2200),
@@ -316,14 +319,21 @@ export default function useDashboardData() {
         });
       } catch {
         // The regular cloud/cache path remains available during a local retry.
+      } finally {
+        syncInFlight = false;
       }
     };
 
     syncLocalDevices();
-    const timer = setInterval(syncLocalDevices, 4000);
+    const timer = setInterval(syncLocalDevices, 15000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') syncLocalDevices();
+    };
+    document.addEventListener('visibilitychange', refreshWhenVisible);
     return () => {
       active = false;
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
   }, [isLocalConnected, boards]);
 
