@@ -53,6 +53,14 @@ export default function DeviceCard({
               Offline
             </span>
           )}
+          {!hasFeedback && (
+            <span
+              className="text-[9px] font-extrabold uppercase tracking-wide text-(--pg-muted) bg-black/[0.04] border border-(--pg-line) px-1.5 py-0.5 rounded-md"
+              title="This firmware is not reporting actual AC-current sensor readings."
+            >
+              Feedback N/A
+            </span>
+          )}
         </span>
       </div>
 
@@ -72,7 +80,11 @@ export default function DeviceCard({
           }`}
           aria-live="polite"
         >
-          {isManualOverride ? "Manual ON" : isLightOn ? "ON" : "OFF"}
+          {isManualOverride
+            ? "Manual ON"
+            : hasFeedback
+              ? (isLightOn ? "AC ON" : "AC OFF")
+              : (isRelayOn ? "Relay ON · AC feedback unavailable" : "Relay OFF · AC feedback unavailable")}
         </p>
       </div>
 
