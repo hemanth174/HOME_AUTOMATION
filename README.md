@@ -52,7 +52,7 @@ This project evolved over 6 months through rigorous prototyping, solving real-wo
 
 ### Phase 4: Distributed Architecture & Fail-Safe Redundancy (Current Production PCB)
 * **Core:** Switched to a **Distributed Node Architecture** where each switchboard has its own ESP32 talking over local WiFi.
-* **Pin Optimization:** Integrated **74HC165** shift registers for live AC current feedback and **74HC595** shift registers for relay controls.
+* **Direct GPIO I/O:** This firmware controls relay channels directly through ESP32 GPIO outputs (GPIOs 32, 33, 25, 26) and reads the associated physical switch inputs directly through ESP32 GPIOs (19, 18, 5, 17). No shift registers are used by the current firmware.
 * **Hardware Independence:** Designed to work with any generic ESP32 version.
 * **Hardware Redundancy & Manual Fail-Safe:** If an ESP32 or shift register fails, the physical switches fallback to standard electrical operation, ensuring the home never stops functioning.
 * **Cost Efficiency:** Slashed manufacturing costs from 1,200 INR to **~600 INR** for a 4-channel board (including PCB, components, feedback circuit, and sensor headers).
