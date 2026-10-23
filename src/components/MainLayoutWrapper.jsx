@@ -86,13 +86,15 @@ export default function MainLayoutWrapper({ children, className = "" }) {
     };
   }, [cleanPath, isDeniedPage, router]);
 
-  // SoftAP mode is a dedicated local session. Keep the user on the local
-  // control page because cloud routes cannot work without internet access.
+  // Offline device control runs inside the cached VikaTech web app at /local.
+  // Use a real document navigation here (not Next.js client routing) so the
+  // service worker can serve the cached /local app shell while cloud hosting
+  // is unreachable. The page then sends relay commands directly to the ESP32.
   useEffect(() => {
-    if (!isClientOnline && cleanPath !== '/local') {
-      router.replace('/local');
+    if (!isClientOnline && cleanPath !== '/local' && typeof window !== 'undefined') {
+      window.location.replace('/local');
     }
-  }, [isLocalConnected, isClientOnline, cleanPath, router]);
+  }, [isLocalConnected, isClientOnline, cleanPath]);
 
   // Disable console logs in production mode
   useEffect(() => {

@@ -16,12 +16,15 @@ import {
   discoverLocalNode,
   fetchLocalDevices,
   setLocalDeviceState,
+  triggerLocalAll,
 } from "@/lib/localApi";
 import useLocalConnection, {
   setLocalProbingEnabled,
 } from "@/hooks/useLocalConnection";
 
 const LOCAL_DEVICES_CACHE = "home_auto_cached_local_devices";
+const CLOUD_DEVICES_CACHE = "home_auto_cached_devices";
+const CLOUD_BOARDS_CACHE = "home_auto_cached_boards";
 const LOCAL_DEVICE_REFRESH_INTERVAL = 5000;
 
 function StatusBadge({ children, state }) {
@@ -134,6 +137,8 @@ export default function LocalControlPage() {
   const [localPageConnected, setLocalPageConnected] = useState(false);
   const [busy, setBusy] = useState({});
   const [commandErrors, setCommandErrors] = useState({});
+  const [bulkBusy, setBulkBusy] = useState(null);
+  const [bulkMessage, setBulkMessage] = useState("");
   const loadInFlight = useRef(false);
   const hasDeviceSnapshot = useRef(false);
 
@@ -161,6 +166,49 @@ export default function LocalControlPage() {
     setPageTheme(next);
   };
 
+  // The ESP32 reports relay indexes and mesh node IDs. Reuse metadata cached
+  // during the last online dashboard visit to show familiar room/device names
+  // even when Supabase itself cannot be reached.
+  const enrichLocalDevices = useCallback((localDevices) => {
+    let cachedBoards = [];
+    let cachedDevices = [];
+    try {
+      cachedBoards = JSON.parse(localStorage.getItem(CLOUD_BOARDS_CACHE) || "[]");
+      cachedDevices = JSON.parse(localStorage.getItem(CLOUD_DEVICES_CACHE) || "[]");
+    } catch {
+      cachedBoards = [];
+      cachedDevices = [];
+    }
+
+    return localDevices.map((device) => {
+      const board = cachedBoards.find((item) =>
+        item.board_identifier === device.node_id ||
+        (!device.node_id && cachedBoards.length === 1)
+      );
+      const cloudDevice = cachedDevices.find((item) =>
+        Number(item.relay_index) === Number(device.relay_index) &&
+        (board ? item.board_id === board.id : false)
+      );
+      return {
+        ...device,
+        name: cloudDevice?.name || device.name || `Device ${Number(device.relay_index) + 1}`,
+        roomName: board?.name || device.node_id || "Local controller",
+      };
+    });
+  }, []);
+
+  const saveDeviceSnapshot = useCallback((localDevices) => {
+    const enriched = enrichLocalDevices(localDevices);
+    setDevices(enriched);
+    hasDeviceSnapshot.current = true;
+    try {
+      localStorage.setItem(LOCAL_DEVICES_CACHE, JSON.stringify(enriched));
+    } catch {
+      // Browser storage may be full or disabled; live controls still work.
+    }
+    return enriched;
+  }, [enrichLocalDevices]);
+
   const loadDevices = useCallback(async (rediscover = false) => {
     if (loadInFlight.current) return;
     loadInFlight.current = true;
@@ -179,9 +227,7 @@ export default function LocalControlPage() {
         failureType = "devices";
         throw new Error("device-list");
       }
-      setDevices(nextDevices);
-      hasDeviceSnapshot.current = true;
-      localStorage.setItem(LOCAL_DEVICES_CACHE, JSON.stringify(nextDevices));
+      saveDeviceSnapshot(nextDevices);
     } catch {
       if (!rediscover) {
         try {
@@ -194,12 +240,7 @@ export default function LocalControlPage() {
             failureType = "devices";
             throw new Error("device-list");
           }
-          setDevices(nextDevices);
-          hasDeviceSnapshot.current = true;
-          localStorage.setItem(
-            LOCAL_DEVICES_CACHE,
-            JSON.stringify(nextDevices),
-          );
+          saveDeviceSnapshot(nextDevices);
         } catch (retryError) {
           failureType =
             retryError.message === "device-list" ? "devices" : "connection";
@@ -228,7 +269,7 @@ export default function LocalControlPage() {
       loadInFlight.current = false;
       setLoading(false);
     }
-  }, []);
+  }, [saveDeviceSnapshot]);
 
   useEffect(() => {
     setLocalProbingEnabled(true);
@@ -237,7 +278,7 @@ export default function LocalControlPage() {
         localStorage.getItem(LOCAL_DEVICES_CACHE) || "[]",
       );
       if (Array.isArray(cached) && cached.length) {
-        setDevices(cached);
+        setDevices(enrichLocalDevices(cached));
         hasDeviceSnapshot.current = true;
         setLoading(false);
       }
@@ -254,7 +295,7 @@ export default function LocalControlPage() {
       clearInterval(timer);
       setLocalProbingEnabled(false);
     };
-  }, [loadDevices]);
+  }, [loadDevices, enrichLocalDevices]);
 
   const toggle = async (device) => {
     const key = `${device.node_id || "local"}-${device.relay_index}`;
@@ -304,6 +345,37 @@ export default function LocalControlPage() {
       await checkConnection();
     } finally {
       setBusy((current) => ({ ...current, [key]: false }));
+    }
+  };
+
+  const toggleAllDevices = async (action) => {
+    if (!connected || !devices.length || bulkBusy) return;
+    setBulkBusy(action);
+    setBulkMessage("");
+    try {
+      const result = await triggerLocalAll(action);
+      // Re-read actual relay states instead of treating HTTP submission as
+      // proof every board acted on the command.
+      const refreshed = await fetchLocalDevices(5000);
+      const enriched = saveDeviceSnapshot(refreshed);
+      const targetState = action === "on";
+      const failed = enriched.filter((device) => Boolean(device.is_on) !== targetState);
+      if (failed.length) {
+        setBulkMessage(`Partial result: ${failed.length} of ${enriched.length} devices have not confirmed ${targetState ? "ON" : "OFF"}.`);
+      } else if (result?.success === false) {
+        setBulkMessage("The controller reported that the command did not complete.");
+      } else {
+        setBulkMessage(`Confirmed: all ${enriched.length} devices are ${targetState ? "ON" : "OFF"}.`);
+      }
+    } catch {
+      setBulkMessage("Could not confirm the bulk command. Check the local network and refresh device states.");
+      try {
+        saveDeviceSnapshot(await fetchLocalDevices(2500));
+      } catch {
+        // Keep the latest visible snapshot and its explicit error.
+      }
+    } finally {
+      setBulkBusy(null);
     }
   };
 
@@ -580,6 +652,42 @@ export default function LocalControlPage() {
             </div>
           )}
 
+          {devices.length > 0 && (
+            <div className="mt-5 rounded-2xl border border-[#E8E5DF] bg-[#FCFBF9] p-3 sm:p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-extrabold text-[#26382C]">Control every connected device</p>
+                  <p className="mt-1 text-xs leading-5 text-[#69736D]">Commands go directly to the local ESP32 mesh; internet is not required.</p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:flex">
+                  <button
+                    type="button"
+                    onClick={() => toggleAllDevices("on")}
+                    disabled={!connected || Boolean(bulkBusy) || loading}
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#39845A] px-4 text-xs font-extrabold text-white transition hover:bg-[#287247] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {bulkBusy === "on" ? <LoaderCircle size={15} className="animate-spin" /> : <Power size={15} />}
+                    All ON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleAllDevices("off")}
+                    disabled={!connected || Boolean(bulkBusy) || loading}
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#DADFD7] bg-white px-4 text-xs font-extrabold text-[#26382C] transition hover:border-[#C98C66] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {bulkBusy === "off" ? <LoaderCircle size={15} className="animate-spin" /> : <Power size={15} />}
+                    All OFF
+                  </button>
+                </div>
+              </div>
+              {bulkMessage && (
+                <p className={`mt-3 text-xs font-semibold leading-5 ${bulkMessage.startsWith("Confirmed:") ? "text-[#287247]" : "text-[#D94B4B]"}`} role="status" aria-live="polite">
+                  {bulkMessage}
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {devices.map((device) => {
               const key = `${device.node_id || "local"}-${device.relay_index}`;
@@ -606,15 +714,17 @@ export default function LocalControlPage() {
                         <Power size={19} aria-hidden="true" suppressHydrationWarning />
                       </span>
                       <div className="min-w-0">
-                        <p
-                          className="truncate text-sm font-extrabold text-[#26382C]"
-                          title={deviceLabel}
-                        >
-                          {deviceLabel}
-                        </p>
-                        <p className="mt-1 text-xs text-[#858780]">
-                          Relay {device.relay_index + 1}
-                        </p>
+                        <div className="min-w-0">
+                          <p className="truncate text-[10px] font-bold uppercase tracking-wider text-[#A86F3D]" title={device.roomName || deviceLabel}>
+                            {device.roomName || deviceLabel}
+                          </p>
+                          <p className="truncate text-sm font-extrabold text-[#26382C]" title={device.name || deviceLabel}>
+                            {device.name || deviceLabel}
+                          </p>
+                          <p className="mt-1 text-xs text-[#858780]">
+                            Relay {Number(device.relay_index) + 1}
+                          </p>
+                        </div>
                       </div>
                     </div>
                     <span
