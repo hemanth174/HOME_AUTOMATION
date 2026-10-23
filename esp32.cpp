@@ -28,11 +28,13 @@ const int INPUT_PINS[NUM_DEVICES] = {19, 18, 5, 17};
 //  They have been resolved below.
 // ============================================================
 
-// const char* ssid = "";
-// const char* password = "";
+// Home Wi-Fi credentials are saved in Preferences from the local setup page.
+String homeWifiSSID = "";
+String homeWifiPassword = "";
+volatile bool wifiConfigPending = false;
 
-
-const char* BOARD_IDENTIFIER = "";
+// Provisioning replaces this fallback identifier for each installed board.
+const char* BOARD_IDENTIFIER = "esp32-unconfigured";
 const char* SUPABASE_BASE = "";
 const char* SUPABASE_SERVICE_KEY = ""; 
 
@@ -160,12 +162,31 @@ void saveOfflineQueue();
 void cloudSyncTask(void* parameter);
 void cloudPollTask(void* parameter);
 void configureHttp(HTTPClient& http, uint16_t connectTimeout = 2500, uint16_t requestTimeout = 4000);
+bool isCloudConfigured();
+void loadHomeWifiCredentials();
+void applyPendingWifiConfiguration();
 
 // ============================================================
 //  SMALL HELPERS
 // ============================================================
 bool isHomeWifiConnected() {
-  return WiFi.status() == WL_CONNECTED && WiFi.SSID() == String(ssid);
+  return homeWifiSSID.length() > 0 && WiFi.status() == WL_CONNECTED &&
+         WiFi.SSID() == homeWifiSSID;
+}
+
+bool isCloudConfigured() {
+  return strlen(SUPABASE_BASE) > 0 && strlen(SUPABASE_SERVICE_KEY) > 0;
+}
+
+void loadHomeWifiCredentials() {
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  homeWifiSSID = preferences.getString("wifi_ssid", "");
+  homeWifiPassword = preferences.getString("wifi_pass", "");
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  Serial.printf("-> Home Wi-Fi credentials: %s\n",
+                homeWifiSSID.length() ? "saved" : "not configured");
+  Serial.printf("-> Supabase cloud sync: %s\n",
+                isCloudConfigured() ? "configured" : "disabled (missing URL/key)");
 }
 
 String getSelfIp() {
@@ -254,6 +275,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     .quick-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 24px; }
     .btn-quick { padding: 12px; border-radius: 12px; border: 1px solid #334155; background: #1e293b; color: #cbd5e1; font-size: 13px; font-weight: 700; cursor: pointer; transition: 0.15s; }
     .btn-quick:active { transform: scale(0.98); }
+    .wifi-config { min-height: 0; margin-bottom: 20px; gap: 10px; }
+    .wifi-config h2 { font-size: 14px; font-weight: 800; color: #e2e8f0; }
+    .wifi-config form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+    .wifi-config input { width: 100%; min-width: 0; padding: 10px; border-radius: 10px; border: 1px solid #334155; background: #0b1220; color: #f1f5f9; font-size: 12px; }
+    .wifi-config button { grid-column: 1 / -1; padding: 10px; border-radius: 10px; border: 0; background: #3b82f6; color: white; font-weight: 800; font-size: 12px; cursor: pointer; }
+    .wifi-config button:disabled { opacity: .55; cursor: wait; }
+    #wifi-message { min-height: 16px; margin-top: 4px; }
+    @media (max-width: 360px) { .wifi-config form { grid-template-columns: 1fr; } .wifi-config button { grid-column: auto; } }
     .footer { text-align: center; font-size: 11px; color: #64748b; margin-top: auto; }
   </style>
 </head>
@@ -264,6 +293,17 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <h1>Direct ESP32 Control</h1>
       <p class="sub">SoftAP Leader &bull; Sub-100ms Response</p>
     </header>
+
+    <section class="card wifi-config" aria-labelledby="wifi-heading">
+      <h2 id="wifi-heading">Home Wi-Fi Setup</h2>
+      <p class="sub">Cloud sync reconnects when your router is available. Local relay control stays available while Wi-Fi is configured.</p>
+      <form id="wifi-form">
+        <input id="wifi-ssid" name="ssid" type="text" maxlength="32" placeholder="Home Wi-Fi name (SSID)" autocomplete="off" required>
+        <input id="wifi-password" name="password" type="password" maxlength="63" placeholder="Wi-Fi password (blank for open Wi-Fi)" autocomplete="new-password">
+        <button id="wifi-submit" type="submit">Save Wi-Fi &amp; Connect</button>
+      </form>
+      <p id="wifi-message" class="sub" role="status" aria-live="polite"></p>
+    </section>
 
     <div class="quick-bar">
       <button class="btn-quick" onclick="toggleAll(true)">&#9889; Turn All ON</button>
@@ -278,6 +318,38 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   </div>
 
   <script>
+    const wifiForm = document.getElementById('wifi-form');
+    const wifiMessage = document.getElementById('wifi-message');
+    const wifiSubmit = document.getElementById('wifi-submit');
+
+    wifiForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const ssid = document.getElementById('wifi-ssid').value.trim();
+      const password = document.getElementById('wifi-password').value;
+      if (!ssid) { wifiMessage.textContent = 'Enter a Wi-Fi network name.'; return; }
+      if (password.length > 0 && password.length < 8) {
+        wifiMessage.textContent = 'Wi-Fi passwords must contain at least 8 characters.';
+        return;
+      }
+      wifiSubmit.disabled = true;
+      wifiMessage.textContent = 'Saving credentials…';
+      try {
+        const response = await fetch('/api/wifi/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ssid, password })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Could not save Wi-Fi settings.');
+        wifiMessage.textContent = result.message || 'Saved. Connecting in the background.';
+        document.getElementById('wifi-password').value = '';
+      } catch (error) {
+        wifiMessage.textContent = error.message || 'Could not save Wi-Fi settings.';
+      } finally {
+        wifiSubmit.disabled = false;
+      }
+    });
+
     async function loadStatus() {
       try {
         const res = await fetch('/api/devices');
@@ -483,6 +555,10 @@ void setupWebServer() {
     doc["devicesCount"] = NUM_DEVICES;
     doc["meshNodes"] = (localRole == ROLE_LEADER) ? meshNodeCount : 0;
     doc["stationConnected"] = isHomeWifiConnected();
+    doc["wifiConfigured"] = homeWifiSSID.length() > 0;
+    doc["cloudConfigured"] = isCloudConfigured();
+    doc["mode"] = isHomeWifiConnected() ? "online_wifi" :
+                  (localRole == ROLE_LEADER ? "local_ap" : "offline_retrying");
     doc["apStations"] = WiFi.softAPgetStationNum();
     doc["uptimeMs"] = millis();
 
@@ -625,6 +701,40 @@ void setupWebServer() {
     String res;
     serializeJson(arr, res);
     server.send(200, "application/json", res);
+  });
+
+  server.on("/api/wifi/config", HTTP_POST, []() {
+    handleCORS();
+    if (!server.hasArg("plain")) {
+      server.send(400, "application/json", "{\"success\":false,\"error\":\"Missing request body\"}");
+      return;
+    }
+    DynamicJsonDocument req(512);
+    DeserializationError err = deserializeJson(req, server.arg("plain"));
+    if (err || !req["ssid"].is<const char*>()) {
+      server.send(400, "application/json", "{\"success\":false,\"error\":\"Invalid Wi-Fi configuration\"}");
+      return;
+    }
+    String newSSID = req["ssid"].as<String>();
+    String newPassword = req["password"] | "";
+    newSSID.trim();
+    if (newSSID.length() == 0 || newSSID.length() > 32 ||
+        (newPassword.length() > 0 && newPassword.length() < 8) ||
+        newPassword.length() > 63) {
+      server.send(400, "application/json",
+        "{\"success\":false,\"error\":\"SSID or password length is invalid\"}");
+      return;
+    }
+    homeWifiSSID = newSSID;
+    homeWifiPassword = newPassword;
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    preferences.putString("wifi_ssid", homeWifiSSID);
+    preferences.putString("wifi_pass", homeWifiPassword);
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+
+    wifiConfigPending = true;
+    server.send(200, "application/json",
+      "{\"success\":true,\"message\":\"Wi-Fi saved. Connecting in background; local control remains available.\"}");
   });
 
   server.begin();
@@ -784,6 +894,11 @@ void becomeLeader() {
   }
   Serial.print("-> SoftAP active. IP: ");
   Serial.println(WiFi.softAPIP());
+  if (homeWifiSSID.length() > 0) {
+    WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+    lastLeaderWifiTry = millis();
+    Serial.println("-> Attempting home Wi-Fi in background; local AP remains enabled.");
+  }
 }
 
 void becomeMember() {
@@ -856,7 +971,7 @@ void evaluateLocalRole() {
       lastHomeWifiProbe = millis();
       WiFi.disconnect(false);
       delay(100);
-      WiFi.begin(ssid, password);
+      WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
       unsigned long start = millis();
       while (WiFi.status() != WL_CONNECTED && millis() - start < 4000) { delay(50); server.handleClient(); }
       if (WiFi.status() != WL_CONNECTED) {
@@ -898,6 +1013,9 @@ void evaluateLocalRole() {
 //  STORE AND FORWARD OFFLINE QUEUE
 // ============================================================
 void enqueueOfflineUpdate(int index, bool state, bool isFeedback) {
+  // Offline buffering is only useful when a cloud endpoint/key is configured.
+  // Local relay commands must continue to work when cloud sync is disabled.
+  if (!isCloudConfigured()) return;
   if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
 
   // Keep only the latest value for each device/source pair. This prevents a
@@ -1015,6 +1133,7 @@ void setup() {
   }
 
   preferences.begin("smart_home", false);
+  loadHomeWifiCredentials();
   loadOfflineQueue();
 
   // Initialize GPIOs & restore saved relay states
@@ -1045,10 +1164,10 @@ void setup() {
   // SoftAP is started later by becomeLeader() ONLY when home Wi-Fi is down.
   WiFi.mode(WIFI_STA);
 
-  if (strlen(ssid) > 0) {
-    wifiMulti.addAP(ssid, password);
+  if (homeWifiSSID.length() > 0) {
+    wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
     Serial.print("-> Connecting to Home Wi-Fi: ");
-    Serial.println(ssid);
+    Serial.println(homeWifiSSID);
 
     // Initial bounded attempt so cloud can start immediately when available.
     unsigned long wifiStart = millis();
@@ -1079,8 +1198,8 @@ void setup() {
   // throttled loop() evaluation. HOME-AUTO-LEADER appears within seconds -
   // no EN-button reset should ever be needed to bring the SoftAP online.
   if (!isHomeWifiConnected()) {
-    Serial.println("-> Home Wi-Fi down at boot. Electing local role now...");
-    lastRoleEval = 0;
+    Serial.println("-> Home Wi-Fi unavailable at boot. Starting local mode...");
+    lastRoleEval = millis() - ROLE_EVAL_INTERVAL;
     evaluateLocalRole();
   }
 
@@ -1119,9 +1238,28 @@ void setup() {
 // ============================================================
 //  MAIN LOOP
 // ============================================================
+void applyPendingWifiConfiguration() {
+  if (!wifiConfigPending) return;
+  wifiConfigPending = false;
+
+  // becomeLeader() retains the local AP and starts a station attempt itself.
+  // Return afterward to avoid restarting that connection twice.
+  if (!isHomeWifiConnected() && localRole != ROLE_LEADER) {
+    becomeLeader();
+    return;
+  }
+
+  if (homeWifiSSID.length() > 0) {
+    WiFi.setAutoReconnect(localRole != ROLE_LEADER);
+    WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+    Serial.println("-> Home Wi-Fi connection started; local HTTP API remains enabled.");
+  }
+}
+
 void loop() {
   // Handle local HTTP requests immediately (sub-100ms response)
   server.handleClient();
+  applyPendingWifiConfiguration();
 
   // 1. Physical Switch Input Reading (Debounced)
   for (int i = 0; i < NUM_DEVICES; i++) {
@@ -1161,25 +1299,20 @@ void loop() {
   // 2. Role / connectivity management (throttled internally)
   evaluateLocalRole();
 
-  // 3. Station reconnect attempts - THROTTLED and NEVER while the SoftAP
-  // has a connected phone/member.
-  //
-  // WiFiMulti::run() performs a BLOCKING network scan (~2-4 s). In leader
-  // mode (SoftAP + STA) that scan starves server.handleClient(), so every
-  // local toggle issued during the scan window timed out (and scanning
-  // briefly disturbs SoftAP traffic). The leader now kicks a normal,
-  // WiFi.begin() attempt every 30 s, and only when the AP has no clients.
-  // Automatic STA reconnect is disabled in leader mode for the same reason.
-  // Members already probe home Wi-Fi from evaluateLocalRole(), and IDLE
-  // keeps using WiFiMulti because no SoftAP is active then.
+  // 3. Station reconnect attempts are throttled. WiFiMulti::run() is a
+  // blocking scan, so it is only used while IDLE (no SoftAP). A LEADER uses
+  // WiFi.begin() in the background at a slower interval to preserve local
+  // control; STA scans/association may still briefly affect AP clients.
+  // Members probe home Wi-Fi from evaluateLocalRole().
   if (!isHomeWifiConnected()) {
     if (localRole == ROLE_LEADER) {
-      if (WiFi.softAPgetStationNum() == 0 && strlen(ssid) > 0 && WiFi.status() != WL_CONNECTED &&
+      if (homeWifiSSID.length() > 0 && WiFi.status() != WL_CONNECTED &&
           millis() - lastLeaderWifiTry >= LEADER_WIFI_RETRY_INTERVAL) {
         lastLeaderWifiTry = millis();
-        WiFi.begin(ssid, password); // non-blocking; STA only
+        Serial.println("-> Retrying home Wi-Fi while preserving local AP...");
+        WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
       }
-    } else if (localRole == ROLE_IDLE && strlen(ssid) > 0 &&
+    } else if (localRole == ROLE_IDLE && homeWifiSSID.length() > 0 &&
                millis() - lastWifiRetry >= WIFI_RETRY_INTERVAL) {
       lastWifiRetry = millis();
       wifiMulti.run();
@@ -1213,7 +1346,7 @@ void loop() {
 //  SUPABASE CLOUD HTTP FUNCTIONS (unchanged cloud logic)
 // ============================================================
 void pollDatabase() {
-  if (boardUUID == "") return;
+  if (!isCloudConfigured() || boardUUID == "") return;
 
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=relay_index,is_on");
@@ -1254,7 +1387,7 @@ void pollDatabase() {
 }
 
 bool updateDeviceInDB(int index, bool state) {
-  if (index < 0 || index >= NUM_DEVICES || deviceUUIDs[index] == "") return false;
+  if (!isCloudConfigured() || index < 0 || index >= NUM_DEVICES || deviceUUIDs[index] == "") return false;
 
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUIDs[index]);
@@ -1268,7 +1401,7 @@ bool updateDeviceInDB(int index, bool state) {
 }
 
 bool updateFeedbackInDB(int index, bool feedback) {
-  if (index < 0 || index >= NUM_DEVICES || deviceUUIDs[index] == "") return false;
+  if (!isCloudConfigured() || index < 0 || index >= NUM_DEVICES || deviceUUIDs[index] == "") return false;
 
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUIDs[index]);
@@ -1282,6 +1415,8 @@ bool updateFeedbackInDB(int index, bool feedback) {
 }
 
 bool resolveBoardAndDevices() {
+  if (!isCloudConfigured() || strlen(BOARD_IDENTIFIER) == 0 ||
+      String(BOARD_IDENTIFIER) == "esp32-unconfigured") return false;
   HTTPClient http;
 
   // 1. Find Board UUID
@@ -1335,7 +1470,7 @@ bool resolveBoardAndDevices() {
 // of the old fetchInitialState(), which reverted the relays to stale
 // cloud state and disrupted offline-toggled devices.
 void syncAllStatesToDB() {
-  if (boardUUID == "") return;
+  if (!isCloudConfigured() || boardUUID == "") return;
   for (int i = 0; i < NUM_DEVICES; i++) {
     if (deviceUUIDs[i] == "") continue;
 
@@ -1356,6 +1491,7 @@ void syncAllStatesToDB() {
 }
 
 void pollAlarms() {
+  if (!isCloudConfigured() || boardUUID == "") return;
   String queryIds = "";
   for (int i = 0; i < NUM_DEVICES; i++) {
     if (deviceUUIDs[i] != "") {
@@ -1398,6 +1534,7 @@ void pollAlarms() {
 }
 
 void markAlarmFiredInDB(String alarmId) {
+  if (!isCloudConfigured() || alarmId.length() == 0) return;
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/alarms?id=eq." + alarmId);
   configureHttp(http);
@@ -1410,7 +1547,7 @@ void markAlarmFiredInDB(String alarmId) {
 }
 
 void sendHeartbeat() {
-  if (boardUUID == "") return;
+  if (!isCloudConfigured() || boardUUID == "") return;
 
   String nowIso = getIsoTime();
 
@@ -1443,7 +1580,7 @@ void cloudSyncTask(void* parameter) {
   unsigned long queueRetryDelay = 2000;
 
   for (;;) {
-    if (!isHomeWifiConnected()) {
+    if (!isHomeWifiConnected() || !isCloudConfigured()) {
       vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
     }
@@ -1515,7 +1652,7 @@ void cloudPollTask(void* parameter) {
   TickType_t nextPoll = xTaskGetTickCount();
 
   for (;;) {
-    if (!isHomeWifiConnected() || !cloudDevicesReady) {
+    if (!isHomeWifiConnected() || !cloudDevicesReady || !isCloudConfigured()) {
       nextPoll = xTaskGetTickCount();
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
