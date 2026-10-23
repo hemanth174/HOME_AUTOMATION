@@ -1013,6 +1013,9 @@ void evaluateLocalRole() {
 //  STORE AND FORWARD OFFLINE QUEUE
 // ============================================================
 void enqueueOfflineUpdate(int index, bool state, bool isFeedback) {
+  // Offline buffering is only useful when a cloud endpoint/key is configured.
+  // Local relay commands must continue to work when cloud sync is disabled.
+  if (!isCloudConfigured()) return;
   if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
 
   // Keep only the latest value for each device/source pair. This prevents a
@@ -1238,7 +1241,14 @@ void setup() {
 void applyPendingWifiConfiguration() {
   if (!wifiConfigPending) return;
   wifiConfigPending = false;
-  if (!isHomeWifiConnected() && localRole != ROLE_LEADER) becomeLeader();
+
+  // becomeLeader() retains the local AP and starts a station attempt itself.
+  // Return afterward to avoid restarting that connection twice.
+  if (!isHomeWifiConnected() && localRole != ROLE_LEADER) {
+    becomeLeader();
+    return;
+  }
+
   if (homeWifiSSID.length() > 0) {
     WiFi.setAutoReconnect(localRole != ROLE_LEADER);
     WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
@@ -1289,17 +1299,11 @@ void loop() {
   // 2. Role / connectivity management (throttled internally)
   evaluateLocalRole();
 
-  // 3. Station reconnect attempts - THROTTLED and NEVER while the SoftAP
-  // has a connected phone/member.
-  //
-  // WiFiMulti::run() performs a BLOCKING network scan (~2-4 s). In leader
-  // mode (SoftAP + STA) that scan starves server.handleClient(), so every
-  // local toggle issued during the scan window timed out (and scanning
-  // briefly disturbs SoftAP traffic). The leader now kicks a normal,
-  // WiFi.begin() attempt every 30 s, and only when the AP has no clients.
-  // Automatic STA reconnect is disabled in leader mode for the same reason.
-  // Members already probe home Wi-Fi from evaluateLocalRole(), and IDLE
-  // keeps using WiFiMulti because no SoftAP is active then.
+  // 3. Station reconnect attempts are throttled. WiFiMulti::run() is a
+  // blocking scan, so it is only used while IDLE (no SoftAP). A LEADER uses
+  // WiFi.begin() in the background at a slower interval to preserve local
+  // control; STA scans/association may still briefly affect AP clients.
+  // Members probe home Wi-Fi from evaluateLocalRole().
   if (!isHomeWifiConnected()) {
     if (localRole == ROLE_LEADER) {
       if (homeWifiSSID.length() > 0 && WiFi.status() != WL_CONNECTED &&
