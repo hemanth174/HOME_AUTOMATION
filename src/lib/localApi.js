@@ -174,7 +174,7 @@ function normalizeDevice(d) {
     id: d.id ?? `${d.node_id || 'esp32'}_${d.relay_index}`,
     relay_index: d.relay_index ?? 0,
     is_on: Boolean(d.is_on),
-    feedback_on: Boolean(d.feedback_on),
+    feedback_on: d.feedback_on === null || d.feedback_on === undefined ? null : Boolean(d.feedback_on),
     node_id: d.node_id || null,
     node_role: d.node_role || null,
   };
