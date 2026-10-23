@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, User } from "lucide-react";
+
 import { getDeviceKind } from "./deviceKind";
 export default function DeviceCard({
   device,
@@ -14,10 +14,8 @@ export default function DeviceCard({
   const { Icon } = kind;
   const hasFeedback =
     device.feedback_on !== null && device.feedback_on !== undefined;
-  const isLightOn = hasFeedback ? device.feedback_on : device.is_on;
   const isRelayOn = device.is_on;
-  const isBurntBulb = hasFeedback && isRelayOn && !device.feedback_on;
-  const isManualOverride = hasFeedback && !isRelayOn && device.feedback_on;
+  const isLightOn = isRelayOn;
 
   return (
     <article
@@ -30,24 +28,6 @@ export default function DeviceCard({
           <Icon size={16} strokeWidth={2.25} aria-hidden="true" />
         </span>
         <span className="flex flex-col items-end gap-1 shrink-0">
-          {isBurntBulb && (
-            <span
-              className="flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-wide text-(--pg-error) bg-(--pg-error-faint) border border-(--pg-error-line) px-1.5 py-0.5 rounded-md"
-              title="Relay is ON but no AC current detected — bulb may be fused or the breaker tripped."
-            >
-              <AlertTriangle size={10} />
-              Error
-            </span>
-          )}
-          {isManualOverride && (
-            <span
-              className="flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-wide text-(--pg-brand) bg-(--pg-brand-faint) border border-(--pg-brand-soft) px-1.5 py-0.5 rounded-md"
-              title="Relay is OFF but AC current detected — the physical wall switch is ON."
-            >
-              <User size={10} />
-              Manual
-            </span>
-          )}
           {!boardOnline && (
             <span className="text-[9px] font-extrabold uppercase tracking-wide text-(--pg-muted) bg-black/[0.04] border border-(--pg-line) px-1.5 py-0.5 rounded-md">
               Offline
@@ -56,9 +36,9 @@ export default function DeviceCard({
           {!hasFeedback && (
             <span
               className="text-[9px] font-extrabold uppercase tracking-wide text-(--pg-muted) bg-black/[0.04] border border-(--pg-line) px-1.5 py-0.5 rounded-md"
-              title="This firmware is not reporting actual AC-current sensor readings."
+              title="This controller has not reported its GPIO switch-input state yet."
             >
-              Feedback N/A
+              Input N/A
             </span>
           )}
         </span>
@@ -80,11 +60,9 @@ export default function DeviceCard({
           }`}
           aria-live="polite"
         >
-          {isManualOverride
-            ? "Manual ON"
-            : hasFeedback
-              ? (isLightOn ? "AC ON" : "AC OFF")
-              : (isRelayOn ? "Relay ON · AC feedback unavailable" : "Relay OFF · AC feedback unavailable")}
+          {hasFeedback
+            ? \`Relay \${isRelayOn ? "ON" : "OFF"} · Switch input \${device.feedback_on ? "ON" : "OFF"}\`
+            : (isRelayOn ? "Relay ON · switch input unavailable" : "Relay OFF · switch input unavailable")}
         </p>
       </div>
 
