@@ -45,6 +45,10 @@ export function setLocalProbingEnabled(on) {
     clearTimeout(beatTimer);
     beatTimer = null;
   }
+  if (!probingEnabled && (snapshot.isLocalConnected || snapshot.leaderNode || snapshot.isProbing)) {
+    probeInFlight = false;
+    patch({ isLocalConnected: false, leaderNode: null, isProbing: false });
+  }
 }
 
 function emit() {
@@ -88,6 +92,7 @@ export async function checkConnection() {
     if (!status || status.online !== true || !status.nodeId) {
       throw new Error('Invalid ESP32 status response');
     }
+    if (!probingEnabled) return;
     consecutiveFailures = 0;
     // Only notify subscribers when something actually changed.
     if (

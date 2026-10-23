@@ -2,8 +2,11 @@
 
 import { useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+import { setLocalDeviceState } from '@/lib/localApi';
+import useLocalConnection from '@/hooks/useLocalConnection';
 
 export default function AlarmExecutor() {
+  const { isLocalConnected } = useLocalConnection();
   // We use refs to hold the latest data so the interval doesn't need to be recreated,
   // which prevents missing ticks or stale closures.
   const dataRef = useRef({ user: null, devices: [], alarms: [], schedules: [] });
@@ -18,7 +21,7 @@ export default function AlarmExecutor() {
       if (!user || !active) return;
       
       const [devRes, alarmRes, schedRes] = await Promise.all([
-        supabase.from('devices').select('id, name, is_on').eq('user_id', user.id),
+        supabase.from('devices').select('id, name, relay_index, node_id, is_on').eq('user_id', user.id),
         supabase.from('alarms').select('id, trigger_at, action, fired, device_id').eq('user_id', user.id).eq('fired', false),
         supabase.from('schedules').select('id, time, days, action, device_id, enabled').eq('user_id', user.id).eq('enabled', true)
       ]);
@@ -115,7 +118,7 @@ export default function AlarmExecutor() {
       clearInterval(interval);
       channelsPromise.then(chan => chan && supabase.removeChannel(chan));
     };
-  }, []);
+  }, [isLocalConnected]);
 
   // Executes a hardware action (ON/OFF) checking live feedback
   const executeAction = async (user, devices, deviceId, targetAction, sourceName) => {
@@ -129,6 +132,16 @@ export default function AlarmExecutor() {
         detail: `Skipped ${sourceName}: ${device.name} is already ${targetAction ? 'ON' : 'OFF'}`,
       }));
       return;
+    }
+
+    // Update the local relay first when the ESP32 mesh is available. Cloud
+    // persistence still follows so both planes converge.
+    if (isLocalConnected) {
+      try {
+        await setLocalDeviceState(device.relay_index, targetAction, device.node_id);
+      } catch (error) {
+        console.warn('Local automation command failed; continuing with cloud sync:', error);
+      }
     }
 
     // Update the device state

@@ -167,7 +167,11 @@ export default function BoardsPage() {
       });
     }
     const { error: devicesError } = await supabase.from('devices').insert(deviceInserts);
-    if (devicesError) { setToast(devicesError.message); return; }
+    if (devicesError) {
+      await supabase.from('boards').delete().eq('id', board.id);
+      setToast(`${devicesError.message} The empty board was removed.`);
+      return;
+    }
 
     setShowModal(false);
     setBoardIdentifier('');

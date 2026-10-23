@@ -373,6 +373,87 @@ html[data-theme="dark"] body.m-shell {
     --pg-tile-ico: #E8B07A;
 }
 
+/* Neutral app shell palette: keep the dashboard monochrome across themes. */
+body.pg-shell,
+body.m-shell {
+    --bg: #fafafa;
+    --bg-card: #ffffff;
+    --bg-card-alt: #f4f4f5;
+    --bg-input: #ffffff;
+    --bg-header: rgba(250, 250, 250, 0.92);
+    --text: #09090b;
+    --text-muted: #71717a;
+    --accent: #09090b;
+    --accent-hover: #27272a;
+    --accent-bg: rgba(0, 0, 0, 0.05);
+    --accent-glow: rgba(0, 0, 0, 0.12);
+    --border: #e4e4e7;
+    --toggle-track: #e4e4e7;
+    --toggle-on: #09090b;
+    --btn-text: #ffffff;
+    --pg-card: #ffffff;
+    --pg-ink: #09090b;
+    --pg-muted: #71717a;
+    --pg-line: #e4e4e7;
+    --pg-faint: #f4f4f5;
+    --pg-deep: #09090b;
+    --pg-brand: #09090b;
+    --pg-brand-hover: #27272a;
+    --pg-onbrand: #ffffff;
+    --pg-side: #fafafa;
+    --pg-navtext: #52525b;
+    --pg-nav-active-bg: rgba(0, 0, 0, 0.06);
+    --pg-nav-active-text: #09090b;
+    --pg-success: #09090b;
+    --pg-track: #e4e4e7;
+    --pg-track-hover: #d4d4d8;
+    --pg-brand-line: rgba(9, 9, 11, 0.24);
+    --pg-brand-soft: rgba(9, 9, 11, 0.14);
+    --pg-brand-faint: rgba(9, 9, 11, 0.06);
+    --pg-brand-ghost: rgba(9, 9, 11, 0.035);
+    --pg-tile-ico: #ffffff;
+}
+
+html[data-theme="dark"] body.pg-shell,
+html[data-theme="dark"] body.m-shell {
+    --bg: #09090b;
+    --bg-card: #18181b;
+    --bg-card-alt: #27272a;
+    --bg-input: #18181b;
+    --bg-header: rgba(9, 9, 11, 0.92);
+    --text: #f4f4f5;
+    --text-muted: #a1a1aa;
+    --accent: #ffffff;
+    --accent-hover: #e4e4e7;
+    --accent-bg: rgba(255, 255, 255, 0.08);
+    --accent-glow: rgba(255, 255, 255, 0.2);
+    --border: #27272a;
+    --toggle-track: #27272a;
+    --toggle-on: #ffffff;
+    --btn-text: #09090b;
+    --pg-card: #18181b;
+    --pg-ink: #f4f4f5;
+    --pg-muted: #a1a1aa;
+    --pg-line: #27272a;
+    --pg-faint: #27272a;
+    --pg-deep: #f4f4f5;
+    --pg-brand: #ffffff;
+    --pg-brand-hover: #e4e4e7;
+    --pg-onbrand: #09090b;
+    --pg-side: #09090b;
+    --pg-navtext: #a1a1aa;
+    --pg-nav-active-bg: rgba(255, 255, 255, 0.08);
+    --pg-nav-active-text: #ffffff;
+    --pg-success: #f4f4f5;
+    --pg-track: #27272a;
+    --pg-track-hover: #3f3f46;
+    --pg-brand-line: rgba(255, 255, 255, 0.28);
+    --pg-brand-soft: rgba(255, 255, 255, 0.16);
+    --pg-brand-faint: rgba(255, 255, 255, 0.08);
+    --pg-brand-ghost: rgba(255, 255, 255, 0.04);
+    --pg-tile-ico: #09090b;
+}
+
 /* Mobile top header: clear the notch. */
 body.m-shell header.fixed.top-0 {
     padding-top: env(safe-area-inset-top);
@@ -390,7 +471,7 @@ body.m-shell nav.fixed.bottom-0 {
     box-shadow: 0 -4px 16px rgba(38, 56, 44, 0.06);
 }
 html[data-theme="dark"] body.m-shell nav.fixed.bottom-0 {
-    background: rgba(34, 29, 22, 0.94);
+    background: rgba(24, 24, 27, 0.94);
     box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.4);
 }
 body.m-shell nav.fixed.bottom-0 .text-accent {
@@ -404,21 +485,21 @@ body.m-shell nav.fixed.bottom-0 .text-accent::after {
     width: 4px;
     height: 4px;
     border-radius: 999px;
-    background: #A86F3D;
+    background: var(--accent);
     transform: translateX(-50%);
 }
 html[data-theme="dark"] body.m-shell nav.fixed.bottom-0 .text-accent::after {
-    background: #D99A5B;
+    background: var(--accent);
 }
 
 /* Voice mic on mobile: flat terracotta disc, no neon glow. */
 body.m-shell #voice-control-mic-btn {
-    background: #A86F3D;
-    box-shadow: 0 6px 18px rgba(168, 111, 61, 0.35);
+    background: var(--accent);
+    box-shadow: 0 6px 18px var(--accent-glow);
 }
 html[data-theme="dark"] body.m-shell #voice-control-mic-btn {
-    background: #D99A5B;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    background: var(--accent);
+    box-shadow: 0 6px 18px var(--accent-glow);
 }
 
 /* -------- Overview summary cards --------
@@ -435,7 +516,7 @@ html[data-theme="dark"] .ov-sub {
 
 /* PG shell polish: readable focus, calm scrollbars, restrained motion */
 body.pg-shell :focus-visible {
-    outline: 2px solid #087443;
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
 body.pg-shell ::-webkit-scrollbar-thumb {
@@ -794,6 +875,22 @@ body,
         padding-top: 92px;
         /* Keep content clear of the bottom nav + home indicator. */
         padding-bottom: calc(48px + env(safe-area-inset-bottom));
+    }
+}
+
+/* Mobile dashboard prioritizes room controls over summary metrics. */
+@media (max-width: 639px) {
+    .dashboard-container {
+        width: min(100% - 20px, 620px);
+        padding-top: 84px;
+    }
+
+    .dashboard-container > section[aria-label="Overview"] {
+        margin-bottom: 1rem;
+    }
+
+    .dashboard-container .boards-section-selector > div:first-child {
+        padding-bottom: 0.25rem;
     }
 }
 

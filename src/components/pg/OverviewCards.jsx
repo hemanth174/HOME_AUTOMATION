@@ -68,7 +68,7 @@ export default function OverviewCards({
         {greeting}, {firstName}
       </h1>
       <p className="text-[13px] font-medium text-text-muted mt-1 mb-4">{statusMessage}</p>
-      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4 lg:gap-3">
+      <div className="hidden sm:grid grid-cols-2 gap-2.5 lg:grid-cols-4 lg:gap-3">
         {cards.map(({ label, value, sub, Icon, accent, ok }) => (
           <div
             key={label}

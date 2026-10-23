@@ -14,7 +14,7 @@ export function getDeviceKind(name = '') {
       key: 'climate',
       label: 'Fan',
       Icon: Fan,
-      tile: 'bg-(--pg-brand-faint) text-(--pg-brand)',
+      tile: 'bg-(--pg-faint) text-(--pg-brand)',
     };
   }
   if (
@@ -27,14 +27,14 @@ export function getDeviceKind(name = '') {
       key: 'lighting',
       label: 'Lighting',
       Icon: Lightbulb,
-      tile: 'bg-[#FEF3C7] text-[#B45309]',
+      tile: 'bg-(--pg-faint) text-(--pg-brand)',
     };
   }
   return {
     key: 'appliance',
     label: 'Appliance',
     Icon: PlugZap,
-    tile: 'bg-[#E8EEF4] text-[#3E5C76]',
+    tile: 'bg-(--pg-faint) text-(--pg-brand)',
   };
 }
 

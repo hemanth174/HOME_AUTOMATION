@@ -1,4 +1,5 @@
 'use client';
+import { supabase } from '@/lib/supabase';
 
 // Standardized voice utility to ensure all pages use the exact same voice
 let selectedVoice = null;
@@ -98,13 +99,16 @@ export const speak = async (text, lang = "en-US") => {
 }
 
 async function sarvamSpeak(text) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return;
 
     const response = await fetch("/api/sarvam/tts", {
 
         method: "POST",
 
         headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${session.access_token}`
         },
 
         body: JSON.stringify({

@@ -21,7 +21,7 @@ export async function GET(request, { params }) {
 }
 
 async function buildFirmware(record, password) {
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://home-automation-mauve-one.vercel.app';
   const response = await fetch(`${baseUrl}/esp32.cpp`, { cache: 'no-store' });
   let source = response.ok ? await response.text() : '#include <WiFi.h>\n';
   source = source.replace(/const char\* BOARD_IDENTIFIER = "[^"]*";/, `const char* BOARD_IDENTIFIER = "${record.board_identifier}";`);

@@ -26,6 +26,10 @@ export const metadata = {
   title: "VikaTech",
   description: "VikaTech Automation Control Panel",
   manifest: "/manifest.json",
+  icons: {
+    icon: "/favicon.png",
+    apple: "/icon-192.png",
+  },
 };
 
 export const viewport = {
@@ -45,6 +49,7 @@ export default function RootLayout({ children }) {
     >
       <head>
         <link rel="manifest" href="/manifest.json" />
+        <link rel="icon" href="/favicon.png" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta

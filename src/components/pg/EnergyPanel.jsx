@@ -123,8 +123,8 @@ export default function EnergyPanel({ dailyRows }) {
                 width={44}
               />
               <Tooltip
-                contentStyle={{ backgroundColor: '#063B20', border: 'none', borderRadius: '10px', padding: '8px 12px' }}
-                labelStyle={{ color: '#CFFF79', fontSize: '11px', fontWeight: 'bold' }}
+                contentStyle={{ backgroundColor: 'var(--bg-card-alt)', border: '1px solid var(--border)', borderRadius: '10px', padding: '8px 12px' }}
+                labelStyle={{ color: 'var(--text)', fontSize: '11px', fontWeight: 'bold' }}
                 itemStyle={{ color: '#ffffff', fontSize: '11px', fontWeight: '600' }}
                 formatter={(v) => [`${Number(v).toFixed(3)} kWh`, 'Usage']}
               />

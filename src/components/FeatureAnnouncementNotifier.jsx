@@ -4,7 +4,6 @@ import { useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import {
   playNotificationTone,
-  requestBrowserNotificationPermission,
 } from '@/lib/browserNotifications';
 
 const LAST_SEEN_KEY = 'vikatech_last_feature_announcement';
@@ -16,7 +15,9 @@ async function announceInBrowser(announcement) {
     detail: `${announcement.title}: ${announcement.message}`,
   }));
 
-  const permission = await requestBrowserNotificationPermission();
+  // Permission prompts require a user gesture. The notification bell owns
+  // that gesture; announcements should not interrupt users on page load.
+  const permission = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
   if (permission !== 'granted') return;
   playNotificationTone();
 

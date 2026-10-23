@@ -14,19 +14,20 @@ export default function MainLayoutWrapper({ children, className = "" }) {
   const pathname = usePathname();
   const router = useRouter();
   const cleanPath = (pathname || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '') || '/';
-  const VALID_ROUTES = ['/', '/local', '/login', '/pending', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/admin'];
+  const VALID_ROUTES = ['/', '/local', '/login', '/pending', '/denied', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/settings', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/admin'];
   const PUBLIC_ROUTES = ['/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/terms'];
   const isTrackPage = cleanPath.startsWith('/track/');
   const isPublicPage = PUBLIC_ROUTES.includes(cleanPath) || isTrackPage;
   const is404Page = !VALID_ROUTES.includes(cleanPath) && !isTrackPage;
   const isLoginPage = cleanPath === '/login';
   const isPendingPage = cleanPath === '/pending';
+  const isDeniedPage = cleanPath === '/denied';
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(true);
   const [isClientOnline, setIsClientOnline] = useState(true); // Always true initially to match SSR
   const { isLocalConnected, localUrl } = useLocalConnection();
 
-  const fullWidthPage = isLoginPage || isPendingPage || cleanPath === '/admin' || is404Page || isPublicPage || (!user && cleanPath === '/');
+  const fullWidthPage = isLoginPage || isPendingPage || isDeniedPage || cleanPath === '/admin' || is404Page || isPublicPage || (!user && cleanPath === '/');
 
   // Real connectivity monitor.
   //
@@ -40,7 +41,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
     // Admin and public tracking pages are cloud-only views. Do not run the
     // local-mode connectivity probe here; its timeout intentionally appears
     // as a cancelled generate_204 request in browser DevTools.
-    if (cleanPath === '/admin' || isPendingPage || isTrackPage) {
+    if (cleanPath === '/admin' || isPendingPage || isDeniedPage || isTrackPage) {
       setIsClientOnline(true);
       return undefined;
     }
@@ -66,9 +67,10 @@ export default function MainLayoutWrapper({ children, className = "" }) {
     window.addEventListener('online', recheckSoon);
     window.addEventListener('offline', recheckSoon);
     window.addEventListener('focus', recheckSoon);
-    document.addEventListener('visibilitychange', () => {
+    const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') recheckSoon();
-    });
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Slow background beat catches silent ISP drops/restore.
     pollTimer = setInterval(evaluate, 10000);
@@ -80,8 +82,9 @@ export default function MainLayoutWrapper({ children, className = "" }) {
       window.removeEventListener('online', recheckSoon);
       window.removeEventListener('offline', recheckSoon);
       window.removeEventListener('focus', recheckSoon);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [cleanPath, router]);
+  }, [cleanPath, isDeniedPage, router]);
 
   // SoftAP mode is a dedicated local session. Keep the user on the local
   // control page because cloud routes cannot work without internet access.
@@ -124,7 +127,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
         const currentUser = session?.user || null;
         setUser(currentUser);
 
-        if (currentUser && !isPendingPage && !isLoginPage && !isPublicPage && cleanPath !== '/admin') {
+        if (currentUser && !isPendingPage && !isDeniedPage && !isLoginPage && !isPublicPage && cleanPath !== '/admin') {
           const approvalResponse = await fetch('/api/account/status', { cache: 'no-store', headers: { Authorization: `Bearer ${session.access_token}` } });
           if (approvalResponse.ok) {
             const approvalData = await approvalResponse.json();
@@ -157,7 +160,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
       active = false;
       subscription.unsubscribe();
     };
-  }, [isLoginPage, isPendingPage, cleanPath, router, isPublicPage]);
+  }, [isLoginPage, isPendingPage, isDeniedPage, cleanPath, router, isPublicPage]);
 
   // Loading screens to prevent UI flashes
   // Redirecting loading screen if accessing unauthorized areas while online

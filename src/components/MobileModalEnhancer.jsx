@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 // starts only in the top grab area so fields and scrollable content remain usable.
 const PANEL_SELECTOR =
   'div.fixed[class*="bg-black/"] > div[class*="max-md:rounded-t"], div.fixed[class*="z-[1000]"] > div[class*="max-md:rounded-t"], div.fixed[class*="z-[10000]"] > div[class*="max-md:rounded-t"]';
+const OVERLAY_SELECTOR = 'div.fixed.inset-0';
 const GRAB_ZONE_PX = 64;
 const CLOSE_DISTANCE_PX = 96;
 const CLOSE_VELOCITY_PX_MS = 0.55;
@@ -14,6 +15,14 @@ export default function MobileModalEnhancer() {
   useEffect(() => {
     const mediaQuery = window.matchMedia('(max-width: 767px)');
     const disposers = new Map();
+    const originalBodyOverflow = document.body.style.overflow;
+    const originalBodyOverscroll = document.body.style.overscrollBehavior;
+
+    const syncBodyLock = () => {
+      const hasSheet = mediaQuery.matches && document.querySelector(OVERLAY_SELECTOR);
+      document.body.style.overflow = hasSheet ? 'hidden' : originalBodyOverflow;
+      document.body.style.overscrollBehavior = hasSheet ? 'none' : originalBodyOverscroll;
+    };
 
     const enhance = (panel) => {
       if (!(panel instanceof HTMLElement) || panel.dataset.mobileModalDrag === '1') return;
@@ -23,6 +32,7 @@ export default function MobileModalEnhancer() {
       const dismissTarget = backdrop?.querySelector('div.absolute.inset-0') || backdrop;
       const handle = panel.firstElementChild;
       if (handle instanceof HTMLElement) handle.style.touchAction = 'none';
+      panel.style.overscrollBehavior = 'contain';
 
       let dragging = false;
       let dragged = false;
@@ -149,14 +159,15 @@ export default function MobileModalEnhancer() {
         window.removeEventListener('pointerup', onPointerUp);
         window.removeEventListener('pointercancel', onPointerCancel);
         if (handle instanceof HTMLElement) handle.style.touchAction = '';
+        panel.style.overscrollBehavior = '';
         delete panel.dataset.mobileModalDrag;
         resetPanel();
       });
     };
 
     const scan = () => {
-      if (!mediaQuery.matches) return;
-      document.querySelectorAll(PANEL_SELECTOR).forEach(enhance);
+      if (mediaQuery.matches) document.querySelectorAll(PANEL_SELECTOR).forEach(enhance);
+      syncBodyLock();
     };
 
     const observer = new MutationObserver(scan);
@@ -169,6 +180,8 @@ export default function MobileModalEnhancer() {
       mediaQuery.removeEventListener('change', scan);
       disposers.forEach((dispose) => dispose());
       disposers.clear();
+      document.body.style.overflow = originalBodyOverflow;
+      document.body.style.overscrollBehavior = originalBodyOverscroll;
     };
   }, []);
 

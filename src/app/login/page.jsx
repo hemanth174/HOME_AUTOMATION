@@ -17,6 +17,8 @@ const SECURITY_QUESTIONS = [
   "What was your first school?",
 ];
 
+const getAuthRedirectUrl = () => process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
+
 export default function LoginPage() {
   const [view, setView] = useState('login');
   const [email, setEmail] = useState('');
@@ -129,7 +131,7 @@ export default function LoginPage() {
   const handleGoogleSignIn = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: window.location.origin }
+      options: { redirectTo: getAuthRedirectUrl() }
     });
     if (error) setError(error.message);
   };
@@ -137,7 +139,7 @@ export default function LoginPage() {
   const handleGithubSignIn = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'github',
-      options: { redirectTo: window.location.origin }
+      options: { redirectTo: getAuthRedirectUrl() }
     });
     if (error) setError(error.message);
   };
@@ -147,7 +149,7 @@ export default function LoginPage() {
       provider: 'azure',
       options: {
         scopes: 'email',
-        redirectTo: window.location.origin
+        redirectTo: getAuthRedirectUrl()
       }
     });
     if (error) setError(error.message);
@@ -230,7 +232,7 @@ export default function LoginPage() {
       }
       
       await supabase.auth.resetPasswordForEmail(forgotEmail, {
-        redirectTo: window.location.origin,
+        redirectTo: getAuthRedirectUrl(),
       });
       setSuccess('Security questions verified! A password reset link has been sent to your email.');
       setView('login');
@@ -256,7 +258,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
-        redirectTo: window.location.origin,
+        redirectTo: getAuthRedirectUrl(),
       });
       if (error) throw error;
       setSuccess('Recovery code verified! A password reset link has been sent to your email.');
@@ -307,7 +309,9 @@ export default function LoginPage() {
           <span>BACK TO HOME</span>
         </Link>
         <div className="relative z-10 max-w-md">
-          <p className="login-brand-kicker text-[11px] font-extrabold uppercase tracking-[0.25em] mb-4">VIKA TECH · V4 PLATFORM</p>
+          <div className="mb-5 flex h-16 w-52 items-center justify-center overflow-hidden rounded-xl bg-white shadow-lg">
+            <img src="/vikatech-logo.png" alt="VikaTech" className="h-full w-full object-contain" />
+          </div>
           <h2 className="login-brand-title text-4xl xl:text-5xl font-extrabold leading-[1.05] tracking-tight">
             One login.
             <br />
@@ -360,7 +364,9 @@ export default function LoginPage() {
         <div className="w-full max-w-[440px] min-w-0">
           {/* Mobile brand header — compact, no kicker per craft-floor */}
           <div className="lg:hidden text-center mb-5">
-            <p className="text-[11px] font-extrabold uppercase tracking-[0.25em] text-accent mb-2">VIKA TECH</p>
+            <div className="mx-auto mb-3 flex h-14 w-44 items-center justify-center overflow-hidden rounded-xl bg-white shadow-sm">
+              <img src="/vikatech-logo.png" alt="VikaTech" className="h-full w-full object-contain" />
+            </div>
             <h1 className="text-[32px] leading-[1.1] font-extrabold tracking-tight text-text">Smart Home</h1>
           </div>
 

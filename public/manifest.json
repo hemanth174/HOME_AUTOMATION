@@ -4,8 +4,8 @@
   "description": "VikaTech Automation Control Panel",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0A0A0A",
-  "theme_color": "#DC2626",
+  "background_color": "#FFFFFF",
+  "theme_color": "#0B6B56",
   "orientation": "portrait",
   "icons": [
     {

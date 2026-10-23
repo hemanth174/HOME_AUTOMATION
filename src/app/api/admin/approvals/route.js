@@ -16,10 +16,14 @@ export async function PATCH(request) {
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const { userId, action, rejectionReason = '' } = await request.json();
   if (!userId || !['approve', 'reject', 'revoke'].includes(action)) return NextResponse.json({ error: 'Valid user and approval action are required' }, { status: 400 });
+  if ((action === 'reject' || action === 'revoke') && (typeof rejectionReason !== 'string' || !rejectionReason.trim())) return NextResponse.json({ error: 'A denial reason is required' }, { status: 400 });
   const { data: rows, error: readError } = await auth.admin.from('account_approval_requests').select('*').eq('user_id', userId).limit(1);
   const current = rows?.[0];
   if (readError || !current) return NextResponse.json({ error: readError?.message || 'Approval request not found' }, { status: 404 });
   const actor = auth.user.email.toLowerCase();
+  if (action === 'approve' && (current.account_status === 'rejected' || current.account_status === 'revoked')) {
+    return NextResponse.json({ error: 'Denied or revoked accounts cannot be approved from the current request.' }, { status: 409 });
+  }
   const updates = { updated_at: new Date().toISOString() };
   if (action === 'reject' || action === 'revoke') {
     updates.account_status = action === 'revoke' ? 'revoked' : 'rejected';

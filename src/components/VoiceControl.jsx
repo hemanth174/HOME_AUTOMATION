@@ -95,7 +95,6 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
   const [selectedLang, setSelectedLang] = useState('en-US');
   const [listening, setListening] = useState(false);
   const [agentState, setAgentState] = useState('idle');
-  const [textCommand, setTextCommand] = useState('');
   const agentVisible = useVoiceAgentVisible();
 
   // If the user hides the agent mid-listen, stop recognition immediately.
@@ -276,6 +275,10 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       case 'APPLY_PRESET': {
         const preset = presetsRef.current.find(p => p.id === presetId);
         if (preset) {
+          if (!applyPreset) {
+            provideFeedback('Preset voice commands are available from the dashboard.');
+            break;
+          }
           await applyPreset(preset, result.deactivate || false);
           provideFeedback(`${result.deactivate ? 'Deactivated' : 'Activated'} preset: ${presetName}`);
         }
@@ -969,14 +972,6 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     }
   };
 
-  const submitTextCommand = async (event) => {
-    event.preventDefault();
-    const command = textCommand.trim();
-    if (!command) return;
-    setTextCommand('');
-    await processCommand(command);
-  };
-
   // Hidden via Profile → Voice Agent setting.
   if (!agentVisible) return null;
 
@@ -1029,15 +1024,6 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           {agentState === 'transcribing' ? 'Transcribing...' : 'Processing command...'}
         </div>
       )}
-      <form onSubmit={submitTextCommand} className="fixed bottom-7 right-24 max-md:bottom-20 max-md:right-24 z-[200] flex items-center gap-2">
-        <input
-          value={textCommand}
-          onChange={(event) => setTextCommand(event.target.value)}
-          aria-label="Type a voice command"
-          placeholder="Type a command"
-          className="w-40 max-md:w-32 rounded-full border border-border bg-card/90 px-3 py-2 text-xs text-text outline-none focus:border-accent"
-        />
-      </form>
       <button
         id="voice-control-mic-btn"
         onClick={toggleListening}

@@ -6,8 +6,11 @@ import { ADMIN_EMAILS, isAdminEmail } from "@/lib/admin";
 import { CATEGORY_LABELS, STAGES } from "@/lib/orderCategories";
 import {
   ArrowUpRight,
+  Ban,
   Check,
   ChevronDown,
+  CircleAlert,
+  Clock3,
   Database,
   LayoutDashboard,
   Mail,
@@ -68,6 +71,14 @@ function AdminLoading() {
   );
 }
 
+const approvalState = (item) => {
+  if (item.account_status === "rejected") return { key: "denied", label: "Denied", tone: "border-red-400/40 bg-red-400/10 text-red-500" };
+  if (item.account_status === "revoked") return { key: "revoked", label: "Revoked", tone: "border-orange-400/40 bg-orange-400/10 text-orange-500" };
+  if (item.account_status === "approved" && item.admin_one_approved_at && item.admin_two_approved_at) return { key: "approved", label: "Approved", tone: "border-emerald-400/40 bg-emerald-400/10 text-emerald-600" };
+  if (item.admin_one_approved_at) return { key: "awaiting_second", label: "Awaiting second approval", tone: "border-cyan-400/40 bg-cyan-400/10 text-cyan-600" };
+  return { key: "pending", label: "Needs review", tone: "border-amber-400/50 bg-amber-400/10 text-amber-600" };
+};
+
 export default function AdminPage() {
   const [user, setUser] = useState(null);
   const [orders, setOrders] = useState([]);
@@ -79,30 +90,52 @@ export default function AdminPage() {
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
+  const [approvalFilter, setApprovalFilter] = useState("all");
+  const [approvalAction, setApprovalAction] = useState(null);
+  const [denyTarget, setDenyTarget] = useState(null);
+  const [denyReason, setDenyReason] = useState("");
   const load = useCallback(async () => {
     setLoading(true);
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    setUser(session?.user || null);
-    if (!session || !isAdminEmail(session.user.email)) {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      setUser(session?.user || null);
+      if (!session || !isAdminEmail(session.user.email)) return;
+      const res = await fetch("/api/admin/orders", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setOrders(json.orders || []);
+        setUsers(json.users || []);
+        setApprovals(json.approvals || []);
+      } else setNotice(json.error || "Could not load admin data");
+    } catch (error) {
+      setNotice(error.message || "Could not load admin data");
+    } finally {
       setLoading(false);
-      return;
     }
-    const res = await fetch("/api/admin/orders", {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-    const json = await res.json();
-    if (res.ok) {
-      setOrders(json.orders || []);
-      setUsers(json.users || []);
-      setApprovals(json.approvals || []);
-    } else setNotice(json.error || "Could not load admin data");
-    setLoading(false);
   }, []);
   useEffect(() => {
     load();
   }, [load]);
+  useEffect(() => {
+    if (!user || !isAdminEmail(user.email)) return;
+    const channel = supabase
+      .channel("admin-account-approval-queue")
+      .on("postgres_changes", { event: "*", schema: "public", table: "account_approval_requests" }, (payload) => {
+        if (payload.eventType === "DELETE") {
+          setApprovals((current) => current.filter((item) => item.user_id !== payload.old.user_id));
+        } else if (payload.eventType === "INSERT") {
+          setApprovals((current) => [payload.new, ...current.filter((item) => item.user_id !== payload.new.user_id)]);
+        } else {
+          setApprovals((current) => current.map((item) => item.user_id === payload.new.user_id ? payload.new : item));
+        }
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user]);
   const filtered = useMemo(
     () =>
       orders.filter(
@@ -114,6 +147,16 @@ export default function AdminPage() {
       ),
     [orders, filter, query],
   );
+  const approvalStats = useMemo(() => approvals.reduce((counts, item) => {
+    const key = approvalState(item).key;
+    counts[key] = (counts[key] || 0) + 1;
+    counts.all += 1;
+    return counts;
+  }, { all: 0, pending: 0, awaiting_second: 0, approved: 0, denied: 0, revoked: 0 }), [approvals]);
+  const visibleApprovals = useMemo(() => approvals.filter((item) => {
+    const key = approvalState(item).key;
+    return approvalFilter === "all" || key === approvalFilter || (approvalFilter === "denied" && key === "revoked");
+  }), [approvals, approvalFilter]);
   const updateStage = async (orderId, status) => {
     const previous = selected;
     // Keep the console responsive while the protected server update runs.
@@ -160,22 +203,28 @@ export default function AdminPage() {
       setNotice(error.message || "Could not update stage");
     }
   };
-  const reviewAccount = async (userId, action) => {
+  const reviewAccount = async (userId, action, rejectionReason = "") => {
     const {
       data: { session },
     } = await supabase.auth.getSession();
+    if (!session) {
+      setNotice("Your session expired. Please sign in again.");
+      return false;
+    }
+    setApprovalAction(`${userId}:${action}`);
+    try {
     const res = await fetch("/api/admin/approvals", {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({ userId, action }),
+      body: JSON.stringify({ userId, action, rejectionReason }),
     });
     const json = await res.json();
     if (!res.ok) {
       setNotice(json.error || "Approval update failed");
-      return;
+      return false;
     }
     setApprovals((prev) =>
       prev.map((item) => (item.user_id === userId ? json.approval : item)),
@@ -183,8 +232,23 @@ export default function AdminPage() {
     setNotice(
       action === "approve"
         ? "Approval recorded. Both administrators must approve before access is unlocked."
-        : "Account request rejected.",
+        : action === "revoke" ? "Account access revoked." : "Account request denied.",
     );
+    return true;
+    } catch (error) {
+      setNotice(error.message || "Approval update failed");
+      return false;
+    } finally {
+      setApprovalAction(null);
+    }
+  };
+  const submitDenial = async () => {
+    if (!denyTarget || !denyReason.trim()) return;
+    const success = await reviewAccount(denyTarget.user_id, denyTarget.action, denyReason.trim());
+    if (success) {
+      setDenyTarget(null);
+      setDenyReason("");
+    }
   };
   const generateProvisioning = async () => {
     const {
@@ -279,6 +343,24 @@ export default function AdminPage() {
                 Both administrators must approve before dashboard access is
                 unlocked.
               </p>
+              <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                {[
+                  ["all", "All", approvalStats.all],
+                  ["pending", "Needs review", approvalStats.pending],
+                  ["awaiting_second", "Second review", approvalStats.awaiting_second],
+                  ["approved", "Approved", approvalStats.approved],
+                  ["denied", "Denied", approvalStats.denied + approvalStats.revoked],
+                ].map(([key, label, count]) => (
+                  <button
+                    key={key}
+                    onClick={() => setApprovalFilter(key)}
+                    className={`rounded-xl border px-3 py-2 text-left transition-colors ${approvalFilter === key ? "border-accent bg-accent/10" : "border-border bg-background hover:border-accent/50"}`}
+                  >
+                    <span className="block text-[9px] font-black uppercase tracking-wide text-text-muted">{label}</span>
+                    <span className="mt-1 block text-lg font-black text-text">{count}</span>
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px] text-left">
@@ -292,7 +374,10 @@ export default function AdminPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {approvals.map((item) => (
+                  {visibleApprovals.map((item) => {
+                    const state = approvalState(item);
+                    const actionBusy = approvalAction?.startsWith(`${item.user_id}:`);
+                    return (
                     <tr key={item.user_id}>
                       <td className="px-5 py-4">
                         <p className="text-sm font-black">{item.email}</p>
@@ -305,8 +390,9 @@ export default function AdminPage() {
                             : "—"}
                         </p>
                       </td>
-                      <td className="px-5 py-4 text-xs font-black uppercase text-text-muted">
-                        {item.account_status}
+                      <td className="px-5 py-4">
+                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${state.tone}`}>{state.label}</span>
+                        {item.rejection_reason && <p className="mt-2 max-w-[190px] text-[10px] font-semibold text-red-500">{item.rejection_reason}</p>}
                       </td>
                       <td className="px-5 py-4 text-xs font-semibold">
                         {item.admin_one_approved_at
@@ -319,28 +405,21 @@ export default function AdminPage() {
                           : "Waiting"}
                       </td>
                       <td className="px-5 py-4 text-right">
-                        {item.account_status === "pending" ? (
-                          <button
-                            onClick={() =>
-                              reviewAccount(item.user_id, "approve")
-                            }
-                            className="rounded-lg bg-accent px-3 py-1.5 text-[11px] font-black text-[var(--btn-text)]"
-                          >
-                            Approve
-                          </button>
-                        ) : (
-                          <span className="text-xs font-bold text-text-muted">
-                            No action
-                          </span>
-                        )}
+                        {(state.key === "pending" || state.key === "awaiting_second") && <div className="flex justify-end gap-2">
+                          <button disabled={actionBusy} onClick={() => reviewAccount(item.user_id, "approve")} className="inline-flex items-center gap-1 rounded-lg bg-accent px-3 py-1.5 text-[11px] font-black text-[var(--btn-text)] disabled:opacity-50"><Check size={13} /> {actionBusy ? "Saving…" : state.key === "awaiting_second" ? "Approve second" : "Approve"}</button>
+                          <button disabled={actionBusy} onClick={() => { setDenyTarget({ ...item, action: "reject" }); setDenyReason(""); }} className="inline-flex items-center gap-1 rounded-lg border border-red-400/40 px-3 py-1.5 text-[11px] font-black text-red-500 hover:bg-red-400/10 disabled:opacity-50"><Ban size={13} /> Deny</button>
+                        </div>}
+                        {state.key === "approved" && <button disabled={actionBusy} onClick={() => { setDenyTarget({ ...item, action: "revoke" }); setDenyReason(""); }} className="inline-flex items-center gap-1 rounded-lg border border-orange-400/40 px-3 py-1.5 text-[11px] font-black text-orange-500 hover:bg-orange-400/10 disabled:opacity-50"><CircleAlert size={13} /> Revoke</button>}
+                        {(state.key === "denied" || state.key === "revoked") && <span className="text-xs font-bold text-text-muted">Access blocked</span>}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
-              {approvals.length === 0 && (
+              {visibleApprovals.length === 0 && (
                 <div className="p-12 text-center text-sm font-semibold text-text-muted">
-                  No approval requests.
+                  {approvals.length === 0 ? "No approval requests." : "No requests match this state."}
                 </div>
               )}
             </div>
@@ -484,6 +563,22 @@ export default function AdminPage() {
             </div>
           </div>
         </section>
+        {denyTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-5 backdrop-blur-sm" onClick={() => setDenyTarget(null)}>
+            <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[.18em] text-red-500">{denyTarget.action === "revoke" ? "Revoke access" : "Deny account"}</p>
+                  <h2 className="mt-2 text-xl font-black">{denyTarget.email}</h2>
+                  <p className="mt-2 text-xs font-semibold leading-5 text-text-muted">A reason is required and will be shown to the user on the denied page.</p>
+                </div>
+                <button onClick={() => setDenyTarget(null)} className="rounded-lg border border-border p-2 text-text-muted hover:text-text"><X size={16} /></button>
+              </div>
+              <textarea value={denyReason} onChange={(event) => setDenyReason(event.target.value)} rows={4} autoFocus placeholder="Explain why access is being denied…" className="mt-5 w-full resize-none rounded-xl border border-border bg-background p-3 text-sm font-semibold outline-none focus:border-red-400" />
+              <div className="mt-4 flex justify-end gap-2"><button onClick={() => setDenyTarget(null)} className="rounded-xl border border-border px-4 py-2.5 text-xs font-black">Cancel</button><button disabled={!denyReason.trim() || approvalAction} onClick={submitDenial} className="rounded-xl bg-red-500 px-4 py-2.5 text-xs font-black text-white disabled:opacity-50">{approvalAction ? "Saving…" : denyTarget.action === "revoke" ? "Revoke access" : "Deny account"}</button></div>
+            </div>
+          </div>
+        )}
         {notice && (
           <div className="fixed bottom-5 right-5 z-50 rounded-xl border border-accent/40 bg-card px-4 py-3 text-xs font-black text-accent shadow-xl">
             {notice}

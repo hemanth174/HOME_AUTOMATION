@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { CheckCircle2, Clock3, MailCheck, ShieldCheck, XCircle } from 'lucide-react';
@@ -13,14 +13,125 @@ function ReviewCard({ label, approved, email, rejected }) {
 
 export default function PendingPage() {
   const [approval, setApproval] = useState(null);
+  const [realtimeState, setRealtimeState] = useState('connecting');
+  const sessionRef = useRef(null);
+  const requestInFlight = useRef(false);
+  const channelRef = useRef(null);
+  const retryTimer = useRef(null);
+  const reconnectTimer = useRef(null);
+  const retryAttempt = useRef(0);
+
+  const loadStatus = useCallback(async () => {
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
+    try {
+      const session = sessionRef.current || (await supabase.auth.getSession()).data.session;
+      if (!session) {
+        window.location.href = '/login';
+        return;
+      }
+      sessionRef.current = session;
+      const response = await fetch('/api/account/status', {
+        cache: 'no-store',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not load account status');
+      setApproval(data.approval);
+    } finally {
+      requestInFlight.current = false;
+    }
+  }, []);
+
   useEffect(() => {
     let active = true;
-    const load = async () => { const { data: { session } } = await supabase.auth.getSession(); if (!session) { window.location.href = '/login'; return; } const response = await fetch('/api/account/status', { cache: 'no-store', headers: { Authorization: `Bearer ${session.access_token}` } }); const data = await response.json(); if (active && response.ok) setApproval(data.approval); };
-    load();
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => { if (!session) window.location.href = '/login'; });
-    return () => { active = false; subscription.unsubscribe(); };
-  }, []);
-  useEffect(() => { if (approval?.account_status === 'approved') window.location.href = '/'; }, [approval]);
+    const clearRetry = () => {
+      if (retryTimer.current) window.clearTimeout(retryTimer.current);
+      retryTimer.current = null;
+    };
+    const clearReconnect = () => {
+      if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    };
+    const disconnect = () => {
+      if (channelRef.current) supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+      if (active) setRealtimeState('fallback');
+    };
+    const scheduleRetry = () => {
+      if (!active || document.visibilityState !== 'visible' || retryTimer.current) return;
+      const delays = [30000, 60000, 120000, 300000];
+      const base = delays[Math.min(retryAttempt.current, delays.length - 1)];
+      retryAttempt.current += 1;
+      const jitter = Math.floor(base * (Math.random() * 0.2 - 0.1));
+      retryTimer.current = window.setTimeout(async () => {
+        retryTimer.current = null;
+        try { await loadStatus(); } catch { /* Retry on the next backoff step. */ }
+        if (active && !channelRef.current) scheduleRetry();
+      }, Math.max(5000, base + jitter));
+    };
+    const scheduleReconnect = () => {
+      if (!active || document.visibilityState !== 'visible' || reconnectTimer.current) return;
+      reconnectTimer.current = window.setTimeout(() => {
+        reconnectTimer.current = null;
+        connect();
+      }, 30000 + Math.floor(Math.random() * 10000));
+    };
+    const connect = async () => {
+      if (!active || document.visibilityState !== 'visible' || channelRef.current) return;
+      const session = sessionRef.current || (await supabase.auth.getSession()).data.session;
+      if (!active || document.visibilityState !== 'visible' || !session) return;
+      sessionRef.current = session;
+      channelRef.current = supabase
+        .channel(`web-account-approval-${session.user.id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'account_approval_requests', filter: `user_id=eq.${session.user.id}` }, (payload) => {
+          if (payload.eventType !== 'DELETE') setApproval(payload.new);
+        })
+        .subscribe((state) => {
+          if (state === 'SUBSCRIBED') {
+            retryAttempt.current = 0;
+            clearRetry();
+            clearReconnect();
+            setRealtimeState('live');
+          } else if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT' || state === 'CLOSED') {
+            disconnect();
+            scheduleRetry();
+            scheduleReconnect();
+          }
+        });
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadStatus().catch(() => scheduleRetry());
+        connect();
+      } else {
+        clearRetry();
+        clearReconnect();
+        disconnect();
+      }
+    };
+    loadStatus().then(connect).catch(scheduleRetry);
+    document.addEventListener('visibilitychange', handleVisibility);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      sessionRef.current = session;
+      if (!session) window.location.href = '/login';
+    });
+    return () => {
+      active = false;
+      document.removeEventListener('visibilitychange', handleVisibility);
+      subscription.unsubscribe();
+      clearRetry();
+      clearReconnect();
+      disconnect();
+    };
+  }, [loadStatus]);
+  useEffect(() => {
+    if (approval?.account_status === 'rejected' || approval?.account_status === 'revoked') {
+      window.location.href = '/denied';
+    } else if (approval?.account_status === 'approved' && approval.admin_one_approved_at && approval.admin_two_approved_at) {
+      window.location.href = '/';
+    }
+  }, [approval]);
   const rejected = approval?.account_status === 'rejected' || approval?.account_status === 'revoked'; const firstApproved = Boolean(approval?.admin_one_approved_at); const secondApproved = Boolean(approval?.admin_two_approved_at); const bothApproved = firstApproved && secondApproved;
   const title = rejected ? 'Request not approved' : bothApproved ? 'Access approved' : firstApproved ? 'Waiting for second approval' : 'Approval is in progress';
   const subtitle = rejected ? approval?.rejection_reason || 'Please contact support for more information.' : bothApproved ? 'Both administrators have approved your account. Redirecting you now…' : firstApproved ? 'Approved by one administrator — waiting for the second approval.' : 'Your account and order access are waiting for administrator approval.';

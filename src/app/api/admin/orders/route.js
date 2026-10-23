@@ -18,7 +18,7 @@ async function sendStageEmail(order, stage) {
     secure: process.env.SMTP_SECURE === 'true',
     auth: { user, pass },
   });
-  const trackingUrl = `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/track/${order.order_id}`;
+    const trackingUrl = `${process.env.NEXT_PUBLIC_SITE_URL || 'https://home-automation-mauve-one.vercel.app'}/track/${order.order_id}`;
   await transporter.sendMail({
     from: process.env.SMTP_FROM || `VikaTech <${user}>`,
     to: order.email,

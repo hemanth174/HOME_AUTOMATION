@@ -45,13 +45,14 @@ export default function RoomList({
               <span className="block truncate text-sm font-bold text-(--pg-ink)">
                 {board.name}
               </span>
-              <span className="block text-[11px] font-semibold text-(--pg-muted) mt-0.5">
-                {count} device{count === 1 ? '' : 's'} · {online ? 'Online' : 'Offline'}
+              <span className="block whitespace-nowrap text-[11px] font-semibold text-(--pg-muted) mt-0.5">
+                {count} device{count === 1 ? '' : 's'}
               </span>
             </span>
             <span
-              aria-label={online ? 'online' : 'offline'}
-              className={`w-2 h-2 rounded-full shrink-0 ${online ? 'bg-(--pg-success)' : 'bg-(--pg-error)'}`}
+              aria-label={online ? 'Online' : 'Offline'}
+              title={online ? 'Online' : 'Offline'}
+              className={`w-2.5 h-2.5 rounded-full shrink-0 ${online ? 'bg-emerald-500' : 'bg-red-500'}`}
             />
           </button>
         );

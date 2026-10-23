@@ -11,7 +11,7 @@ async function sendOrderEmail(order) {
   const pass = process.env.SMTP_PASS;
   if (!user || !pass) return { skipped: true };
   const transporter = nodemailer.createTransport({ host: process.env.SMTP_HOST || 'smtp.gmail.com', port: parseInt(process.env.SMTP_PORT || '587', 10), secure: process.env.SMTP_SECURE === 'true', auth: { user, pass } });
-  const url = `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/track/${order.order_id}`;
+    const url = `${process.env.NEXT_PUBLIC_SITE_URL || 'https://home-automation-mauve-one.vercel.app'}/track/${order.order_id}`;
   await transporter.sendMail({
     from: process.env.SMTP_FROM || `VikaTech <${user}>`,
     to: order.email,

@@ -20,13 +20,13 @@ import {
   Moon,
   Sun,
   Bell,
-  Crown,
   Download,
   HelpCircle,
   FileText,
   Wifi,
   WifiOff,
   Zap,
+  Settings,
 } from "lucide-react";
 
 import useLocalConnection from "@/hooks/useLocalConnection";
@@ -76,7 +76,9 @@ function FeatureNotificationBell({
           <div className="flex items-center justify-between border-b border-border px-2 pb-3">
             <div>
               <p className="text-sm font-black text-text">Notifications</p>
-              <p className="mt-0.5 text-[10px] font-semibold text-text-muted">Product updates from VikaTech</p>
+              <p className="mt-0.5 text-[10px] font-semibold text-text-muted">
+                Product updates from VikaTech
+              </p>
             </div>
             <button
               type="button"
@@ -90,7 +92,9 @@ function FeatureNotificationBell({
 
           <div className="mt-2 flex max-h-72 flex-col gap-1 overflow-y-auto">
             {announcements.length === 0 ? (
-              <p className="px-2 py-8 text-center text-xs font-semibold text-text-muted">No new updates.</p>
+              <p className="px-2 py-8 text-center text-xs font-semibold text-text-muted">
+                No new updates.
+              </p>
             ) : (
               announcements.map((announcement) => (
                 <Link
@@ -100,10 +104,17 @@ function FeatureNotificationBell({
                   className="rounded-xl px-2.5 py-3 transition hover:bg-accent-bg"
                 >
                   <div className="flex items-start gap-2.5">
-                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-(--pg-brand)" aria-hidden="true" />
+                    <span
+                      className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-(--pg-brand)"
+                      aria-hidden="true"
+                    />
                     <span className="min-w-0">
-                      <span className="block text-xs font-black text-text">{announcement.title}</span>
-                      <span className="mt-1 block text-[11px] leading-5 text-text-muted">{announcement.message}</span>
+                      <span className="block text-xs font-black text-text">
+                        {announcement.title}
+                      </span>
+                      <span className="mt-1 block text-[11px] leading-5 text-text-muted">
+                        {announcement.message}
+                      </span>
                       <span className="mt-1.5 block text-[10px] font-semibold text-accent">
                         {new Date(announcement.created_at).toLocaleDateString()}
                       </span>
@@ -115,7 +126,8 @@ function FeatureNotificationBell({
           </div>
           {notificationPermission !== "granted" && (
             <div className="mt-2 border-t border-border pt-3">
-              {notificationPermission === "denied" || notificationPermission === "unsupported" ? (
+              {notificationPermission === "denied" ||
+              notificationPermission === "unsupported" ? (
                 <p className="px-2 text-[10px] font-semibold leading-4 text-text-muted">
                   {notificationPermission === "unsupported"
                     ? "Browser notifications are not supported here."
@@ -260,7 +272,8 @@ export default function Navbar() {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [notificationPermission, setNotificationPermission] = useState("default");
+  const [notificationPermission, setNotificationPermission] =
+    useState("default");
   const [announcements, setAnnouncements] = useState([]);
   const [readAnnouncementIds, setReadAnnouncementIds] = useState([]);
   const [showFaqModal, setShowFaqModal] = useState(false);
@@ -271,6 +284,7 @@ export default function Navbar() {
   const [currentY, setCurrentY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const sheetContentRef = useRef(null);
+  const dragYRef = useRef(0);
 
   // PWA Install States
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -319,7 +333,9 @@ export default function Navbar() {
 
   useEffect(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(READ_ANNOUNCEMENTS_KEY) || "[]");
+      const saved = JSON.parse(
+        localStorage.getItem(READ_ANNOUNCEMENTS_KEY) || "[]",
+      );
       if (Array.isArray(saved)) setReadAnnouncementIds(saved);
     } catch {
       // Invalid local notification state is ignored.
@@ -347,10 +363,12 @@ export default function Navbar() {
         { event: "INSERT", schema: "public", table: "feature_announcements" },
         ({ new: announcement }) => {
           if (!active) return;
-          setAnnouncements((current) => [
-            announcement,
-            ...current.filter((item) => item.id !== announcement.id),
-          ].slice(0, 8));
+          setAnnouncements((current) =>
+            [
+              announcement,
+              ...current.filter((item) => item.id !== announcement.id),
+            ].slice(0, 8),
+          );
         },
       );
     channel.subscribe();
@@ -377,7 +395,10 @@ export default function Navbar() {
 
   const handleOfflineLinkClick = (e, link) => {
     const localOffline = !isClientOnline;
-    if ((localOffline && link.href !== "/local") || (!localOffline && !isClientOnline && link.href !== "/")) {
+    if (
+      (localOffline && link.href !== "/local") ||
+      (!localOffline && !isClientOnline && link.href !== "/")
+    ) {
       e.preventDefault();
       setOfflineToast(
         `⚠️ ${link.label} is unavailable offline. Dashboard device controls remain available locally.`,
@@ -422,11 +443,21 @@ export default function Navbar() {
         setClientNetQuality((prev) =>
           prev.bars === 0
             ? prev
-            : { percentage: 0, bars: 0, downlink: null, effectiveType: null, rtt: null },
+            : {
+                percentage: 0,
+                bars: 0,
+                downlink: null,
+                effectiveType: null,
+                rtt: null,
+              },
         );
       } else {
         // Re-assert quality once connectivity is confirmed back.
-        setClientNetQuality((prev) => (prev.bars === 0 ? { ...prev, percentage: 100, bars: 4, effectiveType: "4g" } : prev));
+        setClientNetQuality((prev) =>
+          prev.bars === 0
+            ? { ...prev, percentage: 100, bars: 4, effectiveType: "4g" }
+            : prev,
+        );
       }
     });
 
@@ -543,43 +574,25 @@ export default function Navbar() {
     return nowMs - lastSeenMs < 45000;
   };
 
-  // Helper: generate stable, responsive board signal metrics
+  // Board rows expose heartbeat timestamps, not radio RSSI. Keep this status
+  // honest instead of presenting name-derived signal values as hardware data.
   const getBoardSignal = (board, online) => {
     if (!online) {
       return {
         percentage: 0,
         rssi: 0,
         quality: "Offline",
-        distance: 0,
-        speed: "0 Mbps",
+        distance: null,
+        speed: "Offline",
       };
     }
-    const hash = (board.name || "")
-      .split("")
-      .reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const baseRssi = -48 - (hash % 22);
-    const fluctuation = Math.floor(Math.sin(Date.now() / 12000) * 1.5);
-    const rssi = baseRssi + fluctuation;
-    const percentage = Math.min(
-      100,
-      Math.max(0, Math.round(((rssi + 100) / 60) * 100)),
-    );
-
-    let quality = "Weak";
-    if (percentage > 75) quality = "Excellent";
-    else if (percentage > 50) quality = "Good";
-    else if (percentage > 25) quality = "Fair";
-
-    const distance = Math.round(Math.pow(10, (Math.abs(rssi) - 40) / 20));
-
-    let speed = "7.2 Mbps";
-    if (rssi >= -50) speed = "72.2 Mbps";
-    else if (rssi >= -58) speed = "57.8 Mbps";
-    else if (rssi >= -65) speed = "43.3 Mbps";
-    else if (rssi >= -70) speed = "28.9 Mbps";
-    else if (rssi >= -75) speed = "14.4 Mbps";
-
-    return { percentage, rssi, quality, distance, speed };
+    return {
+      percentage: 100,
+      rssi: null,
+      quality: "Online",
+      distance: null,
+      speed: "Heartbeat connected",
+    };
   };
 
   // Click outside to close dropdowns
@@ -783,6 +796,7 @@ export default function Navbar() {
     "/analytics",
     "/logs",
     "/profile",
+    "/settings",
     "/faq",
     "/terms",
     "/privacy-policy",
@@ -792,6 +806,7 @@ export default function Navbar() {
     "/local",
     "/admin",
     "/pending",
+    "/denied",
   ];
   const PUBLIC_ROUTES = [
     "/privacy-policy",
@@ -812,7 +827,10 @@ export default function Navbar() {
     { href: "/schedules", label: "Schedules", icon: CalendarDays },
     { href: "/analytics", label: "Energy", icon: TrendingUp },
     { href: "/logs", label: "Activity Logs", icon: History },
-    ...(isAdminEmail(user?.email) ? [{ href: "/admin", label: "Admin Settings", icon: ShieldCheck }] : []),
+    { href: "/settings", label: "Settings", icon: Settings },
+    ...(isAdminEmail(user?.email)
+      ? [{ href: "/admin", label: "Admin Settings", icon: ShieldCheck }]
+      : []),
   ];
 
   // Secondary device-management routes, kept reachable under MANAGE.
@@ -844,6 +862,7 @@ export default function Navbar() {
       "/analytics": "Energy - Overview",
       "/logs": "Activity Logs - Overview",
       "/profile": "Profile - Account",
+      "/settings": "Settings",
       "/admin": "Admin Settings",
     };
     return pathMap[pathname] || "Dashboard - Admin Overview";
@@ -851,7 +870,10 @@ export default function Navbar() {
 
   // Touch gesture handlers for mobile bottom sheet
   const handleTouchStart = (e) => {
+    if (e.touches.length !== 1) return;
     setStartY(e.touches[0].clientY);
+    dragYRef.current = 0;
+    setCurrentY(0);
     setIsDragging(true);
   };
 
@@ -863,20 +885,31 @@ export default function Navbar() {
     }
     const deltaY = e.touches[0].clientY - startY;
     if (deltaY > 0) {
+      e.preventDefault();
+      dragYRef.current = deltaY;
       setCurrentY(deltaY);
     }
   };
 
   const handleTouchEnd = () => {
     setIsDragging(false);
-    if (currentY > 80) {
+    if (dragYRef.current > 80) {
       setMobileOpen(false);
     }
+    dragYRef.current = 0;
     setCurrentY(0);
   };
 
   // If on login page, 404 page, public info page, or not authenticated, hide navigation completely
-  if (isLoginPage || cleanPath === "/pending" || cleanPath === "/admin" || is404Page || isPublicPage || !user) {
+  if (
+    isLoginPage ||
+    cleanPath === "/pending" ||
+    cleanPath === "/denied" ||
+    cleanPath === "/admin" ||
+    is404Page ||
+    isPublicPage ||
+    !user
+  ) {
     return null;
   }
 
@@ -892,7 +925,9 @@ export default function Navbar() {
     { href: "/alarms", label: "Alarms", icon: AlarmClock },
     { href: "/analytics", label: "Analytics", icon: TrendingUp },
     { href: "/logs", label: "Logs", icon: History },
-    ...(isAdminEmail(user?.email) ? [{ href: "/admin", label: "Admin Console", icon: ShieldCheck }] : []),
+    ...(isAdminEmail(user?.email)
+      ? [{ href: "/admin", label: "Admin Console", icon: ShieldCheck }]
+      : []),
   ];
   const bottomBarLinks = mobileLinks.slice(0, 4);
   // Rest of the links go to bottom sheet menu
@@ -917,10 +952,10 @@ export default function Navbar() {
         className={`rounded-xl px-3 py-2.5 text-sm font-bold transition-all duration-200 ease-out flex items-center justify-between ${
           isCloudDisabled
             ? "opacity-40 cursor-not-allowed text-(--pg-muted) bg-transparent hover:bg-transparent"
-             : active
-               ? link.href === "/local"
-                 ? "bg-[#F0E1D2] text-[#8D5B30] border-l-2 border-[#A86F3D]"
-                 : "bg-[#CFFF79]/50 text-[#063B20]"
+            : active
+              ? link.href === "/local"
+                 ? "bg-(--pg-faint) text-(--pg-ink) border border-(--pg-line)"
+                 : "bg-(--pg-faint) text-(--pg-ink)"
               : "text-(--pg-navtext) bg-transparent hover:bg-black/[0.04] hover:text-(--pg-deep)"
         }`}
       >
@@ -947,11 +982,12 @@ export default function Navbar() {
             href="/"
             className="flex items-center gap-2.5 hover:opacity-90 transition-opacity"
           >
-            <span className="w-8 h-8 rounded-xl bg-[#063B20] flex items-center justify-center shrink-0">
-              <Crown className="text-[#CFFF79]" size={16} />
-            </span>
-            <span className="flex flex-col leading-none">
-              <span className="text-lg font-black text-(--pg-deep) tracking-tight">VikaTech</span>
+            <span className="flex h-13 w-26 items-center justify-center overflow-hidden rounded-xl  shadow-sm">
+              <img
+                src="/vikatech-logo.png"
+                alt="VikaTech"
+                className="h-full w-full object-contain"
+              />
             </span>
           </Link>
         </div>
@@ -1061,7 +1097,6 @@ export default function Navbar() {
       <header className="fixed top-0 right-0 left-0 md:left-64 h-16 border-b border-border bg-header/90 backdrop-blur-md flex items-center justify-between px-6 z-40 max-md:hidden select-none">
         {/* Left: Page Title */}
         <div className="flex items-center gap-2">
-          <Crown className="text-accent" size={16} />
           <span className="text-sm font-black text-text tracking-tight">
             {getPageTitle()}
           </span>
@@ -1148,8 +1183,8 @@ export default function Navbar() {
                     <div className="flex flex-col gap-1.5 text-[11px] text-text-muted">
                       {onEspSoftAp ? (
                         <div className="p-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-[10px] text-emerald-300">
-                          ⚡ Connected to <strong>HOME-AUTO-LEADER</strong> — this
-                          Wi-Fi has no internet by design. Use the ⚡ Local
+                          ⚡ Connected to <strong>HOME-AUTO-LEADER</strong> —
+                          this Wi-Fi has no internet by design. Use the ⚡ Local
                           Server panel or the Local tab for hardware control.
                         </div>
                       ) : (
@@ -1259,7 +1294,7 @@ export default function Navbar() {
                           {clientNetQuality.bars * 25}%
                         </span>
                       </div>
-                     </div>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1284,7 +1319,7 @@ export default function Navbar() {
               className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-center ${
                 boards.length === 0
                   ? "border-border bg-transparent text-text-muted/40 hover:text-text-muted hover:border-border/80"
-                  : boards.some((b) => !isBoardOnline(b.last_seen))
+                   : !overallWifi.online
                     ? "border-red-500/30 bg-red-500/5 text-red-500 hover:bg-red-500/10 hover:border-red-500/50"
                     : "border-(--pg-brand-line) bg-(--pg-brand-ghost) text-(--pg-success) hover:bg-(--pg-brand-faint) hover:border-(--pg-brand-line)"
               }`}
@@ -1293,8 +1328,7 @@ export default function Navbar() {
               <BoardSignalIcon
                 percentage={overallWifi.percentage}
                 online={
-                  overallWifi.online &&
-                  !boards.some((b) => !isBoardOnline(b.last_seen))
+                  overallWifi.online
                 }
                 size={15}
               />
@@ -1311,16 +1345,18 @@ export default function Navbar() {
                     className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md ${
                       boards.length === 0
                         ? "bg-border text-text-muted"
-                        : boards.some((b) => !isBoardOnline(b.last_seen))
+                        : !overallWifi.online
                           ? "bg-red-500/10 text-red-500 border border-red-500/20"
                           : "bg-(--pg-brand-faint) text-(--pg-success) border border-(--pg-brand-soft)"
                     }`}
                   >
                     {boards.length === 0
                       ? "No Hardware"
-                      : boards.some((b) => !isBoardOnline(b.last_seen))
-                        ? "Alert: Range Issue"
-                        : "All Connected"}
+                      : boards.every((b) => isBoardOnline(b.last_seen))
+                        ? "All Connected"
+                        : overallWifi.online
+                          ? "Partial Connection"
+                          : "All Offline"}
                   </span>
                 </div>
 
@@ -1365,7 +1401,7 @@ export default function Navbar() {
                               <div className="flex justify-between items-center text-[10px] font-semibold text-text-muted">
                                 <span>Signal Strength:</span>
                                 <span className="text-text font-bold">
-                                  {sig.quality} ({sig.rssi} dBm)
+                                  {sig.quality}
                                 </span>
                               </div>
                               <div className="w-full h-1 bg-border rounded-full overflow-hidden mt-0.5">
@@ -1382,7 +1418,7 @@ export default function Navbar() {
                               </div>
                               <div className="flex justify-between items-center text-[9px] text-text-muted/80 mt-0.2">
                                 <span>Approx. Distance:</span>
-                                <span>{sig.distance} meters</span>
+                                <span>{sig.distance == null ? "Not reported" : `${sig.distance} meters`}</span>
                               </div>
                             </div>
                           ) : (
@@ -1520,12 +1556,19 @@ export default function Navbar() {
             open={showNotifications}
             notificationPermission={notificationPermission}
             onEnableNotifications={enableNotifications}
-            onToggle={() => (showNotifications ? setShowNotifications(false) : openNotifications())}
+            onToggle={() =>
+              showNotifications
+                ? setShowNotifications(false)
+                : openNotifications()
+            }
             onClose={() => setShowNotifications(false)}
           />
 
           {/* User avatar + profile menu */}
-          <div className="relative" onMouseLeave={() => setShowProfileMenu(false)}>
+          <div
+            className="relative"
+            onMouseLeave={() => setShowProfileMenu(false)}
+          >
             <button
               onClick={() => setShowProfileMenu((v) => !v)}
               onMouseEnter={() => setShowProfileMenu(true)}
@@ -1548,8 +1591,12 @@ export default function Navbar() {
             {showProfileMenu && (
               <div className="absolute right-0 top-full mt-2 w-60 rounded-2xl border border-border bg-card p-2 shadow-2xl z-50 animate-scale-in">
                 <div className="px-3 py-2.5 border-b border-border mb-1">
-                  <p className="text-xs font-black text-text truncate">{fullName}</p>
-                  <p className="text-[11px] text-text-muted truncate mt-0.5">{email}</p>
+                  <p className="text-xs font-black text-text truncate">
+                    {fullName}
+                  </p>
+                  <p className="text-[11px] text-text-muted truncate mt-0.5">
+                    {email}
+                  </p>
                 </div>
                 <Link
                   href="/profile"
@@ -1558,12 +1605,27 @@ export default function Navbar() {
                 >
                   <span className="w-7 h-7 rounded-full bg-accent-bg text-accent flex items-center justify-center text-[11px] font-black shrink-0 overflow-hidden">
                     {avatarUrl ? (
-                      <img src={avatarUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      <img
+                        src={avatarUrl}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
                     ) : (
                       <span>{initial}</span>
                     )}
                   </span>
                   View Profile
+                </Link>
+                <Link
+                  href="/settings"
+                  onClick={() => setShowProfileMenu(false)}
+                  className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-bold text-text-muted hover:bg-accent-bg hover:text-accent transition-all"
+                >
+                  <span className="w-7 h-7 rounded-full bg-accent-bg text-accent flex items-center justify-center shrink-0">
+                    <Settings size={13} />
+                  </span>
+                  Settings
                 </Link>
                 <button
                   onClick={() => {
@@ -1579,12 +1641,6 @@ export default function Navbar() {
             )}
           </div>
 
-          <button
-            onClick={() => setShowLogoutModal(true)}
-            className="px-4 py-1.5 rounded-xl text-xs font-extrabold border border-(--pg-error-line) bg-(--pg-error-faint) text-(--pg-error) hover:bg-(--pg-error) hover:text-white transition-all duration-200 cursor-pointer"
-          >
-            Log Out
-          </button>
         </div>
       </header>
 
@@ -1594,8 +1650,13 @@ export default function Navbar() {
           href="/"
           className="flex items-center gap-2 text-sm sm:text-base font-black text-accent tracking-tight whitespace-nowrap shrink-0"
         >
-          <Crown className="text-accent fill-accent/10 shrink-0" size={18} />
-          <span className="whitespace-nowrap font-black">VikaTech</span>
+          <span className="flex h-10   items-center justify-center overflow-hidden rounded-full  shrink-0">
+            <img
+              src="/vikatech-logo.png"
+              alt="VikaTech"
+              className="h-full w-full"
+            />
+          </span>
         </Link>
         <div className="flex items-center gap-2">
           {/* Wi-Fi Client/Internet Network Status Indicator (Mobile) */}
@@ -1778,7 +1839,7 @@ export default function Navbar() {
               className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-center ${
                 boards.length === 0
                   ? "border-border bg-transparent text-text-muted/40"
-                  : boards.some((b) => !isBoardOnline(b.last_seen))
+                   : !overallWifi.online
                     ? "border-red-500/30 bg-red-500/5 text-red-500 hover:bg-red-500/10 hover:border-red-500/50"
                     : "border-(--pg-brand-line) bg-(--pg-brand-ghost) text-(--pg-success) hover:bg-(--pg-brand-faint) hover:border-(--pg-brand-line)"
               }`}
@@ -1786,8 +1847,7 @@ export default function Navbar() {
               <BoardSignalIcon
                 percentage={overallWifi.percentage}
                 online={
-                  overallWifi.online &&
-                  !boards.some((b) => !isBoardOnline(b.last_seen))
+                  overallWifi.online
                 }
                 size={14}
               />
@@ -1804,16 +1864,18 @@ export default function Navbar() {
                     className={`text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
                       boards.length === 0
                         ? "bg-border text-text-muted"
-                        : boards.some((b) => !isBoardOnline(b.last_seen))
+                        : !overallWifi.online
                           ? "bg-red-500/10 text-red-500 border border-red-500/20"
                           : "bg-(--pg-brand-faint) text-(--pg-success) border border-(--pg-brand-soft)"
                     }`}
                   >
                     {boards.length === 0
                       ? "No HW"
-                      : boards.some((b) => !isBoardOnline(b.last_seen))
-                        ? "Alert"
-                        : "Online"}
+                      : boards.every((b) => isBoardOnline(b.last_seen))
+                        ? "Online"
+                        : overallWifi.online
+                          ? "Partial"
+                          : "Offline"}
                   </span>
                 </div>
 
@@ -1968,8 +2030,8 @@ export default function Navbar() {
                         Not connected to ESP32 SoftAP
                       </p>
                       <p>
-                        To control devices without internet, connect your
-                        device to the{" "}
+                        To control devices without internet, connect your device
+                        to the{" "}
                         <strong className="text-text font-mono">
                           HOME-AUTO-XXXX
                         </strong>{" "}
@@ -1989,7 +2051,11 @@ export default function Navbar() {
             mobile
             notificationPermission={notificationPermission}
             onEnableNotifications={enableNotifications}
-            onToggle={() => (showNotifications ? setShowNotifications(false) : openNotifications())}
+            onToggle={() =>
+              showNotifications
+                ? setShowNotifications(false)
+                : openNotifications()
+            }
             onClose={() => setShowNotifications(false)}
           />
           <ThemeToggle size={14} />
@@ -2016,10 +2082,10 @@ export default function Navbar() {
               className={`flex flex-col items-center justify-center gap-1 flex-1 py-1 transition-all ${
                 isCloudDisabled
                   ? "opacity-35 cursor-not-allowed text-text-muted/40"
-                   : active
-                     ? link.href === "/local"
-                       ? "text-[#A86F3D]"
-                       : "text-accent"
+                  : active
+                    ? link.href === "/local"
+                       ? "text-accent"
+                      : "text-accent"
                     : "text-text-muted"
               }`}
             >
@@ -2092,7 +2158,9 @@ export default function Navbar() {
                   key={link.href}
                   href={link.href}
                   target={link.href === "/admin" ? "_blank" : undefined}
-                  rel={link.href === "/admin" ? "noopener noreferrer" : undefined}
+                  rel={
+                    link.href === "/admin" ? "noopener noreferrer" : undefined
+                  }
                   onClick={(e) => {
                     handleOfflineLinkClick(e, link);
                     setMobileOpen(false);

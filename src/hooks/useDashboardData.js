@@ -371,13 +371,19 @@ export default function useDashboardData() {
         if (error) throw error;
         cloudSynced = true;
 
-        await supabase.from('activity_logs').insert({
+        const activityLog = {
           user_id: user.id,
           device_id: device.id,
           device_name: device.name,
           action: newState ? 'turned ON' : 'turned OFF',
           triggered_by: localDispatched ? `${triggeredBy} (via ESP32 Local Mesh)` : triggeredBy
-        });
+        };
+        const { error: logError } = await supabase.from('activity_logs').insert(activityLog);
+        if (!logError && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('dashboard-activity-created', {
+            detail: { ...activityLog, created_at: new Date().toISOString() },
+          }));
+        }
       } catch (err) {
         console.warn('Supabase sync background error:', err);
       }
@@ -422,13 +428,19 @@ export default function useDashboardData() {
         if (syncError) throw syncError;
         cloudSynced = true;
 
-        await supabase.from('activity_logs').insert({
+        const activityLog = {
           user_id: user.id,
           device_id: null,
           device_name: 'All Devices',
           action: targetState ? 'turned ON' : 'turned OFF',
           triggered_by: localDispatched ? `${triggeredBy} All (via ESP32 Local Mesh)` : `${triggeredBy} All`
-        });
+        };
+        const { error: logError } = await supabase.from('activity_logs').insert(activityLog);
+        if (!logError && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('dashboard-activity-created', {
+            detail: { ...activityLog, created_at: new Date().toISOString() },
+          }));
+        }
       } catch (err) {
         console.warn('Supabase global sync error:', err);
       }

@@ -139,8 +139,8 @@ export default function LandingPage() {
           >
             <span className="material-symbols-outlined text-xl">{mobileNavOpen ? 'close' : 'menu'}</span>
           </button>
-          <div className="text-base md:text-xl font-headline-md font-black tracking-tighter text-white uppercase select-none truncate">
-            VIKA TECH
+          <div className="flex h-9 w-28 md:h-11 md:w-36 items-center justify-center overflow-hidden rounded-lg bg-white shadow-sm select-none shrink-0">
+            <img src="/vikatech-logo.png" alt="VikaTech" className="h-full w-full object-contain" />
           </div>
         </div>
         <nav className="hidden md:flex gap-8 font-label-caps text-[12px] tracking-tight items-center">

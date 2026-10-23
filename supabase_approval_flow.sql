@@ -74,10 +74,19 @@ update public.account_approval_requests
 set account_status = 'pending', admin_one_email = null, admin_one_approved_at = null,
     admin_two_email = null, admin_two_approved_at = null, first_approved_at = null,
     second_approved_at = null, rejection_reason = null, updated_at = now()
-where lower(email) not in ('lrvkausthubh@gmail.com', 'ramasaiahemanth@gmail.com');
+where lower(email) not in ('lrvkausthubh@gmail.com', 'ramasaiahemanth@gmail.com')
+  and account_status = 'approved'
+  and not (admin_one_approved_at is not null and admin_two_approved_at is not null);
 
 update public.account_approval_requests
-set account_status = 'approved', updated_at = now()
+set account_status = 'approved',
+    admin_one_email = 'lrvkausthubh@gmail.com',
+    admin_one_approved_at = coalesce(admin_one_approved_at, now()),
+    admin_two_email = 'ramasaiahemanth@gmail.com',
+    admin_two_approved_at = coalesce(admin_two_approved_at, now()),
+    first_approved_at = coalesce(first_approved_at, now()),
+    second_approved_at = coalesce(second_approved_at, now()),
+    updated_at = now()
 where lower(email) in ('lrvkausthubh@gmail.com', 'ramasaiahemanth@gmail.com');
 
 update public.order_trackings o
@@ -88,7 +97,17 @@ where o.user_id = a.user_id;
 alter table public.account_approval_requests enable row level security;
 alter table public.provisioning_records enable row level security;
 alter table public.approval_audit_log enable row level security;
+grant select on public.account_approval_requests to authenticated;
 drop policy if exists "users read own approval" on public.account_approval_requests;
 drop policy if exists "users read own provisioning" on public.provisioning_records;
 create policy "users read own approval" on public.account_approval_requests for select using (auth.uid() = user_id);
 create policy "users read own provisioning" on public.provisioning_records for select using (auth.uid() = user_id);
+
+-- Enable live approval updates for the web and mobile pending screens.
+do $$
+begin
+  alter publication supabase_realtime add table public.account_approval_requests;
+exception
+  when duplicate_object then null;
+end
+$$;

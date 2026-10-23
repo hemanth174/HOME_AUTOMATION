@@ -69,6 +69,7 @@ export default function LogsPage() {
         await supabase
           .from('activity_logs')
           .delete()
+          .eq('user_id', user.id)
           .lt('created_at', sevenDaysAgo);
 
         const [logsRes, boardsRes, devicesRes] = await Promise.all([
@@ -141,7 +142,8 @@ export default function LogsPage() {
 
   const executeClearLogs = async () => {
     try {
-      await supabase.from('activity_logs').delete().eq('user_id', user.id);
+      const { error } = await supabase.from('activity_logs').delete().eq('user_id', user.id);
+      if (error) throw error;
       setLogs([]);
       setToast('Logs cleared successfully');
       setShowConfirmModal(false);
@@ -265,7 +267,25 @@ export default function LogsPage() {
             </div>
           </div>
         ) : (
-          <div className="w-full overflow-x-auto">
+          <>
+          <div className="divide-y divide-border/30 sm:hidden">
+            {filteredLogs.map((log) => {
+              const isActionOn = log.action?.toLowerCase().includes('on') || log.action?.toLowerCase().includes('activate');
+              return (
+                <article key={log.id} className="flex items-center justify-between gap-3 p-4">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-extrabold text-text">{log.device_name || 'Device'}</p>
+                    <p className="truncate text-[11px] font-semibold text-text-muted mt-1">{getBoardIdentifier(log)} · {getTriggerSource(log.triggered_by)}</p>
+                    <p className="text-[10px] font-semibold text-text-muted mt-1">{formatLogTime(log.created_at)}</p>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wider ${isActionOn ? 'bg-accent text-[var(--btn-text)]' : 'bg-border text-text-muted'}`}>
+                    {isActionOn ? 'ON' : 'OFF'}
+                  </span>
+                </article>
+              );
+            })}
+          </div>
+          <div className="hidden w-full overflow-x-auto sm:block">
             <table className="w-full text-left border-collapse min-w-[600px]">
               <thead>
                 <tr className="border-b border-border/40 text-text-muted text-[10px] uppercase tracking-wider font-extrabold select-none">
@@ -312,6 +332,7 @@ export default function LogsPage() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
     </div>

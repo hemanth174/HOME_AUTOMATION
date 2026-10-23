@@ -20,8 +20,8 @@ export default function InfoPageShell({ badge, title, subtitle, children }) {
     <div className="bg-lp-bg text-lp-on-surface font-body-md min-h-screen flex flex-col selection:bg-lp-primary-container selection:text-lp-on-primary-container">
       {/* Top Navbar */}
       <header className="fixed top-0 w-full z-50 flex justify-between items-center px-4 md:px-6 py-3 md:py-4 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant">
-        <Link href="/" className="text-base md:text-xl font-headline-md font-black tracking-tighter text-white uppercase select-none">
-          ELECTRIC WARRIORS
+        <Link href="/" className="flex h-9 w-28 md:h-11 md:w-36 items-center justify-center overflow-hidden rounded-lg bg-white shadow-sm select-none">
+          <img src="/vikatech-logo.png" alt="VikaTech" className="h-full w-full object-contain" />
         </Link>
         <div className="flex gap-2 md:gap-4 items-center shrink-0">
           <ThemeToggle />

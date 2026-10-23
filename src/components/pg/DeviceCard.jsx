@@ -2,19 +2,13 @@
 
 import { AlertTriangle, User } from "lucide-react";
 import { getDeviceKind } from "./deviceKind";
-
-/**
- * Honest device card: exactly the controls the relay backend supports —
- * one large ON/OFF switch plus state feedback. Feedback badges mirror the
- * AC optocoupler truth (burnt-bulb / manual-override) without inventing
- * brightness or fan-speed controls the hardware does not offer.
- */
 export default function DeviceCard({
   device,
   roomName,
   boardOnline,
   pending,
   onToggle,
+  carousel = false,
 }) {
   const kind = getDeviceKind(device.name);
   const { Icon } = kind;
@@ -27,7 +21,7 @@ export default function DeviceCard({
 
   return (
     <article
-      className={`relative flex min-h-[104px] min-w-0 flex-col justify-between gap-1.5 rounded-2xl border bg-(--pg-card) p-3 transition-all duration-200 max-sm:w-full max-sm:basis-full max-sm:shrink-0 max-sm:snap-start max-sm:snap-always sm:w-auto ${
+      className={`relative flex min-h-[104px] min-w-0 flex-col justify-between gap-1.5 rounded-2xl border bg-(--pg-card) p-3.5 transition-all duration-200 ${carousel ? "w-[320px] shrink-0 snap-start snap-always" : "w-full"} max-sm:w-full max-sm:basis-full max-sm:shrink-0 max-sm:snap-start max-sm:snap-always max-sm:min-h-[132px] ${
         isLightOn ? 'border-(--pg-brand-line)' : 'border-(--pg-line)'
       } ${pending ? 'opacity-70' : ''}`}
     >

@@ -14,6 +14,7 @@ import { useEffect } from 'react';
  */
 const PANEL_SELECTOR =
   'div.fixed[class*="bg-black/"] > div:first-child, div.fixed[class*="z-[10000]"] > div:first-child';
+const OVERLAY_SELECTOR = 'div.fixed.inset-0';
 const GRAB_ZONE_PX = 40;
 const CLOSE_X = 120;
 const CLOSE_Y = 140;
@@ -22,6 +23,12 @@ export default function PGDrawerEnhancer() {
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 1024px)');
     const disposers = new Map();
+    const originalBodyOverflow = document.body.style.overflow;
+
+    const syncBodyLock = () => {
+      const hasDrawer = mq.matches && document.querySelector(OVERLAY_SELECTOR);
+      document.body.style.overflow = hasDrawer ? 'hidden' : originalBodyOverflow;
+    };
 
     const enhance = (panel) => {
       if (!(panel instanceof HTMLElement)) return;
@@ -83,8 +90,8 @@ export default function PGDrawerEnhancer() {
     };
 
     const scan = () => {
-      if (!mq.matches) return;
-      document.querySelectorAll(PANEL_SELECTOR).forEach(enhance);
+      if (mq.matches) document.querySelectorAll(PANEL_SELECTOR).forEach(enhance);
+      syncBodyLock();
     };
 
     const obs = new MutationObserver(scan);
@@ -97,6 +104,7 @@ export default function PGDrawerEnhancer() {
       mq.removeEventListener('change', scan);
       disposers.forEach((dispose) => dispose());
       disposers.clear();
+      document.body.style.overflow = originalBodyOverflow;
     };
   }, []);
   return null;
