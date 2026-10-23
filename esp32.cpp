@@ -139,6 +139,7 @@ void pollDatabase();
 void pollAlarms();
 void sendHeartbeat();
 bool resolveBoardAndDevices();
+void syncAllStatesToDB();
 void setupWebServer();
 void handleDeviceToggle(int rIndex);
 void enqueueOfflineUpdate(int index, bool state, bool isFeedback);
@@ -362,8 +363,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 <span class="dev-name">Device ${d.relay_index + 1}</span><br>
                 ${d.node_id ? `<span class="dev-node">${d.node_id}</span>` : ''}
               </span>
-              <span class="feedback-pill ${d.feedback_on ? 'active' : ''}">
-                ${d.feedback_on ? 'AC ON' : 'AC OFF'}
+              <span class="feedback-pill ${d.feedback_on === true ? 'active' : ''}">
+                ${d.feedback_on === true ? 'AC ON' : d.feedback_on === false ? 'AC OFF' : 'AC FEEDBACK N/A'}
               </span>
             </div>
             <button class="btn-toggle" onclick="toggleDevice('${d.node_id || ''}', ${d.relay_index}, ${!d.is_on})">
@@ -458,7 +459,7 @@ void handleDeviceToggle(int rIndex) {
     http.setTimeout(800);
     String body = "{\"nodeId\":\"" + String(BOARD_IDENTIFIER) + "\",\"relay_index\":" + String(rIndex) +
                   ",\"is_on\":" + String(targetState ? "true" : "false") +
-                  ",\"feedback_on\":" + String(confirmedInputState[rIndex] == LOW ? "true" : "false") + "}";
+                  ",\"feedback_on\":null}";
     http.POST(body);
     http.end();
   }
@@ -750,7 +751,9 @@ void buildDevicesPayload(JsonArray& arr, bool includeMesh) {
     dev["id"] = String(BOARD_IDENTIFIER) + "_" + String(i);
     dev["relay_index"] = i;
     dev["is_on"] = isRelayOn[i];
-    dev["feedback_on"] = (confirmedInputState[i] == LOW);
+    // This firmware revision reads wall-switch GPIOs, not an AC-current sensor.
+    // Report unknown rather than presenting switch position as live current feedback.
+    dev["feedback_on"] = nullptr;
     dev["node_id"] = BOARD_IDENTIFIER;
     dev["node_role"] = (localRole == ROLE_LEADER) ? "leader" : ((localRole == ROLE_MEMBER) ? "member" : "idle");
   }
@@ -763,7 +766,8 @@ void buildDevicesPayload(JsonArray& arr, bool includeMesh) {
       dev["id"] = meshDeviceCache[c].nodeId + "_" + String(meshDeviceCache[c].relayIndex);
       dev["relay_index"] = meshDeviceCache[c].relayIndex;
       dev["is_on"] = meshDeviceCache[c].isOn;
-      dev["feedback_on"] = meshDeviceCache[c].feedbackOn;
+      // Do not present a wall-switch state as AC-current feedback.
+      dev["feedback_on"] = nullptr;
       dev["node_id"] = meshDeviceCache[c].nodeId;
       dev["node_role"] = "member";
     }
@@ -953,7 +957,8 @@ void evaluateLocalRole() {
         JsonObject d = devs.createNestedObject();
         d["relay_index"] = i;
         d["is_on"] = isRelayOn[i];
-        d["feedback_on"] = (confirmedInputState[i] == LOW);
+        // Physical switch position is not actual AC-current feedback.
+        d["feedback_on"] = nullptr;
       }
       String out;
       serializeJson(body, out);
@@ -1059,17 +1064,31 @@ void saveOfflineQueue() {
 }
 
 void loadOfflineQueue() {
-  queueCount = min((int)preferences.getUChar("q_count", 0), MAX_PENDING);
-  for (int i = 0; i < queueCount; i++) {
+  const int storedCount = min((int)preferences.getUChar("q_count", 0), MAX_PENDING);
+  queueCount = 0;
+  for (int i = 0; i < storedCount; i++) {
     char key[8];
-    sprintf(key, "q%d_i", i); offlineQueue[i].deviceIndex = preferences.getChar(key, -1);
-    sprintf(key, "q%d_s", i); offlineQueue[i].state = preferences.getBool(key, false);
-    sprintf(key, "q%d_f", i); offlineQueue[i].isFeedback = preferences.getBool(key, false);
-    offlineQueue[i].pending = offlineQueue[i].deviceIndex >= 0 && offlineQueue[i].deviceIndex < NUM_DEVICES;
-  }
-  Serial.printf("Restored %d pending offline updates.\n", queueCount);
-}
+    sprintf(key, "q%d_i", i);
+    const int deviceIndex = preferences.getChar(key, -1);
+    sprintf(key, "q%d_s", i);
+    const bool state = preferences.getBool(key, false);
+    sprintf(key, "q%d_f", i);
+    const bool isFeedback = preferences.getBool(key, false);
 
+    // Earlier firmware incorrectly queued wall-switch position as AC feedback.
+    // Discard old feedback entries so they cannot overwrite cloud feedback later.
+    if (isFeedback || deviceIndex < 0 || deviceIndex >= NUM_DEVICES) continue;
+
+    offlineQueue[queueCount].deviceIndex = deviceIndex;
+    offlineQueue[queueCount].state = state;
+    offlineQueue[queueCount].isFeedback = false;
+    offlineQueue[queueCount].pending = true;
+    queueCount++;
+  }
+  for (int i = queueCount; i < MAX_PENDING; i++) offlineQueue[i].pending = false;
+  saveOfflineQueue();
+  Serial.printf("Restored %d pending relay updates; discarded legacy feedback entries.\n", queueCount);
+}
 bool flushOfflineQueue() {
   if (!isHomeWifiConnected() || boardUUID == "") return false;
 
@@ -1136,16 +1155,20 @@ void setup() {
   loadHomeWifiCredentials();
   loadOfflineQueue();
 
-  // Initialize GPIOs & restore saved relay states
+  // Initialize GPIOs & restore saved relay states.
   for (int i = 0; i < NUM_DEVICES; i++) {
-    pinMode(RELAY_PINS[i], OUTPUT);
     char key[8];
     sprintf(key, "r_%d", i);
     bool savedState = preferences.getBool(key, false);
+    // Relays are active-LOW. Preload the output latch before enabling OUTPUT
+    // mode, avoiding a brief default-LOW pulse on startup.
+    digitalWrite(RELAY_PINS[i], savedState ? LOW : HIGH);
+    pinMode(RELAY_PINS[i], OUTPUT);
     setRelay(i, savedState, false);
 
     pinMode(INPUT_PINS[i], INPUT_PULLUP);
     confirmedInputState[i] = digitalRead(INPUT_PINS[i]);
+    lastInputRead[i] = confirmedInputState[i];
   }
   Serial.println("-> Relay GPIOs & NVS States restored.");
 
@@ -1285,12 +1308,12 @@ void loop() {
           String body = "{\"nodeId\":\"" + String(BOARD_IDENTIFIER) + "\",\"relay_index\":" + String(i) +
                         ",\"feedback_only\":true" +
                         ",\"is_on\":" + String(isRelayOn[i] ? "true" : "false") +
-                        ",\"feedback_on\":" + String(isSwitchOn ? "true" : "false") + "}";
+                        ",\"feedback_on\":null}";
           http.POST(body);
           http.end();
         }
 
-        enqueueOfflineUpdate(i, isSwitchOn, true);
+        // Do not queue wall-switch position as AC-current feedback; the 74HC165 sensor is not read here.
       }
     }
     lastInputRead[i] = currentRead;
@@ -1482,7 +1505,6 @@ void syncAllStatesToDB() {
     http.addHeader("Content-Type", "application/json");
 
     String body = "{\"is_on\":" + String(isRelayOn[i] ? "true" : "false") +
-                  ",\"feedback_on\":" + String((confirmedInputState[i] == LOW) ? "true" : "false") +
                   ",\"last_changed\":\"" + getIsoTime() + "\"}";
     http.PATCH(body);
     http.end();
@@ -1596,7 +1618,10 @@ void cloudSyncTask(void* parameter) {
       lastResolveAttempt = millis();
       Serial.println("-> Cloud worker linking board/devices...");
       if (resolveBoardAndDevices()) {
-        Serial.println("-> Board & devices linked; one-second cloud polling enabled.");
+        // Reconcile cloud with the persisted relay state BEFORE the first cloud poll.
+        // Otherwise stale cloud is_on values can flip relays immediately after boot.
+        syncAllStatesToDB();
+        Serial.println("-> Board & devices linked; cloud state reconciled before polling.");
         cloudDevicesReady = true;
       }
     }
