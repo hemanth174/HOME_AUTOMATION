@@ -25,7 +25,7 @@ import useLocalConnection, {
 const LOCAL_DEVICES_CACHE = "home_auto_cached_local_devices";
 const CLOUD_DEVICES_CACHE = "home_auto_cached_devices";
 const CLOUD_BOARDS_CACHE = "home_auto_cached_boards";
-const LOCAL_DEVICE_REFRESH_INTERVAL = 5000;
+const LOCAL_DEVICE_REFRESH_INTERVAL = 15000;
 
 function StatusBadge({ children, state }) {
   const styles = {
@@ -287,12 +287,22 @@ export default function LocalControlPage() {
     }
 
     loadDevices(true);
-    const timer = setInterval(
-      () => loadDevices(false),
-      LOCAL_DEVICE_REFRESH_INTERVAL,
-    );
+
+    // Poll the ESP32 only while this page is visible. Use a relaxed interval
+    // instead of a one-second loop, and refresh immediately when the user
+    // returns to the tab. This traffic stays on the local network.
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") loadDevices(false);
+    }, LOCAL_DEVICE_REFRESH_INTERVAL);
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") loadDevices(false);
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
     return () => {
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
       setLocalProbingEnabled(false);
     };
   }, [loadDevices, enrichLocalDevices]);

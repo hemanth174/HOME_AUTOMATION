@@ -16,8 +16,12 @@ import { discoverLocalNode, fetchLocalStatus, getLocalBaseUrl } from '@/lib/loca
  */
 
 const FAST_TIMEOUT_MS = 5500;
-const VISIBLE_PROBE_INTERVAL_MS = 4000;
-const HIDDEN_PROBE_INTERVAL_MS = 20000;
+// Health probes are intentionally low-frequency: the local device page has
+// its own device-state refresh, so probing status every few seconds duplicates
+// traffic against the same ESP32. Visibility events still trigger an instant
+// check when the user returns to the app.
+const VISIBLE_PROBE_INTERVAL_MS = 15000;
+const HIDDEN_PROBE_INTERVAL_MS = 60000;
 
 let snapshot = {
   isLocalConnected: false,
