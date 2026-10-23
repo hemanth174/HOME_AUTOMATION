@@ -116,6 +116,7 @@ struct MeshDeviceCache {
   String nodeId;
   int relayIndex;
   bool isOn;
+  bool feedbackKnown;
   bool feedbackOn;
 };
 #define MAX_MESH_DEVICE_CACHE (MAX_MESH_NODES * NUM_DEVICES)
@@ -139,6 +140,7 @@ void pollDatabase();
 void pollAlarms();
 void sendHeartbeat();
 bool resolveBoardAndDevices();
+bool syncAllStatesToDB();
 void setupWebServer();
 void handleDeviceToggle(int rIndex);
 void enqueueOfflineUpdate(int index, bool state, bool isFeedback);
@@ -153,7 +155,7 @@ String getSelfIp();
 int findMeshNode(const String& nodeId);
 bool meshNodeActive(const String& nodeId);
 void upsertMeshNode(const String& nodeId, const String& ip, int devicesCount);
-void upsertMeshDeviceCache(const String& nodeId, int relayIndex, bool isOn, bool feedbackOn);
+void upsertMeshDeviceCache(const String& nodeId, int relayIndex, bool isOn, bool feedbackKnown, bool feedbackOn);
 void pruneStaleMeshNodes();
 void buildDevicesPayload(JsonArray& arr, bool includeMesh);
 void handleToggleAllMesh(bool on);
@@ -362,8 +364,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 <span class="dev-name">Device ${d.relay_index + 1}</span><br>
                 ${d.node_id ? `<span class="dev-node">${d.node_id}</span>` : ''}
               </span>
-              <span class="feedback-pill ${d.feedback_on ? 'active' : ''}">
-                ${d.feedback_on ? 'AC ON' : 'AC OFF'}
+              <span class="feedback-pill ${d.feedback_on === true ? 'active' : ''}">
+                ${d.feedback_on === true ? 'INPUT ON' : d.feedback_on === false ? 'INPUT OFF' : 'INPUT N/A'}
               </span>
             </div>
             <button class="btn-toggle" onclick="toggleDevice('${d.node_id || ''}', ${d.relay_index}, ${!d.is_on})">
@@ -489,7 +491,7 @@ bool proxyToggleToMember(const String& nodeId, int rIndex, bool targetState) {
   http.end();
 
   if (code == 200) {
-    upsertMeshDeviceCache(nodeId, rIndex, targetState, false);
+    upsertMeshDeviceCache(nodeId, rIndex, targetState, false, false);
     return true;
   }
   return false;
@@ -516,7 +518,7 @@ void handleToggleAllMesh(bool on) {
       if (code == 200) {
         reached++;
         for (int d = 0; d < NUM_DEVICES; d++) {
-          upsertMeshDeviceCache(meshNodes[i].nodeId, d, on, false);
+          upsertMeshDeviceCache(meshNodes[i].nodeId, d, on, false, false);
         }
       }
     }
@@ -651,7 +653,8 @@ void setupWebServer() {
 
     JsonArray devs = req["devices"].as<JsonArray>();
     for (JsonObject d : devs) {
-      upsertMeshDeviceCache(nodeId, d["relay_index"] | 0, d["is_on"] | false, d["feedback_on"] | false);
+      upsertMeshDeviceCache(nodeId, d["relay_index"] | 0, d["is_on"] | false,
+                            d["feedback_on"].is<bool>(), d["feedback_on"] | false);
     }
 
     // Respond with leader identity so members can resolve split-brain ties.
@@ -674,7 +677,8 @@ void setupWebServer() {
     String ip = server.client().remoteIP().toString();
     if (nodeId != "") {
       upsertMeshNode(nodeId, ip, NUM_DEVICES);
-      upsertMeshDeviceCache(nodeId, req["relay_index"] | 0, req["is_on"] | false, req["feedback_on"] | false);
+      upsertMeshDeviceCache(nodeId, req["relay_index"] | 0, req["is_on"] | false,
+                            req["feedback_on"].is<bool>(), req["feedback_on"] | false);
     }
     server.send(200, "application/json", "{\"success\":true}");
   });
@@ -750,6 +754,7 @@ void buildDevicesPayload(JsonArray& arr, bool includeMesh) {
     dev["id"] = String(BOARD_IDENTIFIER) + "_" + String(i);
     dev["relay_index"] = i;
     dev["is_on"] = isRelayOn[i];
+    // Live feedback is the directly-read GPIO input associated with this channel.
     dev["feedback_on"] = (confirmedInputState[i] == LOW);
     dev["node_id"] = BOARD_IDENTIFIER;
     dev["node_role"] = (localRole == ROLE_LEADER) ? "leader" : ((localRole == ROLE_MEMBER) ? "member" : "idle");
@@ -763,7 +768,8 @@ void buildDevicesPayload(JsonArray& arr, bool includeMesh) {
       dev["id"] = meshDeviceCache[c].nodeId + "_" + String(meshDeviceCache[c].relayIndex);
       dev["relay_index"] = meshDeviceCache[c].relayIndex;
       dev["is_on"] = meshDeviceCache[c].isOn;
-      dev["feedback_on"] = meshDeviceCache[c].feedbackOn;
+      if (meshDeviceCache[c].feedbackKnown) dev["feedback_on"] = meshDeviceCache[c].feedbackOn;
+      else dev["feedback_on"] = nullptr;
       dev["node_id"] = meshDeviceCache[c].nodeId;
       dev["node_role"] = "member";
     }
@@ -799,12 +805,17 @@ void upsertMeshNode(const String& nodeId, const String& ip, int devicesCount) {
   meshNodes[slot].lastSeen = millis();
 }
 
-void upsertMeshDeviceCache(const String& nodeId, int relayIndex, bool isOn, bool feedbackOn) {
+void upsertMeshDeviceCache(const String& nodeId, int relayIndex, bool isOn, bool feedbackKnown, bool feedbackOn) {
   if (relayIndex < 0 || relayIndex >= NUM_DEVICES) return;
   for (int i = 0; i < meshCacheCount; i++) {
     if (meshDeviceCache[i].nodeId == nodeId && meshDeviceCache[i].relayIndex == relayIndex) {
       meshDeviceCache[i].isOn = isOn;
-      meshDeviceCache[i].feedbackOn = feedbackOn;
+      // A relay command carries no new input sample. Preserve the last known
+      // GPIO feedback until the member reports its current input state.
+      if (feedbackKnown) {
+        meshDeviceCache[i].feedbackKnown = true;
+        meshDeviceCache[i].feedbackOn = feedbackOn;
+      }
       return;
     }
   }
@@ -812,6 +823,7 @@ void upsertMeshDeviceCache(const String& nodeId, int relayIndex, bool isOn, bool
   meshDeviceCache[meshCacheCount].nodeId = nodeId;
   meshDeviceCache[meshCacheCount].relayIndex = relayIndex;
   meshDeviceCache[meshCacheCount].isOn = isOn;
+  meshDeviceCache[meshCacheCount].feedbackKnown = feedbackKnown;
   meshDeviceCache[meshCacheCount].feedbackOn = feedbackOn;
   meshCacheCount++;
 }
@@ -953,6 +965,7 @@ void evaluateLocalRole() {
         JsonObject d = devs.createNestedObject();
         d["relay_index"] = i;
         d["is_on"] = isRelayOn[i];
+        // Read each channel feedback directly from its ESP32 GPIO input.
         d["feedback_on"] = (confirmedInputState[i] == LOW);
       }
       String out;
@@ -1067,9 +1080,8 @@ void loadOfflineQueue() {
     sprintf(key, "q%d_f", i); offlineQueue[i].isFeedback = preferences.getBool(key, false);
     offlineQueue[i].pending = offlineQueue[i].deviceIndex >= 0 && offlineQueue[i].deviceIndex < NUM_DEVICES;
   }
-  Serial.printf("Restored %d pending offline updates.\n", queueCount);
+  Serial.printf("Restored %d pending offline updates.\\n", queueCount);
 }
-
 bool flushOfflineQueue() {
   if (!isHomeWifiConnected() || boardUUID == "") return false;
 
@@ -1136,16 +1148,20 @@ void setup() {
   loadHomeWifiCredentials();
   loadOfflineQueue();
 
-  // Initialize GPIOs & restore saved relay states
+  // Initialize GPIOs & restore saved relay states.
   for (int i = 0; i < NUM_DEVICES; i++) {
-    pinMode(RELAY_PINS[i], OUTPUT);
     char key[8];
     sprintf(key, "r_%d", i);
     bool savedState = preferences.getBool(key, false);
+    // Relays are active-LOW. Preload the output latch before enabling OUTPUT
+    // mode, avoiding a brief default-LOW pulse on startup.
+    digitalWrite(RELAY_PINS[i], savedState ? LOW : HIGH);
+    pinMode(RELAY_PINS[i], OUTPUT);
     setRelay(i, savedState, false);
 
     pinMode(INPUT_PINS[i], INPUT_PULLUP);
     confirmedInputState[i] = digitalRead(INPUT_PINS[i]);
+    lastInputRead[i] = confirmedInputState[i];
   }
   Serial.println("-> Relay GPIOs & NVS States restored.");
 
@@ -1364,7 +1380,8 @@ void pollDatabase() {
       int rIndex = doc[i]["relay_index"];
       bool dbState = doc[i]["is_on"];
 
-      if (rIndex >= 0 && rIndex < NUM_DEVICES) {
+      // Never let an unlinked/stale cloud row control an ESP32 output.
+      if (rIndex >= 0 && rIndex < NUM_DEVICES && deviceUUIDs[rIndex] != "") {
         if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
         bool updatePending = false;
         for (int q = 0; q < queueCount; q++) {
@@ -1463,14 +1480,15 @@ bool resolveBoardAndDevices() {
   return foundAny;
 }
 
-// Push the CURRENT relay & feedback states to the cloud.
-// Called right after (re)connecting, so the database is updated to match
-// the physical device state - offline toggles are preserved and the cloud
-// simply catches up with what the user actually did. This is the opposite
-// of the old fetchInitialState(), which reverted the relays to stale
-// cloud state and disrupted offline-toggled devices.
-void syncAllStatesToDB() {
-  if (!isCloudConfigured() || boardUUID == "") return;
+// Push current relay states to the cloud before enabling cloud-to-relay polling.
+// The current firmware does not read AC-current feedback from the 74HC165, so
+// feedback_on is deliberately not overwritten with wall-switch GPIO state.
+// This prevents stale cloud relay values from changing outputs immediately after boot.
+bool syncAllStatesToDB() {
+  if (!isCloudConfigured() || boardUUID == "") return false;
+
+  int syncedDevices = 0;
+  bool allSynced = true;
   for (int i = 0; i < NUM_DEVICES; i++) {
     if (deviceUUIDs[i] == "") continue;
 
@@ -1482,12 +1500,21 @@ void syncAllStatesToDB() {
     http.addHeader("Content-Type", "application/json");
 
     String body = "{\"is_on\":" + String(isRelayOn[i] ? "true" : "false") +
-                  ",\"feedback_on\":" + String((confirmedInputState[i] == LOW) ? "true" : "false") +
                   ",\"last_changed\":\"" + getIsoTime() + "\"}";
-    http.PATCH(body);
+    int code = http.PATCH(body);
     http.end();
+
+    if (code == 200 || code == 204) {
+      syncedDevices++;
+    } else {
+      allSynced = false;
+      Serial.printf("-> Initial relay-state sync failed for device %d (HTTP %d).\n", i, code);
+    }
   }
-  Serial.println("-> Current device states synced to cloud (offline states preserved).");
+
+  if (syncedDevices == 0 || !allSynced) return false;
+  Serial.println("-> Current relay states synced to cloud before polling.");
+  return true;
 }
 
 void pollAlarms() {
@@ -1596,8 +1623,21 @@ void cloudSyncTask(void* parameter) {
       lastResolveAttempt = millis();
       Serial.println("-> Cloud worker linking board/devices...");
       if (resolveBoardAndDevices()) {
-        Serial.println("-> Board & devices linked; one-second cloud polling enabled.");
+        Serial.println("-> Board & devices linked; reconciling relay state before cloud polling.");
+      }
+    }
+
+    // Keep cloud-to-relay polling disabled until the persisted physical state
+    // has been written successfully. A failed sync must never apply stale
+    // database values to the hardware.
+    if (boardUUID != "" && !cloudDevicesReady) {
+      if (syncAllStatesToDB()) {
+        Serial.println("-> Cloud state reconciled; one-second cloud polling enabled.");
         cloudDevicesReady = true;
+      } else {
+        Serial.println("-> Initial relay-state sync failed; cloud polling paused to prevent stale-state switching.");
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        continue;
       }
     }
 
