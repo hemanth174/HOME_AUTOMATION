@@ -139,7 +139,7 @@ void pollDatabase();
 void pollAlarms();
 void sendHeartbeat();
 bool resolveBoardAndDevices();
-void syncAllStatesToDB();
+bool syncAllStatesToDB();
 void setupWebServer();
 void handleDeviceToggle(int rIndex);
 void enqueueOfflineUpdate(int index, bool state, bool isFeedback);
@@ -1492,8 +1492,11 @@ bool resolveBoardAndDevices() {
 // simply catches up with what the user actually did. This is the opposite
 // of the old fetchInitialState(), which reverted the relays to stale
 // cloud state and disrupted offline-toggled devices.
-void syncAllStatesToDB() {
-  if (!isCloudConfigured() || boardUUID == "") return;
+bool syncAllStatesToDB() {
+  if (!isCloudConfigured() || boardUUID == "") return false;
+
+  int syncedDevices = 0;
+  bool allSynced = true;
   for (int i = 0; i < NUM_DEVICES; i++) {
     if (deviceUUIDs[i] == "") continue;
 
@@ -1506,10 +1509,20 @@ void syncAllStatesToDB() {
 
     String body = "{\"is_on\":" + String(isRelayOn[i] ? "true" : "false") +
                   ",\"last_changed\":\"" + getIsoTime() + "\"}";
-    http.PATCH(body);
+    int code = http.PATCH(body);
     http.end();
+
+    if (code == 200 || code == 204) {
+      syncedDevices++;
+    } else {
+      allSynced = false;
+      Serial.printf("-> Initial relay-state sync failed for device %d (HTTP %d).\\n", i, code);
+    }
   }
-  Serial.println("-> Current device states synced to cloud (offline states preserved).");
+
+  if (syncedDevices == 0 || !allSynced) return false;
+  Serial.println("-> Current relay states synced to cloud before polling.");
+  return true;
 }
 
 void pollAlarms() {
@@ -1618,11 +1631,21 @@ void cloudSyncTask(void* parameter) {
       lastResolveAttempt = millis();
       Serial.println("-> Cloud worker linking board/devices...");
       if (resolveBoardAndDevices()) {
-        // Reconcile cloud with the persisted relay state BEFORE the first cloud poll.
-        // Otherwise stale cloud is_on values can flip relays immediately after boot.
-        syncAllStatesToDB();
-        Serial.println("-> Board & devices linked; cloud state reconciled before polling.");
+        Serial.println("-> Board & devices linked; reconciling relay state before cloud polling.");
+      }
+    }
+
+    // Keep cloud-to-relay polling disabled until the persisted physical state
+    // has been written successfully. A failed sync must never apply stale
+    // database values to the hardware.
+    if (boardUUID != "" && !cloudDevicesReady) {
+      if (syncAllStatesToDB()) {
+        Serial.println("-> Cloud state reconciled; one-second cloud polling enabled.");
         cloudDevicesReady = true;
+      } else {
+        Serial.println("-> Initial relay-state sync failed; cloud polling paused to prevent stale-state switching.");
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        continue;
       }
     }
 
