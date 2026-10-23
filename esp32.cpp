@@ -1380,7 +1380,8 @@ void pollDatabase() {
       int rIndex = doc[i]["relay_index"];
       bool dbState = doc[i]["is_on"];
 
-      if (rIndex >= 0 && rIndex < NUM_DEVICES) {
+      // Never let an unlinked/stale cloud row control an ESP32 output.
+      if (rIndex >= 0 && rIndex < NUM_DEVICES && deviceUUIDs[rIndex] != "") {
         if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
         bool updatePending = false;
         for (int q = 0; q < queueCount; q++) {
