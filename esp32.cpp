@@ -1486,12 +1486,10 @@ bool resolveBoardAndDevices() {
   return foundAny;
 }
 
-// Push the CURRENT relay & feedback states to the cloud.
-// Called right after (re)connecting, so the database is updated to match
-// the physical device state - offline toggles are preserved and the cloud
-// simply catches up with what the user actually did. This is the opposite
-// of the old fetchInitialState(), which reverted the relays to stale
-// cloud state and disrupted offline-toggled devices.
+// Push current relay states to the cloud before enabling cloud-to-relay polling.
+// The current firmware does not read AC-current feedback from the 74HC165, so
+// feedback_on is deliberately not overwritten with wall-switch GPIO state.
+// This prevents stale cloud relay values from changing outputs immediately after boot.
 bool syncAllStatesToDB() {
   if (!isCloudConfigured() || boardUUID == "") return false;
 
@@ -1516,7 +1514,7 @@ bool syncAllStatesToDB() {
       syncedDevices++;
     } else {
       allSynced = false;
-      Serial.printf("-> Initial relay-state sync failed for device %d (HTTP %d).\\n", i, code);
+      Serial.printf("-> Initial relay-state sync failed for device %d (HTTP %d).\n", i, code);
     }
   }
 
