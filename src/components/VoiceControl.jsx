@@ -437,7 +437,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           const normTime = (time || '').trim().slice(0, 5);
           const [scheduleHour, scheduleMinute] = normTime.split(':').map(Number);
           const actionBool = isOn === true || isOn === 'true';
-          if (!/^\\d{2}:\\d{2}$/.test(normTime) || scheduleHour > 23 || scheduleMinute > 59 ||
+          if (!/^\d{2}:\d{2}$/.test(normTime) || scheduleHour > 23 || scheduleMinute > 59 ||
               !Array.isArray(days) || days.length === 0 ||
               days.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) {
             provideFeedback('I could not validate that schedule. Please repeat the time and days.');
