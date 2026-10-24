@@ -199,7 +199,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
         />
       )}
       {children}
-      {!fullWidthPage && <AlarmExecutor />}
+      {!fullWidthPage && <AlarmExecutor user={user} />}
       <GlobalToast />
     </div>
   );

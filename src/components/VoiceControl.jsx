@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { Mic, X, LayoutGrid, List } from 'lucide-react';
 import { speak } from '@/utils/voice';
 import { useVoiceAgentVisible } from '@/lib/agentVisibility';
+import { discoverLocalNode, setLocalDeviceState, triggerLocalAll } from '@/lib/localApi';
 
 // Number-word to digit map
 const WORD_TO_NUM = {
@@ -62,29 +63,60 @@ const fuzzyScore = (query, target) => {
   return matches / Math.max(qTokens.length, 1);
 };
 
-/** Return the best-matching device for query, or null if below threshold. */
-const findBestDevice = (query, list, threshold = 0.4) => {
-  let best = null;
-  let bestScore = -1;
-  for (const device of list) {
-    const score = fuzzyScore(query, normalizeText(device.name));
-    if (score > bestScore) { bestScore = score; best = device; }
-  }
-  return bestScore >= threshold ? best : null;
+/**
+ * Resolve a device conservatively. Commands must name a unique full device/room
+ * alias; token overlap alone is not enough to actuate hardware.
+ */
+const findBestDevice = (query, list) => {
+  const normalizedQuery = normalizeText(query);
+  if (!normalizedQuery) return null;
+
+  const scored = (list || []).map((device) => {
+    const aliases = [
+      device.name,
+      device.board_name ? `${device.board_name} ${device.name}` : '',
+      device.roomName ? `${device.roomName} ${device.name}` : '',
+      device.node_id ? `${device.node_id} ${device.name}` : '',
+    ].filter(Boolean).map(normalizeText);
+
+    let score = 0;
+    for (const alias of aliases) {
+      if (!alias) continue;
+      if (alias === normalizedQuery) score = Math.max(score, 100 + alias.split(' ').length);
+      else if (` ${normalizedQuery} `.includes(` ${alias} `)) {
+        score = Math.max(score, 80 + alias.split(' ').length);
+      } else if (` ${alias} `.includes(` ${normalizedQuery} `)) {
+        score = Math.max(score, 40 + normalizedQuery.split(' ').length);
+      }
+    }
+    return { device, score };
+  }).filter((item) => item.score > 0);
+
+  if (!scored.length) return null;
+  const bestScore = Math.max(...scored.map((item) => item.score));
+  const best = scored.filter((item) => item.score === bestScore);
+  return best.length === 1 ? best[0].device : null;
 };
 
 /**
  * Parse time string (e.g. "9:30 pm", "8 am", "14:00") into hour and minute.
  */
 const parseTime = (timeStr) => {
-  const match = timeStr.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  const match = String(timeStr || '').match(/^\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*$/i);
   if (!match) return null;
-  let hour = parseInt(match[1], 10);
-  const minute = match[2] ? parseInt(match[2], 10) : 0;
+
+  let hour = Number(match[1]);
+  const minute = match[2] ? Number(match[2]) : 0;
   const ampm = match[3] ? match[3].toLowerCase() : null;
 
-  if (ampm === 'pm' && hour < 12) hour += 12;
-  if (ampm === 'am' && hour === 12) hour = 0;
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute < 0 || minute > 59) return null;
+  if (ampm) {
+    if (hour < 1 || hour > 12) return null;
+    if (ampm === 'pm' && hour < 12) hour += 12;
+    if (ampm === 'am' && hour === 12) hour = 0;
+  } else if (hour < 0 || hour > 23) {
+    return null;
+  }
 
   return { hour, minute };
 };
@@ -124,29 +156,45 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
   // Fetch missing prop data on mount if self-contained
   useEffect(() => {
     const fetchMissingData = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       if (!propDevices || propDevices.length === 0) {
-        const { data: devs } = await supabase
+        const { data: devs, error } = await supabase
           .from('devices')
-          .select('id, name, is_on, board_id')
+          .select('id, name, is_on, board_id, relay_index, boards(name, board_identifier)')
+          .eq('user_id', user.id)
           .order('relay_index');
-        if (devs) {
-          devicesRef.current = devs;
+        if (!error && devs) {
+          devicesRef.current = devs.map((device) => ({
+            ...device,
+            board_name: device.boards?.name || '',
+            node_id: device.boards?.board_identifier || null,
+          }));
         }
       }
       if (!propBoards || propBoards.length === 0) {
-        const { data: bds } = await supabase
+        const { data: bds, error } = await supabase
           .from('boards')
-          .select('id, name');
-        if (bds) {
+          .select('id, name, board_identifier')
+          .eq('user_id', user.id);
+        if (!error && bds) {
           boardsRef.current = bds;
         }
       }
       if (!propPresets || propPresets.length === 0) {
-        const { data: prs } = await supabase
+        const { data: prs, error } = await supabase
           .from('presets')
-          .select('id, name, actions');
-        if (prs) {
-          presetsRef.current = prs;
+          .select('id, name, actions')
+          .eq('user_id', user.id);
+        if (!error && prs) {
+          presetsRef.current = prs.map((preset) => {
+            let actions = preset.actions;
+            if (typeof actions === 'string') {
+              try { actions = JSON.parse(actions); } catch { actions = []; }
+            }
+            return { ...preset, actions: Array.isArray(actions) ? actions : [] };
+          });
         }
       }
     };
@@ -165,7 +213,16 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
             if (!devicesRef.current.find(d => d.id === n.id))
               devicesRef.current = [...devicesRef.current, n];
           } else if (eventType === 'UPDATE') {
-            devicesRef.current = devicesRef.current.map(d => d.id === n.id ? { ...d, ...n } : d);
+            devicesRef.current = devicesRef.current.map((device) => {
+              if (device.id !== n.id) return device;
+              const board = boardsRef.current.find((item) => item.id === n.board_id);
+              return {
+                ...device,
+                ...n,
+                board_name: board?.name || device.board_name || device.boards?.name || '',
+                node_id: board?.board_identifier || device.node_id || device.boards?.board_identifier || null,
+              };
+            });
           } else if (eventType === 'DELETE') {
             devicesRef.current = devicesRef.current.filter(d => d.id !== o.id);
           }
@@ -193,15 +250,32 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     };
   }, []); // mount-once; refs stay current via sync effects above
 
-  // Fetch fresh devices (prefer live ref, DB fallback)
+  // Enrich the device rows with board identity so local commands are routed
+  // to the owning ESP32, not just to a relay number shared by every board.
+  const enrichDevices = useCallback((items) => (items || []).map((device) => {
+    const board = boardsRef.current.find((item) => item.id === device.board_id);
+    return {
+      ...device,
+      board_name: device.board_name || device.boards?.name || board?.name || '',
+      node_id: device.node_id || device.boards?.board_identifier || board?.board_identifier || null,
+    };
+  }), []);
+
+  // Fetch fresh devices (prefer live refs, DB fallback).
   const getLatestDevices = useCallback(async () => {
-    if (devicesRef.current?.length) return devicesRef.current;
-    const { data } = await supabase
+    if (devicesRef.current?.length) return enrichDevices(devicesRef.current);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+    const { data, error } = await supabase
       .from('devices')
-      .select('id, name, is_on, board_id')
+      .select('id, name, is_on, board_id, relay_index, boards(name, board_identifier)')
+      .eq('user_id', user.id)
       .order('relay_index');
-    return data ?? [];
-  }, []);
+    if (error) return [];
+    const enriched = enrichDevices(data || []);
+    devicesRef.current = enriched;
+    return enriched;
+  }, [enrichDevices]);
 
   // Execute structured action returned by the LLM
   const executeLLMAction = useCallback(async (result, safeToast) => {
@@ -222,65 +296,178 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           provideFeedback('That device is no longer available. Please try again.');
           break;
         }
+
         if (controlDevice) {
-          const result = await controlDevice(device, isOn, 'Voice Command (AI)');
-          if (!result?.success) {
+          const commandResult = await controlDevice(device, isOn, 'Voice Command (AI)');
+          if (!commandResult?.success) {
             provideFeedback(`Could not turn ${device.name} ${isOn ? 'on' : 'off'}. Please try again.`);
             break;
           }
-        } else {
-          const { error } = await supabase.from('devices')
-            .update({ is_on: isOn, last_changed: new Date().toISOString() })
-            .eq('id', device.id);
-          if (error) {
-            provideFeedback(`Could not turn ${device.name} ${isOn ? 'on' : 'off'}. Please try again.`);
-            break;
+          provideFeedback(`${device.name} turned ${isOn ? 'on' : 'off'}`);
+          break;
+        }
+
+        // Schedule and Alarm pages mount VoiceControl without dashboard callbacks.
+        // Try local hardware first; the cloud row update remains the durable desired state.
+        let localDispatched = false;
+        if (Number.isInteger(Number(device.relay_index))) {
+          try {
+            await discoverLocalNode(1500);
+            await setLocalDeviceState(Number(device.relay_index), isOn, device.node_id || null);
+            localDispatched = true;
+          } catch {
+            // Cloud state below is the fallback when this browser cannot reach the ESP32.
           }
         }
-        provideFeedback(`${device.name} turned ${isOn ? 'on' : 'off'}`);
+
+        const { error: updateError } = await supabase.from('devices')
+          .update({ is_on: isOn, last_changed: new Date().toISOString() })
+          .eq('id', device.id)
+          .eq('user_id', user.id);
+        if (updateError && !localDispatched) {
+          provideFeedback(`Could not turn ${device.name} ${isOn ? 'on' : 'off'}. Please try again.`);
+          break;
+        }
+        if (!updateError) {
+          const { error: logError } = await supabase.from('activity_logs').insert({
+            user_id: user.id,
+            device_id: device.id,
+            device_name: device.name,
+            action: `turned ${isOn ? 'ON' : 'OFF'}`,
+            triggered_by: localDispatched ? 'Voice Command (AI) via ESP32 Local Mesh' : 'Voice Command (AI)',
+          });
+          if (logError) console.warn('Voice activity log insert failed:', logError);
+        }
+        provideFeedback(updateError
+          ? `${device.name} command was sent locally, but cloud sync failed.`
+          : `${device.name} turned ${isOn ? 'on' : 'off'}`);
         break;
       }
 
       case 'TOGGLE_ALL': {
-        const latestDevices = await getLatestDevices();
         if (controlAll) {
-          const result = await controlAll(isOn ? 'on' : 'off', 'Voice Command (AI)');
-          if (!result?.success) {
+          const commandResult = await controlAll(isOn ? 'on' : 'off', 'Voice Command (AI)');
+          if (!commandResult?.success) {
             provideFeedback(`Could not turn all devices ${isOn ? 'on' : 'off'}. Please try again.`);
             break;
           }
           provideFeedback(`All devices turned ${isOn ? 'on' : 'off'}`);
           break;
         }
-        const devicesToUpdate = latestDevices.filter(d => d.is_on !== isOn);
-        if (devicesToUpdate.length > 0) {
-          await supabase.from('devices')
-            .update({ is_on: isOn, last_changed: new Date().toISOString() })
-            .eq('user_id', user.id);
 
-          await Promise.all(devicesToUpdate.map(async (d) => {
-            await supabase.from('activity_logs').insert({
-              user_id: user.id,
-              device_id: d.id,
-              device_name: d.name,
-              action: isOn ? 'turned ON' : 'turned OFF',
-              triggered_by: 'Voice Command (AI)'
-            });
-          }));
+        let localDispatched = false;
+        try {
+          await discoverLocalNode(1500);
+          await triggerLocalAll(isOn ? 'on' : 'off');
+          localDispatched = true;
+        } catch {
+          // Cloud update below keeps the desired state when local hardware isn't reachable.
         }
-        provideFeedback(`All devices turned ${isOn ? 'on' : 'off'}`);
+
+        const { error: updateError } = await supabase.from('devices')
+          .update({ is_on: isOn, last_changed: new Date().toISOString() })
+          .eq('user_id', user.id);
+        if (updateError && !localDispatched) {
+          provideFeedback(`Could not turn all devices ${isOn ? 'on' : 'off'}. Please try again.`);
+          break;
+        }
+        if (!updateError) {
+          const { error: logError } = await supabase.from('activity_logs').insert({
+            user_id: user.id,
+            device_id: null,
+            device_name: 'All Devices',
+            action: `turned ${isOn ? 'ON' : 'OFF'}`,
+            triggered_by: localDispatched ? 'Voice Command (AI) All via ESP32 Local Mesh' : 'Voice Command (AI) All',
+          });
+          if (logError) console.warn('Voice bulk activity log insert failed:', logError);
+        }
+        provideFeedback(updateError
+          ? `All-device command was sent locally, but cloud sync failed.`
+          : `All devices turned ${isOn ? 'on' : 'off'}`);
         break;
       }
 
       case 'APPLY_PRESET': {
-        const preset = presetsRef.current.find(p => p.id === presetId);
-        if (preset) {
-          if (!applyPreset) {
-            provideFeedback('Preset voice commands are available from the dashboard.');
-            break;
+        const preset = presetsRef.current.find((item) => item.id === presetId);
+        if (!preset) {
+          provideFeedback('That preset is no longer available. Please try again.');
+          break;
+        }
+        if (applyPreset) {
+          const outcome = await applyPreset(preset, result.deactivate || false);
+          if (outcome?.success === false) {
+            provideFeedback(outcome.succeeded > 0
+              ? `Preset ${presetName || preset.name} was only partly applied. Please check device states.`
+              : `Could not apply preset ${presetName || preset.name}. Please try again.`);
+          } else {
+            provideFeedback(`${result.deactivate ? 'Deactivated' : 'Activated'} preset: ${presetName || preset.name}`);
           }
-          await applyPreset(preset, result.deactivate || false);
-          provideFeedback(`${result.deactivate ? 'Deactivated' : 'Activated'} preset: ${presetName}`);
+          break;
+        }
+
+        let actions = preset.actions;
+        if (typeof actions === 'string') {
+          try { actions = JSON.parse(actions); } catch { actions = []; }
+        }
+        if (!Array.isArray(actions) || actions.length === 0) {
+          provideFeedback(`Preset ${preset.name} has no saved device actions.`);
+          break;
+        }
+
+        const latestDevices = await getLatestDevices();
+        let localGatewayAvailable = false;
+        try {
+          await discoverLocalNode(1500);
+          localGatewayAvailable = true;
+        } catch {
+          // Cloud-only execution remains available below.
+        }
+
+        let succeeded = 0;
+        let failed = 0;
+        for (const action of actions) {
+          const device = latestDevices.find((item) => item.id === action.device_id);
+          if (!device) {
+            failed++;
+            continue;
+          }
+
+          const targetState = result.deactivate ? !Boolean(action.is_on) : Boolean(action.is_on);
+          let localDispatched = false;
+          if (localGatewayAvailable) {
+            try {
+              await setLocalDeviceState(Number(device.relay_index), targetState, device.node_id || null);
+              localDispatched = true;
+            } catch {
+              // Fall back to persisted state; firmware sync will pick it up when connected.
+            }
+          }
+
+          const { error: updateError } = await supabase.from('devices')
+            .update({ is_on: targetState, last_changed: new Date().toISOString() })
+            .eq('id', device.id)
+            .eq('user_id', user.id);
+          if (!updateError) {
+            const { error: logError } = await supabase.from('activity_logs').insert({
+              user_id: user.id,
+              device_id: device.id,
+              device_name: device.name,
+              action: `turned ${targetState ? 'ON' : 'OFF'}`,
+              triggered_by: `Voice Command (AI) Preset: ${preset.name}`,
+            });
+            if (logError) console.warn('Preset activity log insert failed:', logError);
+          }
+
+          if (!updateError || localDispatched) succeeded++;
+          else failed++;
+        }
+
+        if (succeeded === actions.length) {
+          provideFeedback(`${result.deactivate ? 'Deactivated' : 'Activated'} preset: ${preset.name}`);
+        } else if (succeeded > 0) {
+          provideFeedback(`Preset ${preset.name} was only partly applied. Please check the device states.`);
+        } else {
+          provideFeedback(`Could not apply preset ${preset.name}. Please try again.`);
         }
         break;
       }
@@ -288,6 +475,10 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       case 'CREATE_ALARM': {
         const latestDevices = await getLatestDevices();
         const device = latestDevices.find(d => d.id === deviceId);
+        if (!device) {
+          provideFeedback('That alarm device could not be found. Please try again.');
+          break;
+        }
         if (device) {
           // ── Guard 1: Reject past timestamps immediately ──────────────────
           const triggerDate = new Date(triggerAt);
@@ -300,12 +491,37 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           const triggerMs = triggerDate.getTime();
           const windowMs = 60 * 1000;
           const actionBool = isOn === true || isOn === 'true';
-          const { data: existingAlarms } = await supabase
+          const { data: existingAlarms, error: alarmQueryError } = await supabase
             .from('alarms')
             .select('id, trigger_at, action')
             .eq('device_id', deviceId)
             .eq('user_id', user.id)
             .eq('fired', false);
+          if (alarmQueryError) {
+            provideFeedback('Could not check existing alarms. Please try again.');
+            break;
+          }
+
+          const alarmTime = `${String(triggerDate.getHours()).padStart(2, '0')}:${String(triggerDate.getMinutes()).padStart(2, '0')}`;
+          const { data: activeSchedules, error: scheduleConflictError } = await supabase
+            .from('schedules')
+            .select('id, time, days, action, enabled')
+            .eq('device_id', deviceId)
+            .eq('user_id', user.id)
+            .eq('enabled', true);
+          if (scheduleConflictError) {
+            provideFeedback('Could not check schedule conflicts. Please try again.');
+            break;
+          }
+          const scheduleConflict = (activeSchedules || []).find((schedule) =>
+            Array.isArray(schedule.days) &&
+            schedule.days.includes(triggerDate.getDay()) &&
+            (schedule.time || '').slice(0, 5) === alarmTime
+          );
+          if (scheduleConflict) {
+            provideFeedback(`${device.name} already has a schedule at ${alarmTime} on that day. Edit it before adding an alarm at the same time.`);
+            break;
+          }
 
           const duplicate = (existingAlarms || []).find(a => {
             const diff = Math.abs(new Date(a.trigger_at).getTime() - triggerMs);
@@ -339,24 +555,46 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       case 'CREATE_SCHEDULE': {
         const latestDevices = await getLatestDevices();
         const device = latestDevices.find(d => d.id === deviceId);
+        if (!device) {
+          provideFeedback('That schedule device could not be found. Please try again.');
+          break;
+        }
         if (device) {
           // Normalise: take first 5 chars of time (HH:MM) to handle DB storing HH:MM:SS
           const normTime = (time || '').trim().slice(0, 5);
+          const [scheduleHour, scheduleMinute] = normTime.split(':').map(Number);
           const actionBool = isOn === true || isOn === 'true';
+          if (!/^\d{2}:\d{2}$/.test(normTime) || scheduleHour > 23 || scheduleMinute > 59 ||
+              !Array.isArray(days) || days.length === 0 ||
+              days.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) {
+            provideFeedback('I could not validate that schedule. Please repeat the time and days.');
+            break;
+          }
 
           // Deduplication: same device + same HH:MM + same action — filter by user_id too
-          const { data: existingSchedules } = await supabase
+          const { data: existingSchedules, error: schedulesQueryError } = await supabase
             .from('schedules')
-            .select('id, time, action')
+            .select('id, time, action, days, enabled')
             .eq('device_id', deviceId)
             .eq('user_id', user.id);
+          if (schedulesQueryError) {
+            provideFeedback('Could not check existing schedules. Please try again.');
+            break;
+          }
 
-          const duplicate = (existingSchedules || []).find(s =>
-            (s.time || '').slice(0, 5) === normTime && !!s.action === actionBool
-          );
+          const requestedDays = [...new Set(days || [])].sort((a, b) => a - b);
+          const conflict = (existingSchedules || []).find((schedule) => {
+            const existingDays = [...new Set(schedule.days || [])];
+            return schedule.enabled !== false &&
+              (schedule.time || '').slice(0, 5) === normTime &&
+              existingDays.some((day) => requestedDays.includes(day));
+          });
 
-          if (duplicate) {
-            provideFeedback(`${device.name} already has a schedule to turn ${actionBool ? 'on' : 'off'} at ${normTime}. Duplicate not created.`);
+          if (conflict) {
+            const sameAction = Boolean(conflict.action) === actionBool;
+            provideFeedback(sameAction
+              ? `${device.name} already has a schedule at ${normTime} on an overlapping day. Duplicate not created.`
+              : `Conflict: ${device.name} already has an opposite-action schedule at ${normTime} on an overlapping day.`);
           } else {
             const { error } = await supabase.from('schedules').insert({
               user_id: user.id,
@@ -381,14 +619,14 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       }
 
       case 'DELETE_ALL_ALARMS': {
-        await supabase.from('alarms').delete().eq('user_id', user.id);
-        provideFeedback('All alarms cleared');
+        const { error } = await supabase.from('alarms').delete().eq('user_id', user.id);
+        provideFeedback(error ? 'Could not clear alarms. Please try again.' : 'All alarms cleared');
         break;
       }
 
       case 'DELETE_ALL_SCHEDULES': {
-        await supabase.from('schedules').delete().eq('user_id', user.id);
-        provideFeedback('All schedules cleared');
+        const { error } = await supabase.from('schedules').delete().eq('user_id', user.id);
+        provideFeedback(error ? 'Could not clear schedules. Please try again.' : 'All schedules cleared');
         break;
       }
 
@@ -506,34 +744,30 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       console.warn('AI voice command failed, falling back to local parser:', e);
     }
 
-    if (commandDevices.length === 0) {
-      safeToast('No devices found. Please add a board first.');
-      speak('No devices found. Please add a board first.');
+    // Device-independent maintenance commands (for example, clearing an
+    // orphaned alarm list) are handled below even when no device rows exist.
+
+    // 2. Clear/Delete All Alarms or Schedules.
+    // Bulk deletion always requires a separate spoken confirmation.
+    if (/^(?:delete|clear|remove) (?:all|every) alarms?$/.test(text)) {
+      pendingActionRef.current = {
+        actionType: 'DELETE_ALL_ALARMS',
+        message: 'This will delete every alarm. Say yes to confirm, or no to cancel.',
+        language: selectedLang,
+      };
+      safeToast(pendingActionRef.current.message);
+      speak(pendingActionRef.current.message, selectedLang);
       setAgentState('idle');
       return;
     }
-
-    // Note: Local hardcoded parsing for "All on / All off" has been removed.
-    // We now rely entirely on the AI API for turning devices on and off.
-
-    // 2. Clear/Delete All Alarms or Schedules
-    if (text === 'delete all alarms' || text === 'clear all alarms') {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.from('alarms').delete().eq('user_id', user.id);
-        safeToast('All alarms deleted');
-        speak('All alarms deleted');
-      }
-      setAgentState('idle');
-      return;
-    }
-    if (text === 'delete all schedules' || text === 'clear all schedules') {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.from('schedules').delete().eq('user_id', user.id);
-        safeToast('All schedules deleted');
-        speak('All schedules deleted');
-      }
+    if (/^(?:delete|clear|remove) (?:all|every) schedules?$/.test(text)) {
+      pendingActionRef.current = {
+        actionType: 'DELETE_ALL_SCHEDULES',
+        message: 'This will delete every schedule. Say yes to confirm, or no to cancel.',
+        language: selectedLang,
+      };
+      safeToast(pendingActionRef.current.message);
+      speak(pendingActionRef.current.message, selectedLang);
       setAgentState('idle');
       return;
     }
@@ -542,7 +776,11 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     const alarmCreateMatch = text.match(/^(?:set|create)\s+alarm\s+for\s+(.+?)\s+(?:to\s+turn\s+(on|off)\s+)?at\s+(.+)$/);
     if (alarmCreateMatch) {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setAgentState('idle');
+        safeToast('Please sign in before creating an alarm.');
+        return;
+      }
 
       const deviceQuery = normalizeText(alarmCreateMatch[1]);
       const actionWord = alarmCreateMatch[2]; // "on" or "off"
@@ -552,8 +790,8 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       if (!matchedDevice) {
         safeToast(`Device "${deviceQuery}" not found for alarm`);
         speak(`Device ${deviceQuery} not found`);
-       setAgentState('idle');
-       return;
+        setAgentState('idle');
+        return;
       }
 
       const parsedTime = parseTime(timeStr);
@@ -582,12 +820,43 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       const isAlarmOn = actionWord ? actionWord === 'on' : true;
 
       // ── Guard 2: Deduplication — same device + 1-min window + same action ─
-      const { data: existingAlarms } = await supabase
+      const { data: existingAlarms, error: alarmQueryError } = await supabase
         .from('alarms')
         .select('id, trigger_at, action')
         .eq('device_id', matchedDevice.id)
         .eq('user_id', user.id)
         .eq('fired', false);
+      if (alarmQueryError) {
+        safeToast('Could not check existing alarms. Please try again.');
+        speak('Could not check existing alarms. Please try again.');
+        setAgentState('idle');
+        return;
+      }
+
+      const alarmTime = `${String(alarmDate.getHours()).padStart(2, '0')}:${String(alarmDate.getMinutes()).padStart(2, '0')}`;
+      const { data: activeSchedules, error: scheduleConflictError } = await supabase
+        .from('schedules')
+        .select('id, time, days, action, enabled')
+        .eq('device_id', matchedDevice.id)
+        .eq('user_id', user.id)
+        .eq('enabled', true);
+      if (scheduleConflictError) {
+        safeToast('Could not check schedule conflicts. Please try again.');
+        speak('Could not check schedule conflicts. Please try again.');
+        setAgentState('idle');
+        return;
+      }
+      const scheduleConflict = (activeSchedules || []).find((schedule) =>
+        Array.isArray(schedule.days) &&
+        schedule.days.includes(alarmDate.getDay()) &&
+        (schedule.time || '').slice(0, 5) === alarmTime
+      );
+      if (scheduleConflict) {
+        safeToast(`${matchedDevice.name} already has a schedule at ${alarmTime} on that day. Edit it before adding an alarm at the same time.`);
+        speak('There is already a schedule at that time. Please edit it first.');
+        setAgentState('idle');
+        return;
+      }
 
       const windowMs = 60 * 1000;
       const alarmTs = alarmDate.getTime();
@@ -632,7 +901,11 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     const scheduleCreateMatch = text.match(/^(?:set|create)\s+schedule\s+for\s+(.+?)\s+(?:to\s+turn\s+(on|off)\s+)?at\s+(.+ ?)(?:\s+on\s+(.+))?$/);
     if (scheduleCreateMatch) {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setAgentState('idle');
+        safeToast('Please sign in before creating a schedule.');
+        return;
+      }
 
       const deviceQuery = normalizeText(scheduleCreateMatch[1]);
       const actionWord = scheduleCreateMatch[2]; // "on" or "off"
@@ -643,8 +916,8 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       if (!matchedDevice) {
         safeToast(`Device "${deviceQuery}" not found for schedule`);
         speak(`Device ${deviceQuery} not found`);
-       setAgentState('idle');
-       return;
+        setAgentState('idle');
+        return;
       }
 
       const parsedTime = parseTime(timeStr);
@@ -670,7 +943,12 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           }
         }
         if (matchedDays.length > 0) {
-          days = matchedDays.sort();
+          days = matchedDays.sort((a, b) => a - b);
+        } else {
+          safeToast(`I could not understand the schedule days "${daysStr}". Say weekdays, weekends, every day, or name the days.`);
+          speak('Please repeat the schedule days.', selectedLang);
+          setAgentState('idle');
+          return;
         }
       }
 
@@ -679,23 +957,36 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
 
       // Dedup: normalize time to HH:MM (5 chars) — DB may store HH:MM:SS
       // Cast action to boolean so type mismatches don't let duplicates through
-      const { data: existingSchedules } = await supabase
+      const { data: existingSchedules, error: scheduleQueryError } = await supabase
         .from('schedules')
-        .select('id, time, action')
+        .select('id, time, action, days, enabled')
         .eq('device_id', matchedDevice.id)
         .eq('user_id', user.id);
+      if (scheduleQueryError) {
+        safeToast('Could not check existing schedules. Please try again.');
+        speak('Could not check existing schedules. Please try again.');
+        setAgentState('idle');
+        return;
+      }
 
-      const dupSched = (existingSchedules || []).find(s =>
-        (s.time || '').slice(0, 5) === formattedTime && !!s.action === isScheduleOn
-      );
+      const requestedDays = [...new Set(days)].sort((a, b) => a - b);
+      const conflictingSchedule = (existingSchedules || []).find((schedule) => {
+        const existingDays = [...new Set(schedule.days || [])];
+        return schedule.enabled !== false &&
+          (schedule.time || '').slice(0, 5) === formattedTime &&
+          existingDays.some((day) => requestedDays.includes(day));
+      });
 
-      if (dupSched) {
+      if (conflictingSchedule) {
         const timeDisplay = `${parsedTime.hour % 12 || 12}:${String(parsedTime.minute).padStart(2, '0')} ${parsedTime.hour >= 12 ? 'PM' : 'AM'}`;
-        const dupMsg = `${matchedDevice.name} already has a schedule to turn ${isScheduleOn ? 'on' : 'off'} at ${timeDisplay}. Duplicate not created.`;
-        safeToast(dupMsg);
-        speak(`Duplicate schedule already exists for ${matchedDevice.name}`);
-       setAgentState('idle');
-       return;
+        const sameAction = Boolean(conflictingSchedule.action) === isScheduleOn;
+        const conflictMessage = sameAction
+          ? `${matchedDevice.name} already has a schedule at ${timeDisplay} on an overlapping day. Duplicate not created.`
+          : `Conflict: ${matchedDevice.name} already has an opposite-action schedule at ${timeDisplay} on an overlapping day.`;
+        safeToast(conflictMessage);
+        speak(conflictMessage);
+        setAgentState('idle');
+        return;
       }
 
       const { error } = await supabase.from('schedules').insert({
@@ -736,6 +1027,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       if (!matchedDevice) {
         safeToast(`Device "${deviceQuery}" not found`);
         speak(`Device ${deviceQuery} not found`);
+        setAgentState('idle');
         return;
       }
 
@@ -754,6 +1046,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           speak(`Schedules deleted for ${matchedDevice.name}`);
         }
       }
+      setAgentState('idle');
       return;
     }
 
@@ -772,6 +1065,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       if (!matchedDevice) {
         safeToast(`Device "${deviceQuery}" not found`);
         speak(`Device ${deviceQuery} not found`);
+        setAgentState('idle');
         return;
       }
 
@@ -782,36 +1076,34 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         safeToast(`Schedules ${enableVal ? 'enabled' : 'disabled'} for ${matchedDevice.name}`);
         speak(`Schedules ${enableVal ? 'enabled' : 'disabled'} for ${matchedDevice.name}`);
       }
+      setAgentState('idle');
       return;
     }
 
     // Note: Local hardcoded parsing for turning specific devices/boards/presets on and off has been removed.
     // We now rely entirely on the AI API for these actions.
 
-    // 8. Fallback: If no activation/deactivation prefix, check direct preset name match (assumes activation)
-    const matchedPresetDirect = presetsRef.current.find(p =>
-      normalizeText(p.name) === text || fuzzyScore(text, normalizeText(p.name)) >= 0.8
+    if (commandDevices.length === 0) {
+      safeToast('No devices found. Please add a board first.');
+      speak('No devices found. Please add a board first.');
+      setAgentState('idle');
+      return;
+    }
+
+    // 8. Fallback: a direct preset name still goes through the same
+    // local+cloud executor as an AI-classified preset action.
+    const matchedPresetDirect = presetsRef.current.find((preset) =>
+      normalizeText(preset.name) === text || fuzzyScore(text, normalizeText(preset.name)) >= 0.8
     );
     if (matchedPresetDirect) {
-      if (applyPreset) {
-        await applyPreset(matchedPresetDirect);
-      } else {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          setAgentState('idle');
-          return;
-        }
-        await Promise.all(
-          matchedPresetDirect.actions.map(action =>
-            supabase.from('devices')
-              .update({ is_on: action.is_on, last_changed: new Date().toISOString() })
-              .eq('user_id', user.id)
-              .eq('id', action.device_id)
-          )
-        );
-      }
-      safeToast(`Activated preset: ${matchedPresetDirect.name}`);
-      speak(`Activated preset ${matchedPresetDirect.name}`);
+      await executeLLMAction({
+        actionType: 'APPLY_PRESET',
+        presetId: matchedPresetDirect.id,
+        presetName: matchedPresetDirect.name,
+        deactivate: /\b(?:deactivate|deactive|disable|off)\b/.test(text),
+        language: selectedLang,
+      }, safeToast);
+      setAgentState('idle');
       return;
     }
 

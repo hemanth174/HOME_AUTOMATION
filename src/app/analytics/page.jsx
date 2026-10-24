@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabase';
 import Loader from '@/components/Loader';
@@ -20,6 +20,7 @@ export default function AnalyticsPage() {
   const [dailyAnalytics, setDailyAnalytics] = useState([]);
   const [weeklyAnalytics, setWeeklyAnalytics] = useState([]);
   const [userSettings, setUserSettings] = useState({ tariff_per_kwh: 8.00, voltage: 230, currency: 'INR' });
+  const fetchInFlightRef = useRef(false);
 
   // Guide and Tour States
   const [showPowerGuide, setShowPowerGuide] = useState(false);
@@ -40,14 +41,19 @@ export default function AnalyticsPage() {
 
   // Fetch devices, boards, and logs from today (memoized for recurring updates)
   const fetchData = useCallback(async (isSilent = false) => {
-    if (!user) return;
+    if (!user || fetchInFlightRef.current) return;
+    fetchInFlightRef.current = true;
     if (!isSilent) setLoading(true);
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
     try {
-      // Trigger database daily rollup aggregation and log pruning trigger
-      await supabase.rpc('summarize_and_prune_old_logs');
+      // Rollup/pruning is a maintenance action, not a live polling query.
+      // Run it on initial/manual refresh only, never on each silent background refresh.
+      if (!isSilent) {
+        const { error: rollupError } = await supabase.rpc('summarize_and_prune_old_logs');
+        if (rollupError) console.warn('Analytics rollup skipped:', rollupError.message);
+      }
 
       const [devicesRes, boardsRes, logsRes, dailyAnalyticsRes, weeklyAnalyticsRes, settingsRes] = await Promise.all([
         supabase.from('devices').select('id, name, is_on, last_changed, board_id, relay_index, feedback_on').eq('user_id', user.id),
@@ -82,6 +88,7 @@ export default function AnalyticsPage() {
     } catch (err) {
       console.error('Failed to load analytics data', err);
     } finally {
+      fetchInFlightRef.current = false;
       if (!isSilent) setLoading(false);
     }
   }, [user]);
@@ -93,12 +100,13 @@ export default function AnalyticsPage() {
     }
   }, [user, fetchData]);
 
-  // Auto-reload every 30 seconds
+  // Background refresh every 2 minutes while visible. The dashboard already
+  // receives device Realtime updates; analytics is a history view, not a 30s poll.
   useEffect(() => {
     if (!user) return;
     const timer = setInterval(() => {
-      fetchData(true); // background silent refresh
-    }, 30000);
+      if (document.visibilityState === 'visible') fetchData(true);
+    }, 120000);
     return () => clearInterval(timer);
   }, [user, fetchData]);
 

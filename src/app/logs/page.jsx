@@ -127,7 +127,34 @@ export default function LogsPage() {
           filter: `user_id=eq.${user.id}`
         },
         (payload) => {
-          setLogs(prev => [payload.new, ...prev].slice(0, 100));
+          setLogs((prev) => [
+            payload.new,
+            ...prev.filter((log) => log.id !== payload.new.id),
+          ].slice(0, 100));
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'activity_logs',
+        },
+        (payload) => {
+          if (payload.old?.id) {
+            setLogs((prev) => prev.filter((log) => log.id !== payload.old.id));
+          } else {
+            // When replica identity omits the deleted row ID, reload the current user's list.
+            void supabase
+              .from('activity_logs')
+              .select('id, created_at, action, device_name, triggered_by, device_id')
+              .eq('user_id', user.id)
+              .order('created_at', { ascending: false })
+              .limit(100)
+              .then(({ data, error }) => {
+                if (!error && data) setLogs(data);
+              });
+          }
         }
       )
       .subscribe();

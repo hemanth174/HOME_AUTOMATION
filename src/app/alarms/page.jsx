@@ -314,8 +314,7 @@ export default function AlarmsPage() {
     const devName = alarm.devices?.name || 'device';
 
     if (text.includes('delete') || text.includes('remove') || text.includes('cancel') || text.includes('trash')) {
-      await deleteAlarm(alarm.id);
-      speak(`Alarm for ${devName} deleted`);
+      if (await deleteAlarm(alarm.id)) speak(`Alarm for ${devName} deleted`);
     } else {
       setToast(`Command not recognized: "${transcript}". Try "delete" or "cancel".`);
       speak(`Command not recognized`);
@@ -455,7 +454,8 @@ export default function AlarmsPage() {
 
     // Duplicate / conflict check (alarm vs alarm)
     const conflicts = alarms.filter(a => {
-      if (a.device_id !== selectedDevice) return false;
+      if (a.device_id !== selectedDevice || a.fired) return false;
+      if (editingAlarm && a.id === editingAlarm.id) return false; // don't conflict with the row being edited
       const aT = new Date(a.trigger_at), nT = new Date(triggerISO);
       return aT.getFullYear() === nT.getFullYear() && aT.getMonth() === nT.getMonth() &&
         aT.getDate() === nT.getDate() && aT.getHours() === nT.getHours() && aT.getMinutes() === nT.getMinutes();
@@ -468,11 +468,12 @@ export default function AlarmsPage() {
     }
 
     // Cross-feature: alarm vs schedule
-    const { data: scs } = await supabase.from('schedules').select('id, time, days, action').eq('user_id', user.id).eq('device_id', selectedDevice).eq('enabled', true);
+    const { data: scs, error: scheduleQueryError } = await supabase.from('schedules').select('id, time, days, action').eq('user_id', user.id).eq('device_id', selectedDevice).eq('enabled', true);
+    if (scheduleQueryError) { setToast('Could not check schedule conflicts. Please retry.'); return; }
     if (scs) {
       const aDate = new Date(triggerISO);
       for (const sc of scs) {
-        if (!sc.days.includes(aDate.getDay())) continue;
+        if (!Array.isArray(sc.days) || !sc.days.includes(aDate.getDay())) continue;
         const [scH, scM] = sc.time.split(':').map(Number);
         if (scH === aDate.getHours() && scM === aDate.getMinutes()) {
           if (sc.action !== alarmAction) { setToast(`Cross-conflict: a schedule already sets this device to Turn ${sc.action ? 'ON' : 'OFF'} at this day/time.`); return; }
@@ -498,13 +499,22 @@ export default function AlarmsPage() {
   };
 
   const deleteAlarm = async (id) => {
-    await supabase.from('alarms').delete().eq('id', id);
+    const { error } = await supabase.from('alarms').delete().eq('id', id).eq('user_id', user.id);
+    if (error) {
+      setToast(`Could not delete alarm: ${error.message}`);
+      return false;
+    }
     setAlarms(prev => prev.filter(a => a.id !== id));
     setToast('Alarm deleted');
+    return true;
   };
 
   const deleteAllAlarms = async () => {
-    await supabase.from('alarms').delete().eq('user_id', user.id);
+    const { error } = await supabase.from('alarms').delete().eq('user_id', user.id);
+    if (error) {
+      setToast(`Could not delete alarms: ${error.message}`);
+      return;
+    }
     setAlarms([]);
     setShowDeleteAllModal(false);
     setToast('All alarms deleted');

@@ -242,20 +242,17 @@ export default function SchedulesPage() {
     const devName = schedule.devices?.name || 'device';
 
     if (text.includes('delete') || text.includes('remove') || text.includes('trash') || text.includes('cancel')) {
-      await deleteSchedule(schedule.id);
-      speak(`Schedule for ${devName} deleted`);
+      if (await deleteSchedule(schedule.id)) speak(`Schedule for ${devName} deleted`);
     } else if (text.includes('disable') || text.includes('turn off') || text.includes('deactivate') || text.includes('deactive')) {
       if (schedule.enabled) {
-        await toggleSchedule(schedule);
-        speak(`Schedule for ${devName} disabled`);
+        if (await toggleSchedule(schedule)) speak(`Schedule for ${devName} disabled`);
       } else {
         setToast(`Schedule for ${devName} is already disabled`);
         speak(`Schedule for ${devName} is already disabled`);
       }
     } else if (text.includes('enable') || text.includes('turn on') || text.includes('activate')) {
       if (!schedule.enabled) {
-        await toggleSchedule(schedule);
-        speak(`Schedule for ${devName} enabled`);
+        if (await toggleSchedule(schedule)) speak(`Schedule for ${devName} enabled`);
       } else {
         setToast(`Schedule for ${devName} is already enabled`);
         speak(`Schedule for ${devName} is already enabled`);
@@ -391,7 +388,7 @@ export default function SchedulesPage() {
     // Check conflicts for each selected device
     for (const deviceId of selectedDevices) {
       const sameDayConflicts = schedules.filter(sc => {
-        if (sc.device_id !== deviceId) return false;
+        if (sc.device_id !== deviceId || !sc.enabled) return false;
         if (editingSchedule && sc.id === editingSchedule.id) return false; // ignore self
         const [scH, scM] = sc.time.split(':').map(Number);
         if (scH !== newH || scM !== newM) return false;
@@ -414,10 +411,12 @@ export default function SchedulesPage() {
 
     // Cross-feature: schedule vs alarm
     for (const deviceId of selectedDevices) {
-      const { data: alarmConflicts } = await supabase.from('alarms').select('id, trigger_at, action').eq('user_id', user.id).eq('device_id', deviceId).eq('fired', false);
+      const { data: alarmConflicts, error: alarmQueryError } = await supabase.from('alarms').select('id, trigger_at, action').eq('user_id', user.id).eq('device_id', deviceId).eq('fired', false);
+      if (alarmQueryError) { setToast('Could not check alarm conflicts. Please retry.'); return; }
       if (alarmConflicts) {
         for (const alarm of alarmConflicts) {
           const ad = new Date(alarm.trigger_at);
+          if (ad.getTime() <= Date.now()) continue;
           if (!sortedDays.includes(ad.getDay())) continue;
           if (ad.getHours() !== newH || ad.getMinutes() !== newM) continue;
           const devName = devices.find(d => d.id === deviceId)?.name || 'A device';
@@ -440,12 +439,16 @@ export default function SchedulesPage() {
 
     if (editingSchedule) {
       if (selectedDevices.length === 1 && selectedDevices[0] === editingSchedule.device_id) {
-         const { error: updateError } = await supabase.from('schedules').update(rows[0]).eq('id', editingSchedule.id);
+         const { error: updateError } = await supabase.from('schedules').update(rows[0]).eq('id', editingSchedule.id).eq('user_id', user.id);
          if (updateError) { setToast(updateError.message); return; }
       } else {
-         await supabase.from('schedules').delete().eq('id', editingSchedule.id);
          const { error: insertError } = await supabase.from('schedules').insert(rows);
          if (insertError) { setToast(insertError.message); return; }
+         const { error: deleteError } = await supabase.from('schedules').delete().eq('id', editingSchedule.id).eq('user_id', user.id);
+         if (deleteError) {
+           setToast('New schedule saved, but the old schedule could not be removed. Review the schedule list.');
+           return;
+         }
       }
       setToast('Schedule updated');
     } else {
@@ -457,17 +460,37 @@ export default function SchedulesPage() {
   };
 
   const toggleSchedule = async (schedule) => {
-    await supabase.from('schedules').update({ enabled: !schedule.enabled }).eq('id', schedule.id);
+    const { error } = await supabase.from('schedules')
+      .update({ enabled: !schedule.enabled })
+      .eq('id', schedule.id)
+      .eq('user_id', user.id);
+    if (error) {
+      setToast(`Could not ${schedule.enabled ? 'disable' : 'enable'} schedule: ${error.message}`);
+      return false;
+    }
+    setSchedules((current) => current.map((item) =>
+      item.id === schedule.id ? { ...item, enabled: !schedule.enabled } : item
+    ));
+    return true;
   };
 
   const deleteSchedule = async (id) => {
-    await supabase.from('schedules').delete().eq('id', id);
+    const { error } = await supabase.from('schedules').delete().eq('id', id).eq('user_id', user.id);
+    if (error) {
+      setToast(`Could not delete schedule: ${error.message}`);
+      return false;
+    }
     setSchedules(prev => prev.filter(s => s.id !== id));
     setToast('Schedule deleted');
+    return true;
   };
 
   const deleteAllSchedules = async () => {
-    await supabase.from('schedules').delete().eq('user_id', user.id);
+    const { error } = await supabase.from('schedules').delete().eq('user_id', user.id);
+    if (error) {
+      setToast(`Could not delete schedules: ${error.message}`);
+      return;
+    }
     setSchedules([]);
     setShowDeleteAllModal(false);
     setToast('All schedules deleted');
