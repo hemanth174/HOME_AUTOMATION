@@ -40,7 +40,7 @@ function validateAction(result, devices, presets, transcript = '', boards = []) 
   }
   const device = devices.find((item) => item.id === result.deviceId);
   if (!device || typeof result.isOn !== 'boolean') return null;
-  if (result.actionType === 'TOGGLE_DEVICE' && !isDeviceExplicitlyIdentified(transcript, device, devices, boards)) return null;
+  if (['TOGGLE_DEVICE', 'CREATE_ALARM', 'CREATE_SCHEDULE'].includes(result.actionType) && !isDeviceExplicitlyIdentified(transcript, device, devices, boards)) return null;
   if (result.actionType === 'CREATE_ALARM' && (!result.triggerAt || Number.isNaN(new Date(result.triggerAt).getTime()) || new Date(result.triggerAt).getTime() <= Date.now())) return null;
   if (result.actionType === 'CREATE_SCHEDULE') {
     if (!/^\d{2}:\d{2}$/.test(result.time || '')) return null;
@@ -88,12 +88,18 @@ function resolveRequestedToggle(transcript, devices, boards = [], language = 'en
   if (!norm || /\b(?:do not|dont|never|should not|shouldnt|would not|wouldnt)\b/.test(norm)) return null;
 
   const hasCommandVerb = /\b(?:turn|switch|power|activate|deactivate)\b/.test(norm);
-  const requestsOn = /\b(?:turn on|switch on|power on|activate|\bon\b)/.test(norm);
-  const requestsOff = /\b(?:turn off|switch off|power off|deactivate|\boff\b)/.test(norm);
-  if (!hasCommandVerb || (!requestsOn && !requestsOff)) return null;
+  if (!hasCommandVerb) return null;
 
   // Leave whole-home commands to the explicit TOGGLE_ALL path.
   if (/\b(?:all|everything|every device|whole house|whole home|entire home)\b/.test(norm)) return null;
+
+  // "on" can be a preposition ("the fan on the second floor"), so state is
+  // detected only in an action phrase, not by the presence of that word alone.
+  const prefixState = norm.match(/\b(?:turn|switch|power)\s+(?:the\s+)?(on|off)\b/);
+  const objectState = norm.match(/\b(?:turn|switch|power)\b(?:\s+\w+){0,6}?\s+(on|off)\b/);
+  const requestsOn = /\bactivate\b/.test(norm) || (prefixState?.[1] === 'on') || (!prefixState && objectState?.[1] === 'on');
+  const requestsOff = /\bdeactivate\b/.test(norm) || (prefixState?.[1] === 'off') || (!prefixState && objectState?.[1] === 'off');
+  if (!requestsOn && !requestsOff) return null;
   if (requestsOn && requestsOff) {
     return unknownToggle('I heard both ON and OFF. Please say one clear action.', language);
   }
@@ -168,6 +174,17 @@ function isDeviceExplicitlyIdentified(transcript, device, devices, boards) {
     device.board_identifier ? `${device.board_identifier} ${device.name}` : '',
   ].filter(Boolean);
   if (aliases.some((alias) => hasPhrase(norm, alias))) return true;
+
+  // Allow a short device alias (e.g. "fan") only when exactly one owned
+  // device has that meaningful name token. Never let common words pick among rooms.
+  const requestedTokens = normalizeCommand(transcript).split(' ').filter((token) =>
+    token.length >= 3 && !['turn', 'switch', 'power', 'activate', 'deactivate', 'please', 'device', 'relay', 'channel'].includes(token)
+  );
+  const tokenCandidates = (devices || []).filter((candidate) => {
+    const deviceTokens = normalizeCommand(candidate.name).split(' ');
+    return requestedTokens.some((token) => deviceTokens.includes(token));
+  });
+  if (tokenCandidates.length === 1 && tokenCandidates[0].id === device.id) return true;
 
   const ordinalMatch = norm.match(/\b(?:device|relay|channel)\s*(\d+)\b/);
   if (!ordinalMatch) return false;
