@@ -234,17 +234,26 @@ function resolveRequestedToggle(transcript, devices, boards = [], language = 'en
 
 function isDeviceExplicitlyIdentified(transcript, device, devices, boards) {
   const norm = normalizeCommand(transcript);
-  const aliases = [
-    device.name,
+  const qualifiedAliases = [
     device.board_name ? `${device.board_name} ${device.name}` : '',
     device.board_identifier ? `${device.board_identifier} ${device.name}` : '',
   ].filter(Boolean);
-  if (aliases.some((alias) => hasPhrase(norm, alias))) return true;
 
-  // Allow a short device alias (e.g. "fan") only when exactly one owned
-  // device has that meaningful name token. Never let common words pick among rooms.
-  const requestedTokens = normalizeCommand(transcript).split(' ').filter((token) =>
-    token.length >= 3 && !['turn', 'switch', 'power', 'activate', 'deactivate', 'please', 'device', 'relay', 'channel'].includes(token)
+  // A room-qualified alias is the strongest disambiguator.
+  if (qualifiedAliases.some((alias) => hasPhrase(norm, alias))) return true;
+
+  // A device name on its own is valid only if it identifies exactly one device.
+  const exactNameMatches = (devices || []).filter((candidate) =>
+    normalizeCommand(candidate.name) === normalizeCommand(device.name) &&
+    hasPhrase(norm, candidate.name)
+  );
+  if (exactNameMatches.length === 1 && exactNameMatches[0].id === device.id) return true;
+
+  // Short aliases are allowed only when a meaningful name token uniquely
+  // identifies the device across the user's devices.
+  const requestedTokens = norm.split(' ').filter((token) =>
+    token.length >= 3 &&
+    !['turn', 'switch', 'power', 'activate', 'deactivate', 'please', 'device', 'relay', 'channel'].includes(token)
   );
   const tokenCandidates = (devices || []).filter((candidate) => {
     const deviceTokens = normalizeCommand(candidate.name).split(' ');
@@ -252,6 +261,7 @@ function isDeviceExplicitlyIdentified(transcript, device, devices, boards) {
   });
   if (tokenCandidates.length === 1 && tokenCandidates[0].id === device.id) return true;
 
+  // Relay ordinals are valid only when the ordinal maps uniquely or the room is explicit.
   const ordinalMatch = norm.match(/\b(?:device|relay|channel)\s*(\d+)\b/);
   if (!ordinalMatch) return false;
   const requestedIndex = Number(ordinalMatch[1]) - 1;
