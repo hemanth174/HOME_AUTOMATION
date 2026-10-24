@@ -48,11 +48,11 @@ export default function ActivityFeed({ logs, deviceRoom }) {
         </div>
       ) : (
         <ul className="flex flex-col max-h-[320px] overflow-y-auto pr-1 -mr-1">
-          {items.map((log) => {
+          {items.map((log, index) => {
             const on = /on/i.test(log.action || '') && !/off/i.test(log.action || '');
             return (
                 <li
-                key={log.id}
+                key={`${log.id || log.created_at || 'activity'}-${index}`}
                 className="flex items-center gap-3 py-2.5 border-b border-(--pg-line) last:border-0"
               >
                 <span

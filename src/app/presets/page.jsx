@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import Toast from '@/components/Toast';
 import Loader from '@/components/Loader';
-import { Edit, LucideEdit2, LucidePower, LucidePowerOff, PowerOffIcon, Trash, SlidersHorizontal } from 'lucide-react';
+import { Cpu, Edit, LucideEdit2, LucidePower, LucidePowerOff, PowerOffIcon, Trash, SlidersHorizontal } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -32,6 +32,17 @@ function PresetDeviceList({ devices, presetActions, onToggleDevice, onToggleActi
   }, [devices, search]);
 
   const groups = useMemo(() => groupByBoard(filtered), [filtered]);
+  const allSelected = filtered.length > 0 && filtered.every(
+    (device) => presetActions[device.id]?.included,
+  );
+
+  const toggleAll = () => {
+    filtered.forEach((device) => {
+      if (Boolean(presetActions[device.id]?.included) !== !allSelected) {
+        onToggleDevice(device.id);
+      }
+    });
+  };
 
   return (
     <div className="flex flex-col gap-2">
@@ -44,17 +55,30 @@ function PresetDeviceList({ devices, presetActions, onToggleDevice, onToggleActi
         className="w-full px-3 py-2 rounded-lg border-[1.5px] border-border bg-input text-text text-xs outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
       />
       {/* Board-grouped scrollable device list */}
-      <div className="max-h-[36vh] overflow-y-auto rounded-lg border border-border bg-input">
+      <div className="overflow-hidden rounded-lg border border-border bg-input">
+       
+        <div className="max-h-[32vh] overflow-y-auto">
         {Object.keys(groups).length === 0 ? (
           <p className="px-4 py-3 text-xs text-text-muted font-semibold">No devices found.</p>
         ) : (
           Object.entries(groups).map(([boardName, devs]) => (
             <div key={boardName}>
               {/* Board header */}
-              <div className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-accent bg-black border-b border-border sticky top-0 z-10">
-                📋 {boardName}
+              <div className="sticky top-0 z-10 flex items-center gap-1.5 border-b border-border dark:bg-[#09090b] px-3 py-1.5 text-[10px] font-black uppercase tracking-widest">
+                <Cpu size={12} strokeWidth={2.5} aria-hidden="true" className="text-white dark:text-black" />
+                <p className="text-white dark:text-black">{boardName}</p>
               </div>
               {/* Devices under this board */}
+               <label className="flex cursor-pointer items-center gap-2 border-b border-border px-3 py-2 text-[11px] font-bold text-text-muted">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            onChange={toggleAll}
+            disabled={!filtered.length}
+            className="accent-accent cursor-pointer"
+          />
+          Select all
+        </label>
               {devs.map(d => (
                 <div
                   key={d.id}
@@ -87,6 +111,7 @@ function PresetDeviceList({ devices, presetActions, onToggleDevice, onToggleActi
             </div>
           ))
         )}
+        </div>
       </div>
     </div>
   );
@@ -483,15 +508,20 @@ export default function PresetsPage() {
           >
             <div className="hidden max-md:block w-12 h-1 bg-border rounded-full mx-auto mb-5 shrink-0" />
 
-            <div className="flex items-center justify-between mb-4">
+            <div className="mb-4 flex items-center justify-between gap-3">
               <h2 className="text-lg font-extrabold text-text">
                 {editingPreset ? `Edit: ${editingPreset.name}` : 'New Preset'}
               </h2>
-              {editingPreset && (
-                <span className="text-[10px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-md bg-accent-bg text-accent">
-                  Editing
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="rounded-md bg-accent-bg px-2 py-1 text-[10px] font-extrabold text-accent">
+                  {Object.values(presetActions).filter((action) => action.included).length} selected
                 </span>
-              )}
+                {editingPreset && (
+                  <span className="rounded-md bg-accent-bg px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest text-accent">
+                    Editing
+                  </span>
+                )}
+              </div>
             </div>
 
             <form onSubmit={savePreset} className="flex flex-col gap-4">

@@ -102,7 +102,13 @@ const findBestDevice = (query, list) => {
  * Parse time string (e.g. "9:30 pm", "8 am", "14:00") into hour and minute.
  */
 const parseTime = (timeStr) => {
-  const match = String(timeStr || '').match(/^\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*$/i);
+  const normalized = String(timeStr || '')
+    .trim()
+    .replace(/\s+(today|tomorrow)$/i, '')
+    .replace(/^(\d{1,2})\.(?=\d{2}\b)/, '$1:')
+    .replace(/^(\d{1,2})\.(?=(?:am|pm)\b)/i, '$1 ')
+    .replace(/^(\d{1,2})\s+(\d{2})(?=\s*(?:am|pm|$))/i, '$1:$2');
+  const match = normalized.match(/^\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*$/i);
   if (!match) return null;
 
   let hour = Number(match[1]);
@@ -121,6 +127,18 @@ const parseTime = (timeStr) => {
   return { hour, minute };
 };
 
+const parseTimeWithDay = (timeStr) => {
+  const value = String(timeStr || '')
+    .trim()
+    .replace(/^(\d{1,2})\.(?=\d{2}\b)/, '$1:')
+    .replace(/^(\d{1,2})\.(?=(?:am|pm)\b)/i, '$1 ')
+    .replace(/^(\d{1,2})\s+(\d{2})(?=\s*(?:am|pm|today|tomorrow|$))/i, '$1:$2');
+  const dayMatch = value.match(/\s+(today|tomorrow)$/i);
+  const day = dayMatch ? dayMatch[1].toLowerCase() : null;
+  const time = parseTime(dayMatch ? value.slice(0, dayMatch.index).trim() : value);
+  return time ? { ...time, day } : null;
+};
+
 // ---------------------------------------------------------------------------
 export default function VoiceControl({ devices: propDevices, boards: propBoards, presets: propPresets, applyPreset, controlDevice, controlAll, onToast }) {
   const router = useRouter();
@@ -128,6 +146,11 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
   const [listening, setListening] = useState(false);
   const [agentState, setAgentState] = useState('idle');
   const agentVisible = useVoiceAgentVisible();
+  const [voicePosition, setVoicePosition] = useState(null);
+  const [voiceDragging, setVoiceDragging] = useState(false);
+  const voiceDragRef = useRef(null);
+  const voiceButtonRef = useRef(null);
+  const voiceDraggedRef = useRef(false);
 
   // If the user hides the agent mid-listen, stop recognition immediately.
   useEffect(() => {
@@ -139,6 +162,64 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       setListening(false);
     }
   }, [agentVisible]);
+
+  useEffect(() => {
+    const moveVoiceAgent = (event) => {
+      const drag = voiceDragRef.current;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+
+      const moved = Math.abs(event.clientX - drag.startX) > 4 ||
+        Math.abs(event.clientY - drag.startY) > 4;
+      if (moved) voiceDraggedRef.current = true;
+      if (!voiceDraggedRef.current) return;
+
+      const left = Math.max(8, Math.min(window.innerWidth - 64, event.clientX - drag.offsetX));
+      const top = Math.max(8, Math.min(window.innerHeight - 64, event.clientY - drag.offsetY));
+      setVoicePosition({ left, top });
+    };
+
+    const stopVoiceDrag = (event) => {
+      if (voiceDragRef.current?.pointerId !== event.pointerId) return;
+      voiceDragRef.current = null;
+      setVoiceDragging(false);
+    };
+
+    window.addEventListener('pointermove', moveVoiceAgent);
+    window.addEventListener('pointerup', stopVoiceDrag);
+    window.addEventListener('pointercancel', stopVoiceDrag);
+    return () => {
+      window.removeEventListener('pointermove', moveVoiceAgent);
+      window.removeEventListener('pointerup', stopVoiceDrag);
+      window.removeEventListener('pointercancel', stopVoiceDrag);
+    };
+  }, []);
+
+  const startVoiceDrag = (event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    const rect = voiceButtonRef.current?.getBoundingClientRect() || event.currentTarget.getBoundingClientRect();
+    voiceDraggedRef.current = false;
+    setVoiceDragging(true);
+    voiceDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const voiceFloatingStyle = voicePosition
+    ? {
+        left: `${Math.max(8, Math.min(
+          (typeof window !== 'undefined' ? window.innerWidth : 360) - 120,
+          voicePosition.left - 20,
+        ))}px`,
+        top: `${Math.max(8, voicePosition.top - 48)}px`,
+        right: 'auto',
+        bottom: 'auto',
+      }
+    : undefined;
 
   // Mutable refs so WS callbacks always see latest data without re-subscribing
   const devicesRef = useRef(propDevices ?? []);
@@ -773,8 +854,9 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     }
 
     // 3. Create Alarm: e.g. "set alarm for fan 2 to turn off at 9:30 pm"
-    const alarmCreateMatch = text.match(/^(?:set|create)\s+alarm\s+for\s+(.+?)\s+(?:to\s+turn\s+(on|off)\s+)?at\s+(.+)$/);
-    if (alarmCreateMatch) {
+    const alarmCreateMatch = text.match(/^(?:set|create)\s+(?:an?\s+)?alarm\s+for\s+(.+?)\s+(?:to\s+turn\s+(on|off)\s+)?at\s+(.+)$/);
+    const alarmWithoutDeviceMatch = text.match(/^(?:set|create)\s+(?:an?\s+)?alarm\s+at\s+(.+)$/);
+    if (alarmCreateMatch || alarmWithoutDeviceMatch) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         setAgentState('idle');
@@ -782,11 +864,21 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         return;
       }
 
-      const deviceQuery = normalizeText(alarmCreateMatch[1]);
-      const actionWord = alarmCreateMatch[2]; // "on" or "off"
-      const timeStr = alarmCreateMatch[3];
+      const deviceQuery = alarmCreateMatch ? normalizeText(alarmCreateMatch[1]) : '';
+      const actionWord = alarmCreateMatch?.[2]; // "on" or "off"
+      const timeStr = alarmCreateMatch ? alarmCreateMatch[3] : alarmWithoutDeviceMatch[1];
 
-      const matchedDevice = findBestDevice(deviceQuery, commandDevices);
+      if (!deviceQuery && commandDevices.length !== 1) {
+        const message = 'Please name the device for this alarm, for example: create an alarm for Device 1 at 1 AM today.';
+        safeToast(message);
+        speak(message);
+        setAgentState('idle');
+        return;
+      }
+
+      const matchedDevice = deviceQuery
+        ? findBestDevice(deviceQuery, commandDevices)
+        : commandDevices[0];
       if (!matchedDevice) {
         safeToast(`Device "${deviceQuery}" not found for alarm`);
         speak(`Device ${deviceQuery} not found`);
@@ -794,7 +886,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         return;
       }
 
-      const parsedTime = parseTime(timeStr);
+       const parsedTime = parseTimeWithDay(timeStr);
       if (!parsedTime) {
         safeToast(`Could not parse time "${timeStr}"`);
         speak(`Could not parse time ${timeStr}`);
@@ -802,14 +894,16 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
        return;
       }
 
-      const now = new Date();
-      const alarmDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parsedTime.hour, parsedTime.minute, 0);
-      if (alarmDate <= now) {
-        alarmDate.setDate(alarmDate.getDate() + 1); // Set for tomorrow
-      }
+       const now = new Date();
+       const alarmDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parsedTime.hour, parsedTime.minute, 0);
+       if (parsedTime.day === 'tomorrow') {
+         alarmDate.setDate(alarmDate.getDate() + 1);
+       } else if (!parsedTime.day && alarmDate <= now) {
+         alarmDate.setDate(alarmDate.getDate() + 1); // Set for tomorrow
+       }
 
       // ── Guard 1: Reject alarms in the past ─────────────────────────────
-      if (alarmDate.getTime() <= Date.now()) {
+       if (alarmDate.getTime() <= Date.now()) {
         const pastMsg = `Cannot set an alarm in the past. "${timeStr}" has already passed. Please say a future time or date.`;
         safeToast(`⚠ ${pastMsg}`);
         speak(`Cannot set alarm in the past`);
@@ -920,7 +1014,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         return;
       }
 
-      const parsedTime = parseTime(timeStr);
+       const parsedTime = parseTimeWithDay(timeStr);
       if (!parsedTime) {
         safeToast(`Could not parse time "${timeStr}"`);
         speak(`Could not parse time ${timeStr}`);
@@ -1270,7 +1364,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
   return (
     <>
       {/* Language Selector Pill */}
-      <div className="fixed bottom-[92px] right-7 max-md:bottom-[148px] max-md:right-6 bg-card/85 backdrop-blur-md px-2 py-1 rounded-full border border-border shadow-[0_4px_16px_rgba(0,0,0,0.3)] z-[200] flex gap-1 items-center select-none font-bold text-[10px] tracking-wider transition-all duration-300">
+      <div onPointerDown={startVoiceDrag} style={voiceFloatingStyle} className={`fixed bottom-[92px] right-7 max-md:bottom-[148px] max-md:right-6 bg-card/85 backdrop-blur-md px-2 py-1 rounded-full border border-border shadow-[0_4px_16px_rgba(0,0,0,0.3)] z-[200] flex gap-1 items-center select-none font-bold text-[10px] tracking-wider touch-none ${voiceDragging ? 'transition-none' : 'transition-all duration-300'}`}>
         <button
           onClick={() => setSelectedLang('en-US')}
           aria-label="Use English"
@@ -1297,7 +1391,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       </div>
 
       {listening && (
-        <div className="fixed bottom-36 max-md:bottom-36 right-7 bg-card/90 backdrop-blur-md px-5 py-3.5 rounded-xl border border-border shadow-[0_8px_32px_rgba(0,0,0,0.5)] shadow-gold-glow z-[200] max-w-[300px] animate-scale-in flex flex-col gap-1.5 select-none">
+        <div onPointerDown={startVoiceDrag} style={voiceFloatingStyle} className={`fixed bottom-36 max-md:bottom-36 right-7 bg-card/90 backdrop-blur-md px-5 py-3.5 rounded-xl border border-border shadow-[0_8px_32px_rgba(0,0,0,0.5)] shadow-gold-glow z-[200] max-w-[300px] animate-scale-in flex flex-col gap-1.5 select-none touch-none ${voiceDragging ? 'transition-none' : 'transition-all duration-300'}`}>
           <strong className="text-sm text-text font-bold flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
             {selectedLang === 'te-IN' ? 'వింటున్నాను...' : selectedLang === 'hi-IN' ? 'सुन रहा हूँ...' : 'Listening...'}
@@ -1312,14 +1406,23 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         </div>
       )}
       {agentState !== 'idle' && agentState !== 'listening' && agentState !== 'error' && (
-        <div className="fixed bottom-36 max-md:bottom-36 right-7 bg-card/90 backdrop-blur-md px-5 py-3 rounded-xl border border-border shadow-lg z-[200] text-sm text-text">
+        <div onPointerDown={startVoiceDrag} style={voiceFloatingStyle} className={`fixed bottom-36 max-md:bottom-36 right-7 bg-card/90 backdrop-blur-md px-5 py-3 rounded-xl border border-border shadow-lg z-[200] text-sm text-text touch-none ${voiceDragging ? 'transition-none' : 'transition-all duration-300'}`}>
           {agentState === 'transcribing' ? 'Transcribing...' : 'Processing command...'}
         </div>
       )}
       <button
         id="voice-control-mic-btn"
-        onClick={toggleListening}
-        className={`fixed bottom-7 right-7 max-md:bottom-20 max-md:right-6 w-14 h-14 rounded-full border-none bg-gradient-to-tr from-accent to-[#e2cc89] text-[var(--btn-text)] cursor-pointer z-[200] shadow-[0_6px_24px_var(--accent-glow)] shadow-gold-glow hover:scale-[1.08] active:scale-100 transition-all duration-300 flex items-center justify-center select-none group ${listening ? 'text-[var(--btn-text)]' : 'voice-agent-idle'}`}
+        ref={voiceButtonRef}
+        onPointerDown={startVoiceDrag}
+        onClick={() => {
+          if (voiceDraggedRef.current) {
+            voiceDraggedRef.current = false;
+            return;
+          }
+          toggleListening();
+        }}
+        style={voicePosition ? { left: `${voicePosition.left}px`, top: `${voicePosition.top}px`, right: 'auto', bottom: 'auto', touchAction: 'none' } : { touchAction: 'none' }}
+        className={`fixed bottom-7 right-7 max-md:bottom-20 max-md:right-6 w-14 h-14 rounded-full border-none bg-gradient-to-tr from-accent to-[#e2cc89] text-[var(--btn-text)] cursor-grab active:cursor-grabbing z-[200] shadow-[0_6px_24px_var(--accent-glow)] shadow-gold-glow flex items-center justify-center select-none group ${listening ? 'text-[var(--btn-text)]' : 'voice-agent-idle'}`}
         title="Voice Control"
       >
         {listening ? (

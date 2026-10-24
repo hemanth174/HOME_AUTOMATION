@@ -1,40 +1,71 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
-import Toast from '@/components/Toast';
-import Loader from '@/components/Loader';
-import { Edit, Trash2, LucidePower, LucidePowerOff, CalendarDays } from 'lucide-react';
-import VoiceControl from '@/components/VoiceControl';
-import { speak } from '@/utils/voice';
-import CardVoiceButton from '@/components/CardVoiceButton';
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { supabase } from "@/lib/supabase";
+import Toast from "@/components/Toast";
+import Loader from "@/components/Loader";
+import {
+  CalendarDays,
+  Check,
+  Cpu,
+  Edit,
+  Trash2,
+  LucidePower,
+  LucidePowerOff,
+} from "lucide-react";
+import VoiceControl from "@/components/VoiceControl";
+import { speak } from "@/utils/voice";
+import CardVoiceButton from "@/components/CardVoiceButton";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const DAY_FULL  = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_FULL = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+const MONTH_NAMES = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
 
 function formatTime(timeStr) {
-  const [h, m] = timeStr.split(':');
+  const [h, m] = timeStr.split(":");
   const hour = parseInt(h, 10);
-  return `${hour % 12 || 12}:${m} ${hour >= 12 ? 'PM' : 'AM'}`;
+  return `${hour % 12 || 12}:${m} ${hour >= 12 ? "PM" : "AM"}`;
 }
 
 function formatDays(daysArr) {
-  if (!daysArr || daysArr.length === 0) return 'No days selected';
-  if (daysArr.length === 7) return 'Every day';
-  const isWeekday = [1,2,3,4,5].every(d => daysArr.includes(d)) && daysArr.length === 5;
-  const isWeekend = [0,6].every(d => daysArr.includes(d)) && daysArr.length === 2;
-  if (isWeekday) return 'Weekdays (Mon – Fri)';
-  if (isWeekend) return 'Weekends (Sat & Sun)';
-  return daysArr.map(d => DAY_NAMES[d]).join(', ');
+  if (!daysArr || daysArr.length === 0) return "No days selected";
+  if (daysArr.length === 7) return "Every day";
+  const isWeekday =
+    [1, 2, 3, 4, 5].every((d) => daysArr.includes(d)) && daysArr.length === 5;
+  const isWeekend =
+    [0, 6].every((d) => daysArr.includes(d)) && daysArr.length === 2;
+  if (isWeekday) return "Weekdays (Mon – Fri)";
+  if (isWeekend) return "Weekends (Sat & Sun)";
+  return daysArr.map((d) => DAY_NAMES[d]).join(", ");
 }
 
 /** Next upcoming date for a schedule given its days + time (local) */
 function getNextOccurrence(daysArr, timeStr) {
   if (!daysArr || daysArr.length === 0) return null;
-  const [h, m] = timeStr.split(':').map(Number);
+  const [h, m] = timeStr.split(":").map(Number);
   const now = new Date();
   for (let offset = 0; offset <= 7; offset++) {
     const candidate = new Date(now);
@@ -49,25 +80,34 @@ function getNextOccurrence(daysArr, timeStr) {
 function formatNextRun(daysArr, timeStr) {
   const next = getNextOccurrence(daysArr, timeStr);
   if (!next) return null;
-  return next.toLocaleString('en-US', {
-    weekday: 'short', day: 'numeric', month: 'short',
-    year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+  return next.toLocaleString("en-US", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
   });
 }
 
 function validateTime(h24) {
-  if (!h24) return { valid: false, error: 'Please select a time.' };
-  const [hStr, mStr] = h24.split(':');
-  const h = parseInt(hStr, 10), m = parseInt(mStr, 10);
+  if (!h24) return { valid: false, error: "Please select a time." };
+  const [hStr, mStr] = h24.split(":");
+  const h = parseInt(hStr, 10),
+    m = parseInt(mStr, 10);
   if (isNaN(h) || isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59)
-    return { valid: false, error: 'Invalid time. Please pick a valid hour and minute.' };
-  return { valid: true, error: '' };
+    return {
+      valid: false,
+      error: "Invalid time. Please pick a valid hour and minute.",
+    };
+  return { valid: true, error: "" };
 }
 
 function groupByBoard(devices) {
   const map = {};
   for (const d of devices) {
-    const bn = d.boards?.name || 'Unknown Board';
+    const bn = d.boards?.name || "Unknown Board";
     if (!map[bn]) map[bn] = [];
     map[bn].push(d);
   }
@@ -82,15 +122,17 @@ function groupByBoard(devices) {
  */
 function TimePicker12h({ value, onChange }) {
   // Parse the current 24h "HH:MM" value into 12h parts
-  const [rawH, rawM] = value ? value.split(':').map(Number) : [8, 0];
-  const ampm = rawH >= 12 ? 'PM' : 'AM';
+  const [rawH, rawM] = value ? value.split(":").map(Number) : [8, 0];
+  const ampm = rawH >= 12 ? "PM" : "AM";
   const h12 = rawH % 12 === 0 ? 12 : rawH % 12;
-  const mm = String(rawM).padStart(2, '0');
+  const mm = String(rawM).padStart(2, "0");
 
   const emit = (newH12, newMm, newAmpm) => {
     let h24 = parseInt(newH12, 10) % 12;
-    if (newAmpm === 'PM') h24 += 12;
-    onChange(`${String(h24).padStart(2, '0')}:${String(newMm).padStart(2, '0')}`);
+    if (newAmpm === "PM") h24 += 12;
+    onChange(
+      `${String(h24).padStart(2, "0")}:${String(newMm).padStart(2, "0")}`,
+    );
   };
 
   const hours = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -101,28 +143,34 @@ function TimePicker12h({ value, onChange }) {
       {/* Hour */}
       <select
         value={h12}
-        onChange={e => emit(e.target.value, mm, ampm)}
+        onChange={(e) => emit(e.target.value, mm, ampm)}
         className="flex-1 px-3 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm font-bold outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)] cursor-pointer"
       >
-        {hours.map(h => (
-          <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+        {hours.map((h) => (
+          <option key={h} value={h}>
+            {String(h).padStart(2, "0")}
+          </option>
         ))}
       </select>
-      <span className="text-text-muted font-extrabold text-lg select-none">:</span>
+      <span className="text-text-muted font-extrabold text-lg select-none">
+        :
+      </span>
       {/* Minute */}
       <select
         value={rawM}
-        onChange={e => emit(h12, e.target.value, ampm)}
+        onChange={(e) => emit(h12, e.target.value, ampm)}
         className="flex-1 px-3 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm font-bold outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)] cursor-pointer"
       >
-        {minutes.map(m => (
-          <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
+        {minutes.map((m) => (
+          <option key={m} value={m}>
+            {String(m).padStart(2, "0")}
+          </option>
         ))}
       </select>
       {/* AM/PM */}
       <select
         value={ampm}
-        onChange={e => emit(h12, mm, e.target.value)}
+        onChange={(e) => emit(h12, mm, e.target.value)}
         className="px-3 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm font-extrabold outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)] cursor-pointer"
       >
         <option value="AM">AM</option>
@@ -135,12 +183,14 @@ function TimePicker12h({ value, onChange }) {
 // ─── Grouped device picker ────────────────────────────────────────────────────
 
 function DevicePicker({ devices, selectedDevices, onSelect }) {
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState("");
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     if (!q) return devices;
     return devices.filter(
-      d => d.name.toLowerCase().includes(q) || (d.boards?.name || '').toLowerCase().includes(q)
+      (d) =>
+        d.name.toLowerCase().includes(q) ||
+        (d.boards?.name || "").toLowerCase().includes(q),
     );
   }, [devices, search]);
   const groups = useMemo(() => groupByBoard(filtered), [filtered]);
@@ -150,51 +200,70 @@ function DevicePicker({ devices, selectedDevices, onSelect }) {
       <input
         type="text"
         value={search}
-        onChange={e => setSearch(e.target.value)}
+        onChange={(e) => setSearch(e.target.value)}
         placeholder="Search device or board…"
         className="w-full px-3 py-2 rounded-lg border-[1.5px] border-border bg-input text-text text-xs outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
       />
       <div className="max-h-[200px] overflow-y-auto rounded-lg border border-border bg-input">
         {Object.keys(groups).length === 0 ? (
-          <p className="px-4 py-3 text-xs text-text-muted font-semibold">No devices found.</p>
+          <p className="px-4 py-3 text-xs text-text-muted font-semibold">
+            No devices found.
+          </p>
         ) : (
           Object.entries(groups).map(([boardName, devs]) => {
-            const allSelected = devs.every(d => selectedDevices.includes(d.id));
+            const allSelected = devs.every((d) =>
+              selectedDevices.includes(d.id),
+            );
             return (
-            <div key={boardName}>
-              <div 
-                className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-accent bg-black border-b border-border sticky top-0 cursor-pointer hover:bg-black/80 flex justify-between items-center transition-all select-none"
-                onClick={() => onSelect(devs.map(d => d.id), !allSelected)}
-                title={allSelected ? "Deselect All in Board" : "Select All in Board"}
-              >
-                <span>📋 {boardName}</span>
-                <span className="text-[9px] opacity-70 hover:opacity-100">{allSelected ? 'Deselect All' : 'Select All'}</span>
+              <div key={boardName}>
+                <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border dark:bg-[#09090b] px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <Cpu size={12} strokeWidth={2.5} aria-hidden="true" />
+                    <span className="truncate">{boardName}</span>
+                  </span>
+                  <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-[9px] tracking-normal dark:text-white/80">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={() =>
+                        onSelect(
+                          devs.map((d) => d.id),
+                          !allSelected,
+                        )
+                      }
+                      className="accent-white cursor-pointer"
+                      aria-label={
+                        allSelected
+                          ? "Deselect all devices in board"
+                          : "Select all devices in board"
+                      }
+                    />
+                    All
+                  </label>
+                </div>
+                {devs.map((d) => {
+                  const isSelected = selectedDevices.includes(d.id);
+                  return (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() => onSelect(d.id)}
+                      className={`w-full text-left px-4 py-2.5 text-xs font-bold border-b border-border last:border-b-0 transition-all cursor-pointer flex gap-3`}
+                    >
+                      <span className="inline-flex min-w-4 items-center ">
+                        {isSelected && (
+                          <Check size={13} strokeWidth={3} aria-hidden="true" />
+                        )}
+                      </span>
+                      {d.name}
+                    </button>
+                  );
+                })}
               </div>
-              {devs.map(d => {
-                const isSelected = selectedDevices.includes(d.id);
-                return (
-                <button
-                  key={d.id}
-                  type="button"
-                  onClick={() => onSelect(d.id)}
-                  className={`w-full text-left px-4 py-2.5 text-xs font-bold border-b border-border last:border-b-0 transition-all cursor-pointer ${
-                    isSelected ? 'bg-accent text-[var(--btn-text)]' : 'text-text hover:bg-accent-bg/50'
-                  }`}
-                >
-                  {isSelected ? '✓ ' : '  '}{d.name}
-                </button>
-                );
-              })}
-            </div>
             );
           })
         )}
       </div>
-      {selectedDevices.length > 0 && (
-        <p className="text-[10px] font-bold text-accent/80">
-          Selected: {selectedDevices.length} device{selectedDevices.length !== 1 ? 's' : ''}
-        </p>
-      )}
     </div>
   );
 }
@@ -208,13 +277,16 @@ export default function SchedulesPage() {
   const [showModal, setShowModal] = useState(false);
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState('');
+  const [toast, setToast] = useState("");
 
   // Modal drag-to-close
   const [modalDragY, setModalDragY] = useState(0);
   const [modalDragging, setModalDragging] = useState(false);
   const [modalStartY, setModalStartY] = useState(0);
-  const handleModalTouchStart = (e) => { setModalStartY(e.touches[0].clientY); setModalDragging(true); };
+  const handleModalTouchStart = (e) => {
+    setModalStartY(e.touches[0].clientY);
+    setModalDragging(true);
+  };
   const handleModalTouchMove = (e) => {
     if (!modalDragging || e.currentTarget.scrollTop > 0) return;
     const delta = e.touches[0].clientY - modalStartY;
@@ -228,37 +300,56 @@ export default function SchedulesPage() {
 
   // Form state — scheduleTime stored as "HH:MM" (24h) internally
   const [selectedDevices, setSelectedDevices] = useState([]);
-  const [scheduleTime, setScheduleTime] = useState('08:00');
+  const [scheduleTime, setScheduleTime] = useState("08:00");
   const [scheduleDays, setScheduleDays] = useState([]);
   const [scheduleAction, setScheduleAction] = useState(true);
   const [timeConfirmed, setTimeConfirmed] = useState(false);
-  const [timeError, setTimeError] = useState('');
+  const [timeError, setTimeError] = useState("");
   const [editingSchedule, setEditingSchedule] = useState(null);
 
   // Speak utility is now imported from @/utils/voice
 
   const handleScheduleCardCommand = async (schedule, transcript) => {
     const text = transcript.toLowerCase().trim();
-    const devName = schedule.devices?.name || 'device';
+    const devName = schedule.devices?.name || "device";
 
-    if (text.includes('delete') || text.includes('remove') || text.includes('trash') || text.includes('cancel')) {
-      if (await deleteSchedule(schedule.id)) speak(`Schedule for ${devName} deleted`);
-    } else if (text.includes('disable') || text.includes('turn off') || text.includes('deactivate') || text.includes('deactive')) {
+    if (
+      text.includes("delete") ||
+      text.includes("remove") ||
+      text.includes("trash") ||
+      text.includes("cancel")
+    ) {
+      if (await deleteSchedule(schedule.id))
+        speak(`Schedule for ${devName} deleted`);
+    } else if (
+      text.includes("disable") ||
+      text.includes("turn off") ||
+      text.includes("deactivate") ||
+      text.includes("deactive")
+    ) {
       if (schedule.enabled) {
-        if (await toggleSchedule(schedule)) speak(`Schedule for ${devName} disabled`);
+        if (await toggleSchedule(schedule))
+          speak(`Schedule for ${devName} disabled`);
       } else {
         setToast(`Schedule for ${devName} is already disabled`);
         speak(`Schedule for ${devName} is already disabled`);
       }
-    } else if (text.includes('enable') || text.includes('turn on') || text.includes('activate')) {
+    } else if (
+      text.includes("enable") ||
+      text.includes("turn on") ||
+      text.includes("activate")
+    ) {
       if (!schedule.enabled) {
-        if (await toggleSchedule(schedule)) speak(`Schedule for ${devName} enabled`);
+        if (await toggleSchedule(schedule))
+          speak(`Schedule for ${devName} enabled`);
       } else {
         setToast(`Schedule for ${devName} is already enabled`);
         speak(`Schedule for ${devName} is already enabled`);
       }
     } else {
-      setToast(`Command not recognized: "${transcript}". Try "disable", "enable", or "delete".`);
+      setToast(
+        `Command not recognized: "${transcript}". Try "disable", "enable", or "delete".`,
+      );
       speak(`Command not recognized`);
     }
   };
@@ -266,8 +357,13 @@ export default function SchedulesPage() {
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { window.location.href = '/login'; return; }
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        window.location.href = "/login";
+        return;
+      }
       setUser(user);
     };
     init();
@@ -280,18 +376,35 @@ export default function SchedulesPage() {
     const fetchData = async () => {
       const startTime = Date.now();
       const [schedulesRes, devicesRes] = await Promise.all([
-        supabase.from('schedules').select('id, time, enabled, days, action, device_id, devices(name, boards(name))').eq('user_id', user.id).order('time'),
-        supabase.from('devices').select('id, name, boards(name, id)').eq('user_id', user.id).order('relay_index'),
+        supabase
+          .from("schedules")
+          .select(
+            "id, time, enabled, days, action, device_id, devices(name, boards(name))",
+          )
+          .eq("user_id", user.id)
+          .order("time"),
+        supabase
+          .from("devices")
+          .select("id, name, boards(name, id)")
+          .eq("user_id", user.id)
+          .order("relay_index"),
       ]);
       if (!active) return;
       if (schedulesRes.data) setSchedules(schedulesRes.data);
       if (devicesRes.data) {
         setDevices(devicesRes.data);
       }
-      setTimeout(() => { if (active) setLoading(false); }, Math.max(0, 500 - (Date.now() - startTime)));
+      setTimeout(
+        () => {
+          if (active) setLoading(false);
+        },
+        Math.max(0, 500 - (Date.now() - startTime)),
+      );
     };
     fetchData();
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [user]);
 
   // ── Realtime ──────────────────────────────────────────────────────────────
@@ -300,20 +413,41 @@ export default function SchedulesPage() {
     let isFirstConnect = true;
 
     const channel = supabase
-      .channel('schedules-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'schedules', filter: `user_id=eq.${user.id}` },
+      .channel("schedules-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "schedules",
+          filter: `user_id=eq.${user.id}`,
+        },
         async () => {
-          const { data } = await supabase.from('schedules').select('id, time, enabled, days, action, device_id, devices(name, boards(name))').eq('user_id', user.id).order('time');
+          const { data } = await supabase
+            .from("schedules")
+            .select(
+              "id, time, enabled, days, action, device_id, devices(name, boards(name))",
+            )
+            .eq("user_id", user.id)
+            .order("time");
           if (data) setSchedules(data);
-        }
+        },
       )
       .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
+        if (status === "SUBSCRIBED") {
           if (isFirstConnect) {
             isFirstConnect = false;
           } else {
-            console.log('Reconnected to Supabase Realtime. Resyncing schedules...');
-            const { data } = await supabase.from('schedules').select('id, time, enabled, days, action, device_id, devices(name, boards(name))').eq('user_id', user.id).order('time');
+            console.log(
+              "Reconnected to Supabase Realtime. Resyncing schedules...",
+            );
+            const { data } = await supabase
+              .from("schedules")
+              .select(
+                "id, time, enabled, days, action, device_id, devices(name, boards(name))",
+              )
+              .eq("user_id", user.id)
+              .order("time");
             if (data) setSchedules(data);
           }
         }
@@ -326,10 +460,10 @@ export default function SchedulesPage() {
   const closeModal = () => {
     setShowModal(false);
     setScheduleDays([]);
-    setScheduleTime('08:00');
+    setScheduleTime("08:00");
     setScheduleAction(true);
     setTimeConfirmed(false);
-    setTimeError('');
+    setTimeError("");
     setEditingSchedule(null);
     setSelectedDevices([]);
   };
@@ -341,7 +475,7 @@ export default function SchedulesPage() {
     setScheduleDays(schedule.days);
     setScheduleAction(schedule.action);
     setTimeConfirmed(true);
-    setTimeError('');
+    setTimeError("");
     setShowModal(true);
   };
 
@@ -353,82 +487,133 @@ export default function SchedulesPage() {
 
   const handleConfirmTime = () => {
     const { valid, error } = validateTime(scheduleTime);
-    if (!valid) { setTimeError(error); return; }
-    setTimeError('');
+    if (!valid) {
+      setTimeError(error);
+      return;
+    }
+    setTimeError("");
     setTimeConfirmed(true);
   };
 
   const toggleDay = (day) => {
-    setScheduleDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
+    setScheduleDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day],
+    );
   };
 
   const toggleDeviceSelection = (idOrIds, forceState) => {
     if (Array.isArray(idOrIds)) {
       if (forceState) {
-        setSelectedDevices(prev => [...new Set([...prev, ...idOrIds])]);
+        setSelectedDevices((prev) => [...new Set([...prev, ...idOrIds])]);
       } else {
-        setSelectedDevices(prev => prev.filter(d => !idOrIds.includes(d)));
+        setSelectedDevices((prev) => prev.filter((d) => !idOrIds.includes(d)));
       }
     } else {
-      setSelectedDevices(prev => prev.includes(idOrIds) ? prev.filter(d => d !== idOrIds) : [...prev, idOrIds]);
+      setSelectedDevices((prev) =>
+        prev.includes(idOrIds)
+          ? prev.filter((d) => d !== idOrIds)
+          : [...prev, idOrIds],
+      );
     }
   };
 
   const addSchedule = async (e) => {
     e.preventDefault();
-    if (selectedDevices.length === 0) { setToast('Please select at least one device'); return; }
-    if (scheduleDays.length === 0) { setToast('Please select at least one day'); return; }
-    if (!timeConfirmed) { setToast('Please press "Confirm" to confirm the time'); return; }
+    if (selectedDevices.length === 0) {
+      setToast("Please select at least one device");
+      return;
+    }
+    if (scheduleDays.length === 0) {
+      setToast("Please select at least one day");
+      return;
+    }
+    if (!timeConfirmed) {
+      setToast('Please press "Confirm" to confirm the time');
+      return;
+    }
     const { valid, error } = validateTime(scheduleTime);
-    if (!valid) { setTimeError(error); return; }
+    if (!valid) {
+      setTimeError(error);
+      return;
+    }
 
-    const [newH, newM] = scheduleTime.split(':').map(Number);
+    const [newH, newM] = scheduleTime.split(":").map(Number);
     const sortedDays = [...scheduleDays].sort();
 
     // Check conflicts for each selected device
     for (const deviceId of selectedDevices) {
-      const sameDayConflicts = schedules.filter(sc => {
+      const sameDayConflicts = schedules.filter((sc) => {
         if (sc.device_id !== deviceId || !sc.enabled) return false;
         if (editingSchedule && sc.id === editingSchedule.id) return false; // ignore self
-        const [scH, scM] = sc.time.split(':').map(Number);
+        const [scH, scM] = sc.time.split(":").map(Number);
         if (scH !== newH || scM !== newM) return false;
-        return sortedDays.some(d => sc.days.includes(d));
+        return sortedDays.some((d) => sc.days.includes(d));
       });
       if (sameDayConflicts.length > 0) {
-        const dup = sameDayConflicts.find(sc => sc.action === scheduleAction);
-        const contra = sameDayConflicts.find(sc => sc.action !== scheduleAction);
-        const devName = devices.find(d => d.id === deviceId)?.name || 'A device';
+        const dup = sameDayConflicts.find((sc) => sc.action === scheduleAction);
+        const contra = sameDayConflicts.find(
+          (sc) => sc.action !== scheduleAction,
+        );
+        const devName =
+          devices.find((d) => d.id === deviceId)?.name || "A device";
         if (dup) {
-          const overlap = sortedDays.filter(d => dup.days.includes(d)).map(d => DAY_NAMES[d]).join(', ');
-          setToast(`Duplicate: ${devName} already has a schedule to Turn ${dup.action ? 'ON' : 'OFF'} at ${formatTime(scheduleTime)} on ${overlap}.`); return;
+          const overlap = sortedDays
+            .filter((d) => dup.days.includes(d))
+            .map((d) => DAY_NAMES[d])
+            .join(", ");
+          setToast(
+            `Duplicate: ${devName} already has a schedule to Turn ${dup.action ? "ON" : "OFF"} at ${formatTime(scheduleTime)} on ${overlap}.`,
+          );
+          return;
         }
         if (contra) {
-          const overlap = sortedDays.filter(d => contra.days.includes(d)).map(d => DAY_NAMES[d]).join(', ');
-          setToast(`Conflict: ${devName} already has a schedule to Turn ${contra.action ? 'ON' : 'OFF'} at ${formatTime(scheduleTime)} on ${overlap}. Delete it first.`); return;
+          const overlap = sortedDays
+            .filter((d) => contra.days.includes(d))
+            .map((d) => DAY_NAMES[d])
+            .join(", ");
+          setToast(
+            `Conflict: ${devName} already has a schedule to Turn ${contra.action ? "ON" : "OFF"} at ${formatTime(scheduleTime)} on ${overlap}. Delete it first.`,
+          );
+          return;
         }
       }
     }
 
     // Cross-feature: schedule vs alarm
     for (const deviceId of selectedDevices) {
-      const { data: alarmConflicts, error: alarmQueryError } = await supabase.from('alarms').select('id, trigger_at, action').eq('user_id', user.id).eq('device_id', deviceId).eq('fired', false);
-      if (alarmQueryError) { setToast('Could not check alarm conflicts. Please retry.'); return; }
+      const { data: alarmConflicts, error: alarmQueryError } = await supabase
+        .from("alarms")
+        .select("id, trigger_at, action")
+        .eq("user_id", user.id)
+        .eq("device_id", deviceId)
+        .eq("fired", false);
+      if (alarmQueryError) {
+        setToast("Could not check alarm conflicts. Please retry.");
+        return;
+      }
       if (alarmConflicts) {
         for (const alarm of alarmConflicts) {
           const ad = new Date(alarm.trigger_at);
           if (ad.getTime() <= Date.now()) continue;
           if (!sortedDays.includes(ad.getDay())) continue;
           if (ad.getHours() !== newH || ad.getMinutes() !== newM) continue;
-          const devName = devices.find(d => d.id === deviceId)?.name || 'A device';
+          const devName =
+            devices.find((d) => d.id === deviceId)?.name || "A device";
           if (alarm.action !== scheduleAction) {
-            setToast(`Cross-conflict: ${devName} has an alarm on ${DAY_NAMES[ad.getDay()]} at ${formatTime(scheduleTime)} that sets it to Turn ${alarm.action ? 'ON' : 'OFF'}.`); return;
+            setToast(
+              `Cross-conflict: ${devName} has an alarm on ${DAY_NAMES[ad.getDay()]} at ${formatTime(scheduleTime)} that sets it to Turn ${alarm.action ? "ON" : "OFF"}.`,
+            );
+            return;
           }
-          setToast(`Duplicate: ${devName} already has an alarm at this exact time/day.`); return;
+          setToast(
+            `Duplicate: ${devName} already has an alarm at this exact time/day.`,
+          );
+          return;
         }
       }
     }
 
-    const rows = selectedDevices.map(deviceId => ({
+    const rows = selectedDevices.map((deviceId) => ({
       user_id: user.id,
       device_id: deviceId,
       action: scheduleAction,
@@ -438,62 +623,102 @@ export default function SchedulesPage() {
     }));
 
     if (editingSchedule) {
-      if (selectedDevices.length === 1 && selectedDevices[0] === editingSchedule.device_id) {
-         const { error: updateError } = await supabase.from('schedules').update(rows[0]).eq('id', editingSchedule.id).eq('user_id', user.id);
-         if (updateError) { setToast(updateError.message); return; }
+      if (
+        selectedDevices.length === 1 &&
+        selectedDevices[0] === editingSchedule.device_id
+      ) {
+        const { error: updateError } = await supabase
+          .from("schedules")
+          .update(rows[0])
+          .eq("id", editingSchedule.id)
+          .eq("user_id", user.id);
+        if (updateError) {
+          setToast(updateError.message);
+          return;
+        }
       } else {
-         const { error: insertError } = await supabase.from('schedules').insert(rows);
-         if (insertError) { setToast(insertError.message); return; }
-         const { error: deleteError } = await supabase.from('schedules').delete().eq('id', editingSchedule.id).eq('user_id', user.id);
-         if (deleteError) {
-           setToast('New schedule saved, but the old schedule could not be removed. Review the schedule list.');
-           return;
-         }
+        const { error: insertError } = await supabase
+          .from("schedules")
+          .insert(rows);
+        if (insertError) {
+          setToast(insertError.message);
+          return;
+        }
+        const { error: deleteError } = await supabase
+          .from("schedules")
+          .delete()
+          .eq("id", editingSchedule.id)
+          .eq("user_id", user.id);
+        if (deleteError) {
+          setToast(
+            "New schedule saved, but the old schedule could not be removed. Review the schedule list.",
+          );
+          return;
+        }
       }
-      setToast('Schedule updated');
+      setToast("Schedule updated");
     } else {
-      const { error: insertError } = await supabase.from('schedules').insert(rows);
-      if (insertError) { setToast(insertError.message); return; }
-      setToast(`Created ${rows.length} schedule${rows.length > 1 ? 's' : ''}`);
+      const { error: insertError } = await supabase
+        .from("schedules")
+        .insert(rows);
+      if (insertError) {
+        setToast(insertError.message);
+        return;
+      }
+      setToast(`Created ${rows.length} schedule${rows.length > 1 ? "s" : ""}`);
     }
     closeModal();
   };
 
   const toggleSchedule = async (schedule) => {
-    const { error } = await supabase.from('schedules')
+    const { error } = await supabase
+      .from("schedules")
       .update({ enabled: !schedule.enabled })
-      .eq('id', schedule.id)
-      .eq('user_id', user.id);
+      .eq("id", schedule.id)
+      .eq("user_id", user.id);
     if (error) {
-      setToast(`Could not ${schedule.enabled ? 'disable' : 'enable'} schedule: ${error.message}`);
+      setToast(
+        `Could not ${schedule.enabled ? "disable" : "enable"} schedule: ${error.message}`,
+      );
       return false;
     }
-    setSchedules((current) => current.map((item) =>
-      item.id === schedule.id ? { ...item, enabled: !schedule.enabled } : item
-    ));
+    setSchedules((current) =>
+      current.map((item) =>
+        item.id === schedule.id
+          ? { ...item, enabled: !schedule.enabled }
+          : item,
+      ),
+    );
     return true;
   };
 
   const deleteSchedule = async (id) => {
-    const { error } = await supabase.from('schedules').delete().eq('id', id).eq('user_id', user.id);
+    const { error } = await supabase
+      .from("schedules")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", user.id);
     if (error) {
       setToast(`Could not delete schedule: ${error.message}`);
       return false;
     }
-    setSchedules(prev => prev.filter(s => s.id !== id));
-    setToast('Schedule deleted');
+    setSchedules((prev) => prev.filter((s) => s.id !== id));
+    setToast("Schedule deleted");
     return true;
   };
 
   const deleteAllSchedules = async () => {
-    const { error } = await supabase.from('schedules').delete().eq('user_id', user.id);
+    const { error } = await supabase
+      .from("schedules")
+      .delete()
+      .eq("user_id", user.id);
     if (error) {
       setToast(`Could not delete schedules: ${error.message}`);
       return;
     }
     setSchedules([]);
     setShowDeleteAllModal(false);
-    setToast('All schedules deleted');
+    setToast("All schedules deleted");
   };
 
   if (loading) return <Loader message="Loading schedules..." />;
@@ -503,7 +728,9 @@ export default function SchedulesPage() {
       <div className="dashboard-container animate-fade-up select-none">
         {/* Header */}
         <div className="flex justify-between items-center mb-5">
-          <h2 className="text-lg font-extrabold text-text tracking-tight">Schedules</h2>
+          <h2 className="text-lg font-extrabold text-text tracking-tight">
+            Schedules
+          </h2>
           <div className="flex gap-2">
             {schedules.length > 0 && (
               <button
@@ -528,9 +755,12 @@ export default function SchedulesPage() {
               <CalendarDays size={24} className="stroke-[2.5px]" />
             </div>
             <div className="flex flex-col gap-1">
-              <h3 className="text-base font-extrabold text-text tracking-tight">No Schedules Created</h3>
+              <h3 className="text-base font-extrabold text-text tracking-tight">
+                No Schedules Created
+              </h3>
               <p className="text-xs text-text-muted font-semibold leading-relaxed px-4">
-                Schedules allow devices to automatically switch ON/OFF on specific days of the week at a set time.
+                Schedules allow devices to automatically switch ON/OFF on
+                specific days of the week at a set time.
               </p>
             </div>
             <button
@@ -547,25 +777,31 @@ export default function SchedulesPage() {
               return (
                 <div
                   key={schedule.id}
-                  className={`relative overflow-hidden rounded-[18px] border border-border bg-card p-[18px] shadow-lg transition-all duration-200 hover:-translate-y-px hover:border-accent/40 hover:shadow-2xl ${!schedule.enabled ? 'opacity-55' : ''}`}
+                  className={`relative overflow-hidden rounded-[18px] border border-border bg-card p-[18px] shadow-lg transition-all duration-200 hover:-translate-y-px hover:border-accent/40 hover:shadow-2xl ${!schedule.enabled ? "opacity-55" : ""}`}
                 >
                   <div className="flex items-start justify-between gap-3  max-md:items-start w-full">
                     <div className="min-w-0 flex-1">
                       {/* Big time */}
-                      <div className="text-2xl font-extrabold text-text tracking-tight">{formatTime(schedule.time)}</div>
+                      <div className="text-2xl font-extrabold text-text tracking-tight">
+                        {formatTime(schedule.time)}
+                      </div>
                       {/* Device + Board */}
                       <div className="text-xs font-bold text-text-muted mt-0.5">
-                        {schedule.devices?.boards?.name || 'Board'} → {schedule.devices?.name || 'Device'}
+                        {schedule.devices?.boards?.name || "Board"} →{" "}
+                        {schedule.devices?.name || "Device"}
                       </div>
                       {/* Action */}
-                      <div className="text-xs font-black text-accent mt-1">Turn {schedule.action ? 'ON' : 'OFF'}</div>
+                      <div className="text-xs font-black text-accent mt-1">
+                        Turn {schedule.action ? "ON" : "OFF"}
+                      </div>
                       {/* Days */}
                       <div className="text-xs font-semibold text-text-muted mt-1">
                         🗓 {formatDays(schedule.days)}
                       </div>
                       {/* Repeat info */}
                       <div className="text-[10px] font-bold text-text-muted/60 mt-0.5 uppercase tracking-wide">
-                        Repeats weekly · {schedule.days.length} day{schedule.days.length !== 1 ? 's' : ''}/week
+                        Repeats weekly · {schedule.days.length} day
+                        {schedule.days.length !== 1 ? "s" : ""}/week
                       </div>
                       {/* Next run */}
                       {schedule.enabled && nextRun && (
@@ -574,21 +810,31 @@ export default function SchedulesPage() {
                         </div>
                       )}
                     </div>
-                    <div className="flex gap-2 max-md:flex-col justify-end items-center max-md:mt-4">
+                    <div className="flex gap-2 max-md:flex-col justify-end items-center">
                       <CardVoiceButton
-                        onCommand={(tr) => handleScheduleCardCommand(schedule, tr)}
+                        onCommand={(tr) =>
+                          handleScheduleCardCommand(schedule, tr)
+                        }
                         onToast={setToast}
                       />
                       <button
                         className={`inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 ${
-                          schedule.enabled 
-                            ? 'border-accent bg-accent text-[var(--btn-text)] shadow-gold-glow'
-                            : 'border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]'
+                          schedule.enabled
+                            ? "border-accent bg-accent text-[var(--btn-text)] shadow-gold-glow"
+                            : "border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]"
                         }`}
                         onClick={() => toggleSchedule(schedule)}
-                        title={schedule.enabled ? 'Disable Schedule' : 'Enable Schedule'}
+                        title={
+                          schedule.enabled
+                            ? "Disable Schedule"
+                            : "Enable Schedule"
+                        }
                       >
-                        {schedule.enabled ? <LucidePower size={16} strokeWidth={2.5} /> : <LucidePowerOff size={16} strokeWidth={2.5} />}
+                        {schedule.enabled ? (
+                          <LucidePower size={16} strokeWidth={2.5} />
+                        ) : (
+                          <LucidePowerOff size={16} strokeWidth={2.5} />
+                        )}
                       </button>
                       <button
                         className="inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-border bg-card text-text-muted transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]"
@@ -606,7 +852,6 @@ export default function SchedulesPage() {
                       </button>
                     </div>
                   </div>
-              
                 </div>
               );
             })}
@@ -616,20 +861,43 @@ export default function SchedulesPage() {
 
       {/* ── Add Schedule Modal ────────────────────────────────────────────────── */}
       {showModal && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md animate-scale-in max-md:items-end max-md:p-0" onClick={closeModal}>
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md animate-scale-in max-md:items-end max-md:p-0"
+          onClick={closeModal}
+        >
           <div
             onTouchStart={handleModalTouchStart}
             onTouchMove={handleModalTouchMove}
             onTouchEnd={handleModalTouchEnd}
-            style={{ transform: `translateY(${modalDragY}px)`, transition: modalDragging ? 'none' : 'transform 0.3s cubic-bezier(0.16,1,0.3,1)' }}
+            style={{
+              transform: `translateY(${modalDragY}px)`,
+              transition: modalDragging
+                ? "none"
+                : "transform 0.3s cubic-bezier(0.16,1,0.3,1)",
+            }}
             className="max-h-[88vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl animate-fade-up max-md:w-full max-md:max-h-[92vh] max-md:rounded-t-[24px] max-md:rounded-b-none max-md:border-t max-md:border-x-0 max-md:border-b-0 max-md:pb-10 max-md:animate-slide-up max-md:shadow-none flex flex-col"
-            onClick={e => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="hidden max-md:block w-12 h-1 bg-border rounded-full mx-auto mb-5 shrink-0" />
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-extrabold text-text">
-                {editingSchedule ? 'Edit Schedule' : 'New Schedule'}
+                {editingSchedule ? "Edit Schedule" : "New Schedule"}
               </h2>
+              <div>
+                {selectedDevices.length > 0 && (
+                  <p className="text-[10px] font-bold text-accent/80">
+                    Selected: {selectedDevices.length} device
+                    {selectedDevices.length !== 1 ? "s" : ""}
+                  </p>
+                )}
+                {scheduleDays.length > 0 && (
+                  <p className="text-[11px] font-bold text-accent">
+                    <span className="border p-0.5 rounded">
+                      {formatDays(scheduleDays)}
+                    </span>
+                  </p>
+                )}
+              </div>
               {editingSchedule && (
                 <span className="text-[10px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-md bg-accent-bg text-accent">
                   Editing
@@ -637,20 +905,36 @@ export default function SchedulesPage() {
               )}
             </div>
             <form onSubmit={addSchedule} className="flex flex-col gap-4">
-
               {/* Device — grouped by board with search */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-extrabold tracking-wide text-text-muted">Device</label>
-                <DevicePicker devices={devices} selectedDevices={selectedDevices} onSelect={toggleDeviceSelection} />
+                <label className="text-xs font-extrabold tracking-wide text-text-muted">
+                  Device
+                </label>
+                <DevicePicker
+                  devices={devices}
+                  selectedDevices={selectedDevices}
+                  onSelect={toggleDeviceSelection}
+                />
               </div>
 
               {/* Time — custom 12h picker */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-extrabold tracking-wide text-text-muted">Time</label>
-                <TimePicker12h value={scheduleTime} onChange={handleTimeChange} />
-                {timeError && <p className="text-[11px] font-bold text-red-500">⚠ {timeError}</p>}
+                <label className="text-xs font-extrabold tracking-wide text-text-muted">
+                  Time
+                </label>
+                <TimePicker12h
+                  value={scheduleTime}
+                  onChange={handleTimeChange}
+                />
+                {timeError && (
+                  <p className="text-[11px] font-bold text-red-500">
+                    ⚠ {timeError}
+                  </p>
+                )}
                 {timeConfirmed && !timeError && (
-                  <p className="text-[11px] font-bold text-green-500">✓ Time set to {formatTime(scheduleTime)}</p>
+                  <p className="text-[11px] font-bold text-green-500">
+                    ✓ Time set to {formatTime(scheduleTime)}
+                  </p>
                 )}
                 {/* Confirm button */}
                 <button
@@ -658,17 +942,19 @@ export default function SchedulesPage() {
                   onClick={handleConfirmTime}
                   className={`self-end px-4 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer border ${
                     timeConfirmed
-                      ? 'bg-green-500/20 border-green-500/40 text-green-500'
-                      : 'bg-accent-bg border-accent/40 text-accent hover:bg-accent hover:text-[var(--btn-text)]'
+                      ? "bg-green-500/20 border-green-500/40 text-green-500"
+                      : "bg-accent-bg border-accent/40 text-accent hover:bg-accent hover:text-[var(--btn-text)]"
                   }`}
                 >
-                  {timeConfirmed ? '✓ Confirmed' : 'Confirm Time'}
+                  {timeConfirmed ? "✓ Confirmed" : "Confirm Time"}
                 </button>
               </div>
 
               {/* Repeat Days */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-extrabold tracking-wide text-text-muted">Repeat Days</label>
+                <label className="text-xs font-extrabold tracking-wide text-text-muted">
+                  Repeat Days
+                </label>
                 <div className="flex flex-wrap gap-2">
                   {DAY_NAMES.map((name, idx) => (
                     <button
@@ -677,8 +963,8 @@ export default function SchedulesPage() {
                       title={DAY_FULL[idx]}
                       className={`grid h-[38px] w-[38px] place-items-center rounded-full border text-xs font-extrabold transition-all cursor-pointer hover:-translate-y-px ${
                         scheduleDays.includes(idx)
-                          ? 'border-accent bg-accent text-[var(--btn-text)] shadow-gold-glow'
-                          : 'border-border bg-input text-text-muted hover:border-accent hover:bg-accent-bg'
+                          ? "border-accent bg-accent text-[var(--btn-text)] shadow-gold-glow"
+                          : "border-border bg-input text-text-muted hover:border-accent hover:bg-accent-bg"
                       }`}
                       onClick={() => toggleDay(idx)}
                     >
@@ -686,18 +972,17 @@ export default function SchedulesPage() {
                     </button>
                   ))}
                 </div>
-                {scheduleDays.length > 0 && (
-                  <p className="text-[11px] font-bold text-accent">{formatDays(scheduleDays)}</p>
-                )}
               </div>
 
               {/* Action */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-extrabold tracking-wide text-text-muted">Action</label>
+                <label className="text-xs font-extrabold tracking-wide text-text-muted">
+                  Action
+                </label>
                 <select
                   className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
                   value={scheduleAction}
-                  onChange={e => setScheduleAction(e.target.value === 'true')}
+                  onChange={(e) => setScheduleAction(e.target.value === "true")}
                 >
                   <option value="true">Turn ON</option>
                   <option value="false">Turn OFF</option>
@@ -705,15 +990,21 @@ export default function SchedulesPage() {
               </div>
 
               <div className="mt-4 flex justify-end gap-2.5">
-                <button type="button" onClick={closeModal} className="inline-flex min-h-[36px] items-center justify-center rounded-lg border border-border bg-card px-4 py-2 text-xs font-semibold text-text transition-all hover:bg-card-alt cursor-pointer">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="inline-flex min-h-[36px] items-center justify-center rounded-lg border border-border bg-card px-4 py-2 text-xs font-semibold text-text transition-all hover:bg-card-alt cursor-pointer"
+                >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={!!timeError || !timeConfirmed || scheduleDays.length === 0}
+                  disabled={
+                    !!timeError || !timeConfirmed || scheduleDays.length === 0
+                  }
                   className="inline-flex min-h-[36px] items-center justify-center rounded-lg bg-accent px-5 py-2 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {editingSchedule ? 'Save Changes' : 'Create Schedule'}
+                  {editingSchedule ? "Save Changes" : "Create Schedule"}
                 </button>
               </div>
             </form>
@@ -723,17 +1014,33 @@ export default function SchedulesPage() {
 
       {/* ── Delete All Confirmation Modal ─────────────────────────────────────── */}
       {showDeleteAllModal && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in" onClick={() => setShowDeleteAllModal(false)}>
-          <div className="bg-card border border-border rounded-[18px] p-6 w-[min(100%-40px,360px)] shadow-2xl flex flex-col gap-4" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-extrabold text-text">Delete All Schedules?</h3>
+        <div
+          className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in"
+          onClick={() => setShowDeleteAllModal(false)}
+        >
+          <div
+            className="bg-card border border-border rounded-[18px] p-6 w-[min(100%-40px,360px)] shadow-2xl flex flex-col gap-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-extrabold text-text">
+              Delete All Schedules?
+            </h3>
             <p className="text-xs text-text-muted font-semibold leading-relaxed">
-              This will permanently delete all <strong className="text-text">{schedules.length}</strong> schedule{schedules.length !== 1 ? 's' : ''}. This action cannot be undone.
+              This will permanently delete all{" "}
+              <strong className="text-text">{schedules.length}</strong> schedule
+              {schedules.length !== 1 ? "s" : ""}. This action cannot be undone.
             </p>
             <div className="flex gap-2.5 justify-end">
-              <button onClick={() => setShowDeleteAllModal(false)} className="inline-flex min-h-[34px] items-center justify-center rounded-lg border border-border bg-card px-4 text-xs font-semibold text-text hover:bg-card-alt cursor-pointer transition-all">
+              <button
+                onClick={() => setShowDeleteAllModal(false)}
+                className="inline-flex min-h-[34px] items-center justify-center rounded-lg border border-border bg-card px-4 text-xs font-semibold text-text hover:bg-card-alt cursor-pointer transition-all"
+              >
                 Cancel
               </button>
-              <button onClick={deleteAllSchedules} className="inline-flex min-h-[34px] items-center justify-center rounded-lg bg-red-500 px-4 text-xs font-extrabold text-white hover:bg-red-600 cursor-pointer transition-all">
+              <button
+                onClick={deleteAllSchedules}
+                className="inline-flex min-h-[34px] items-center justify-center rounded-lg bg-red-500 px-4 text-xs font-extrabold text-white hover:bg-red-600 cursor-pointer transition-all"
+              >
                 Delete All
               </button>
             </div>
@@ -742,7 +1049,7 @@ export default function SchedulesPage() {
       )}
 
       <VoiceControl onToast={setToast} />
-      <Toast message={toast} onClose={() => setToast('')} />
+      <Toast message={toast} onClose={() => setToast("")} />
     </>
   );
 }

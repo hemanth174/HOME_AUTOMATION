@@ -17,7 +17,16 @@ const SECURITY_QUESTIONS = [
   "What was your first school?",
 ];
 
-const getAuthRedirectUrl = () => process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
+const getAuthRedirectUrl = () => {
+  const origin = window.location.origin;
+  const isLocalDevelopment =
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1';
+
+  return isLocalDevelopment
+    ? origin
+    : process.env.NEXT_PUBLIC_SITE_URL || origin;
+};
 
 export default function LoginPage() {
   const [view, setView] = useState('login');

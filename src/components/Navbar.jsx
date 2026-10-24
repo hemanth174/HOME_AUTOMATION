@@ -952,6 +952,7 @@ export default function Navbar() {
     { href: "/boards", label: "Boards", icon: Cpu },
     { href: "/schedules", label: "Schedules", icon: CalendarDays },
     { href: "/alarms", label: "Alarms", icon: AlarmClock },
+    { href: "/settings", label: "Settings", icon: Settings },
     { href: "/analytics", label: "Analytics", icon: TrendingUp },
     { href: "/logs", label: "Logs", icon: History },
     ...(isAdminEmail(user?.email)

@@ -937,7 +937,6 @@ export default function Dashboard() {
                         id="device-carousel"
                         ref={deviceCarouselRef}
                         onScroll={rememberCarouselIndex}
-                        scrollEventThrottle="100"
                          className={`board-card-selector ${deviceView === "carousel" ? "flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth overscroll-x-contain pb-1" : "grid sm:grid-cols-2 gap-2.5"}`}
                         aria-label="Local devices carousel"
                       >

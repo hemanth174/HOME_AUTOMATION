@@ -135,7 +135,7 @@ export default function LandingPage() {
             onClick={() => setMobileNavOpen((v) => !v)}
             aria-label={mobileNavOpen ? 'Close menu' : 'Open menu'}
             aria-expanded={mobileNavOpen}
-            className="md:hidden w-11 h-11 -ml-1 rounded-lg border border-lp-outline-variant bg-lp-surface-low/60 flex items-center justify-center text-white active:scale-95 cursor-pointer shrink-0"
+            className="lg:hidden w-11 h-11 -ml-1 rounded-lg border border-lp-outline-variant bg-lp-surface-low/60 flex items-center justify-center text-white active:scale-95 cursor-pointer shrink-0"
           >
             <span className="material-symbols-outlined text-xl">{mobileNavOpen ? 'close' : 'menu'}</span>
           </button>
@@ -143,7 +143,7 @@ export default function LandingPage() {
             <img src="/vikatech-logo.png" alt="VikaTech" className="h-full w-full object-contain" />
           </div>
         </div>
-        <nav className="hidden md:flex gap-8 font-label-caps text-[12px] tracking-tight items-center">
+        <nav className="hidden lg:flex gap-3 xl:gap-8 font-label-caps text-[10px] xl:text-[12px] tracking-tight items-center">
           <button onClick={() => handleScroll('top')} className={navLinkClass('home')}>
             Home
           </button>
@@ -196,7 +196,7 @@ export default function LandingPage() {
 
       {/* Mobile nav drawer — mobile only, desktop untouched */}
       {mobileNavOpen && (
-        <div className="md:hidden fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="Site navigation">
+        <div className="lg:hidden fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="Site navigation">
           <div
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             onClick={() => setMobileNavOpen(false)}
@@ -232,7 +232,7 @@ export default function LandingPage() {
       )}
 
       {/* Mobile quick section chips — horizontal scroll, mobile only */}
-      <div className="md:hidden fixed top-[64px] left-0 right-0 z-30 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant/60">
+      <div className="lg:hidden fixed top-[64px] left-0 right-0 z-30 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant/60">
         <div className="flex gap-2 overflow-x-auto px-3 py-2 scrollbar-none" style={{ scrollbarWidth: 'none' }}>
           {NAV_ITEMS.map((item) => (
             <button
