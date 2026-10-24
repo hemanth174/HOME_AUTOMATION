@@ -42,11 +42,14 @@ function validateAction(result, devices, presets, transcript = '', boards = []) 
   if (result.actionType === 'APPLY_PRESET') {
     const preset = presets.find((item) => item.id === result.presetId);
     if (!preset || typeof result.deactivate !== 'boolean') return null;
+    if (!hasPhrase(normalizeCommand(transcript), preset.name)) return null;
     return { ...result, presetId: preset.id, presetName: preset.name };
   }
   const device = devices.find((item) => item.id === result.deviceId);
   if (!device || typeof result.isOn !== 'boolean') return null;
   if (['TOGGLE_DEVICE', 'CREATE_ALARM', 'CREATE_SCHEDULE'].includes(result.actionType) && !isDeviceExplicitlyIdentified(transcript, device, devices, boards)) return null;
+  const requestedState = getExplicitStateIntent(transcript);
+  if (requestedState.conflict || (requestedState.recognized && requestedState.state !== result.isOn)) return null;
   if (result.actionType === 'CREATE_ALARM' && (!result.triggerAt || Number.isNaN(new Date(result.triggerAt).getTime()) || new Date(result.triggerAt).getTime() <= Date.now())) return null;
   if (result.actionType === 'CREATE_SCHEDULE') {
     if (!/^\d{2}:\d{2}$/.test(result.time || '')) return null;
@@ -68,6 +71,11 @@ const NUMBER_WORDS = {
 function normalizeCommand(value) {
   return String(value || '')
     .toLowerCase()
+    // Preserve negation before stripping punctuation; otherwise "don't" becomes "don t".
+    .replace(/\bdon't\b/g, ' dont ')
+    .replace(/\bshouldn't\b/g, ' shouldnt ')
+    .replace(/\bwouldn't\b/g, ' wouldnt ')
+    .replace(/\bcan't\b/g, ' cannot ')
     .replace(/[^a-z0-9 ]/g, ' ')
     .replace(/\b(?:the|a|an|please|hey|okay|ok)\b/g, ' ')
     .replace(/\s+/g, ' ')
@@ -95,6 +103,10 @@ function hasExplicitAllIntent(transcript) {
 function getExplicitStateIntent(transcript) {
   const raw = String(transcript || '').toLowerCase();
   const normalized = normalizeCommand(raw);
+  const negated = /\b(?:do not|dont|never|should not|shouldnt|would not|wouldnt|cannot)\b/.test(normalized) ||
+    ['नहीं', 'मत ', 'వద్దు', 'చేయొద్దు', 'చేయవద్దు'].some((term) => raw.includes(term));
+  if (negated) return { recognized: false, conflict: true, state: null };
+
   const on = /\bactivate\b/.test(normalized) ||
     /\b(?:turn|switch|power)\s+(?:the\s+)?on\b/.test(normalized) ||
     /\b(?:turn|switch|power)\b(?:\s+\w+){0,6}?\s+on\b/.test(normalized) ||
