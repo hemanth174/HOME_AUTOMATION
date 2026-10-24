@@ -88,7 +88,7 @@ function hasPhrase(text, phrase) {
 function hasExplicitAllIntent(transcript) {
   const raw = String(transcript || '').toLowerCase();
   const normalized = normalizeCommand(raw);
-  return /\b(?:all|everything|every device|whole house|whole home|entire home)\b/.test(normalized) ||
+  return /\b(?:all|everything|every device|whole house|whole home|entire home|sab|sare|saare)\b/.test(normalized) ||
     ['सभी', 'सब', 'सारे', 'सभी उपकरण', 'అన్ని', 'అంతా', 'మొత్తం'].some((term) => raw.includes(term));
 }
 
@@ -99,13 +99,15 @@ function getExplicitStateIntent(transcript) {
     /\b(?:turn|switch|power)\s+(?:the\s+)?on\b/.test(normalized) ||
     /\b(?:turn|switch|power)\b(?:\s+\w+){0,6}?\s+on\b/.test(normalized) ||
     /\b(?:all|everything|every device|whole house|whole home|entire home)\s+on\b/.test(normalized) ||
-    /\bon\s+(?:all|everything|every device)\b/.test(normalized) ||
+    /\bon\s+(?:all|everything|every device|sab|sare|saare)\b/.test(normalized) ||
+    /\b(?:sab|sare|saare)\s+on\b/.test(normalized) ||
     ['चालू', 'जलाओ', 'जला', 'ஆன்', 'ఆన్', 'వెలిగించు'].some((term) => raw.includes(term));
   const off = /\bdeactivate\b/.test(normalized) ||
     /\b(?:turn|switch|power)\s+(?:the\s+)?off\b/.test(normalized) ||
     /\b(?:turn|switch|power)\b(?:\s+\w+){0,6}?\s+off\b/.test(normalized) ||
     /\b(?:all|everything|every device|whole house|whole home|entire home)\s+off\b/.test(normalized) ||
-    /\boff\s+(?:all|everything|every device)\b/.test(normalized) ||
+    /\boff\s+(?:all|everything|every device|sab|sare|saare)\b/.test(normalized) ||
+    /\b(?:sab|sare|saare)\s+(?:off|bandh)\b/.test(normalized) ||
     ['बंद', 'बुझा', 'ஆஃப்', 'ఆఫ్', 'ఆపేయి', 'ఆపివేయి'].some((term) => raw.includes(term));
   return { recognized: on || off, conflict: on && off, state: on === off ? null : on };
 }
@@ -305,9 +307,10 @@ function fallbackParseCommand(transcript, devices = [], presets = [], requestedL
     return { actionType: 'ANSWER', message: local('I can control devices, presets, alarms, schedules, and explain your smart home.', 'मैं डिवाइस, प्रीसेट, अलार्म और शेड्यूल नियंत्रित कर सकती हूँ।', 'నేను పరికరాలు, ప్రీసెట్లు, అలారాలు మరియు షెడ్యూళ్లను నియంత్రించగలను.'), language };
   }
 
-  // 1. Toggle All
-  if (norm.includes('all on') || norm.includes('turn on all') || norm.includes('all off') || norm.includes('turn off all') || norm.includes('sab on') || norm.includes('sab bandh') || norm.includes('सभी') || norm.includes('सब') || norm.includes('सारे')) {
-    const targetState = !isOff;
+  // 1. Toggle All. The user must clearly name the whole-home scope and state.
+  const explicitAllState = getExplicitStateIntent(transcript);
+  if (hasExplicitAllIntent(transcript) && explicitAllState.recognized && !explicitAllState.conflict) {
+    const targetState = explicitAllState.state;
     return {
       actionType: 'TOGGLE_ALL',
       isOn: targetState,
@@ -420,9 +423,19 @@ export async function POST(request) {
       /^(?:delete|clear|remove|erase)\s+(?:all|every)\s+schedules?$/.test(normalizedTranscript) ||
       isSingleMaintenanceCommand;
 
-    // Keep schedule/alarm creation available through the client's deterministic
-    // parser when OpenRouter is not configured; don't misreport "set alarm"
-    // as merely navigation to the alarms page.
+    // Keep English alarm/schedule creation and maintenance on deterministic,
+    // error-aware client handlers when a model might otherwise answer with navigation.
+    const isDeterministicMaintenanceCommand =
+      /^(?:delete|clear|remove|erase)\s+(?:all|every)\s+alarms?$/.test(normalizedTranscript) ||
+      /^(?:delete|clear|remove|erase)\s+(?:all|every)\s+schedules?$/.test(normalizedTranscript) ||
+      isSingleMaintenanceCommand;
+    if (isDeterministicMaintenanceCommand) {
+      return NextResponse.json(
+        { error: 'Using the deterministic voice maintenance handler.' },
+        { status: 503, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
     if (!apiKey || apiKey.trim() === '') {
       if (isClientFallbackCommand) {
         return NextResponse.json(
@@ -511,6 +524,12 @@ Return EXACTLY ONE of these JSON formats:
         const extracted = extractJsonFromText(rawContent);
         const validated = validateAction(extracted, deviceList, presetList, transcript, boardList);
         if (validated) {
+          if (isAlarmCreation && validated.actionType !== 'CREATE_ALARM') {
+            return NextResponse.json({ error: 'Using local alarm parser.' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
+          }
+          if (isScheduleCreation && validated.actionType !== 'CREATE_SCHEDULE') {
+            return NextResponse.json({ error: 'Using local schedule parser.' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
+          }
           return NextResponse.json(validated, { headers: { 'Cache-Control': 'no-store' } });
         }
       }
