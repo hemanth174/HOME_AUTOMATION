@@ -8,6 +8,19 @@ const ACTION_TYPES = new Set([
 ]);
 const ALLOWED_REDIRECTS = new Set(['/faq', '/terms', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/boards', '/presets', '/']);
 
+function isVoiceAgentEnabledForRequest(request) {
+  const configured = process.env.NEXT_PUBLIC_VOICE_AGENT_ENABLED;
+  if (configured === 'true') return true;
+  if (configured === 'false') return false;
+
+  const hostname = new URL(request.url).hostname;
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' ||
+    hostname.endsWith('.local') ||
+    /^10\./.test(hostname) ||
+    /^192\.168\./.test(hostname) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
+}
+
 function getAuthenticatedClient(request) {
   const token = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -396,6 +409,12 @@ function fallbackParseCommand(transcript, devices = [], presets = [], requestedL
 
 export async function POST(request) {
   try {
+    if (!isVoiceAgentEnabledForRequest(request)) {
+      return NextResponse.json(
+        { error: 'Voice agent is disabled for this deployment.' },
+        { status: 503, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
     const authClient = getAuthenticatedClient(request);
     if (!authClient) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     const { data: { user }, error: authError } = await authClient.auth.getUser();

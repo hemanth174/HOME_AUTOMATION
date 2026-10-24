@@ -1,4 +1,6 @@
-const CACHE_NAME = 'smart-home-offline-v5';
+// v6 removes entries created when an RSC response was incorrectly cached as a
+// page shell. Keep this versioned so deployed clients delete the bad cache.
+const CACHE_NAME = 'smart-home-offline-v6';
 
 // These are app routes, not ESP32 endpoints. Cache their app shells while the
 // device has internet so the installed VikaTech PWA can boot without it later.
@@ -32,8 +34,15 @@ function canonicalRequest(url) {
   });
 }
 
-async function cacheResponse(cache, request, response) {
+function isRscRequest(request, url) {
+  return request.headers.get('RSC') === '1' ||
+    request.headers.has('Next-Router-State-Tree') ||
+    url.searchParams.has('_rsc');
+}
+
+async function cacheResponse(cache, request, response, { htmlOnly = false } = {}) {
   if (!response || !response.ok || (response.type !== 'basic' && response.type !== 'default')) return;
+  if (htmlOnly && !response.headers.get('content-type')?.toLowerCase().startsWith('text/html')) return;
   await cache.put(request, response.clone());
 }
 
@@ -44,7 +53,7 @@ async function precacheRoute(cache, path) {
     const url = new URL(path, self.location.origin);
     const response = await fetch(new Request(url.href, { cache: 'reload', credentials: 'same-origin' }));
     if (!response.ok || (response.type !== 'basic' && response.type !== 'default')) return;
-    await cacheResponse(cache, canonicalRequest(url), response);
+    await cacheResponse(cache, canonicalRequest(url), response, { htmlOnly: true });
 
     const html = await response.clone().text();
     const assetPaths = new Set();
@@ -134,6 +143,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // RSC responses are internal Next.js navigation data, not documents. Never
+  // cache them under the route URL or they can be replayed as a blank/text page
+  // when the phone switches to the ESP32 SoftAP.
+  if (isRscRequest(request, url)) return;
+
   // Hashed Next.js assets are immutable; prefer the cache once downloaded.
   if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith((async () => {
@@ -162,7 +176,7 @@ self.addEventListener('fetch', (event) => {
       try {
         const response = await fetch(request);
         if (response.ok && (response.type === 'basic' || response.type === 'default')) {
-          await cacheResponse(cache, canonicalRequest(url), response);
+          await cacheResponse(cache, canonicalRequest(url), response, { htmlOnly: true });
         }
         return response;
       } catch {
@@ -188,7 +202,7 @@ self.addEventListener('fetch', (event) => {
       try {
         const response = await fetch(request);
         if (response.ok && (response.type === 'basic' || response.type === 'default')) {
-          await cacheResponse(cache, canonicalRequest(url), response);
+          await cacheResponse(cache, canonicalRequest(url), response, { htmlOnly: true });
         }
         return response;
       } catch {

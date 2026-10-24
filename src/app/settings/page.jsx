@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Mic, SlidersHorizontal, Zap } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import {
+  isVoiceAgentAvailable,
   isVoiceAgentVisible,
   setVoiceAgentVisible,
 } from "@/lib/agentVisibility";
@@ -17,6 +18,7 @@ export default function SettingsPage() {
   const [voltage, setVoltage] = useState("230");
   const [currency, setCurrency] = useState("INR");
   const [agentVisible, setAgentVisible] = useState(true);
+  const [agentAvailable, setAgentAvailable] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
 
@@ -44,7 +46,8 @@ export default function SettingsPage() {
         setVoltage(String(data.voltage));
         setCurrency(data.currency || "INR");
       }
-      setAgentVisible(isVoiceAgentVisible());
+       setAgentAvailable(isVoiceAgentAvailable());
+       setAgentVisible(isVoiceAgentVisible());
       setLoading(false);
     };
     loadSettings();
@@ -198,23 +201,26 @@ export default function SettingsPage() {
                 Voice assistant button
               </p>
               <p className="text-[11px] font-semibold text-text-muted mt-0.5 leading-relaxed">
-                {agentVisible
-                  ? "Visible — floating mic and schedule/alarm voice buttons are shown."
-                  : "Hidden — all voice controls are removed from every page."}
+                {!agentAvailable
+                  ? "Disabled on the deployed site. An administrator must enable it for this deployment."
+                  : agentVisible
+                   ? "Visible — floating mic and schedule/alarm voice buttons are shown."
+                   : "Hidden — all voice controls are removed from every page."}
               </p>
             </div>
             <button
               type="button"
               role="switch"
-              aria-checked={agentVisible}
+              aria-checked={agentAvailable && agentVisible}
               aria-label="Show voice agent"
+              disabled={!agentAvailable}
               onClick={() => {
                 const next = !agentVisible;
                 setAgentVisible(next);
                 setVoiceAgentVisible(next);
                 setToast(next ? "Voice agent shown." : "Voice agent hidden.");
               }}
-              className={`relative h-8 w-14 shrink-0 rounded-full border transition-colors cursor-pointer ${agentVisible ? "bg-(--pg-control-on) border-(--pg-control-on)" : "bg-toggle-track border-toggle-track"}`}
+              className={`relative h-8 w-14 shrink-0 rounded-full border transition-colors ${agentAvailable ? "cursor-pointer" : "cursor-not-allowed opacity-50"} ${agentVisible ? "bg-(--pg-control-on) border-(--pg-control-on)" : "bg-toggle-track border-toggle-track"}`}
             >
               <span
                 className={`absolute top-1/2 -translate-y-1/2 h-6 w-6 rounded-full bg-white shadow transition-all ${agentVisible ? "left-[calc(100%-1.75rem)]" : "left-1"}`}
