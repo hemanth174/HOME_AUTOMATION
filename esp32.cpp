@@ -51,7 +51,9 @@ IPAddress AP_SUBNET(255, 255, 255, 0);
 //  VARIABLES & STATE
 // ============================================================
 String boardUUID = "";
+String boardUserUUID = "";
 String deviceUUIDs[NUM_DEVICES] = {"", "", "", ""};
+String deviceNames[NUM_DEVICES] = {"Device 1", "Device 2", "Device 3", "Device 4"};
 bool isRelayOn[NUM_DEVICES] = {false, false, false, false};
 
 // Switch Input State Tracking (Debounced)
@@ -137,7 +139,8 @@ unsigned long leaderUptimeMillis = 0;
 void setRelay(int index, bool on, bool saveToNVS = true);
 bool updateDeviceInDB(int index, bool state);
 bool updateFeedbackInDB(int index, bool feedback);
-void markAlarmFiredInDB(String alarmId);
+bool markAlarmFiredInDB(String alarmId);
+bool logActivityInDB(int index, bool state, const String& triggeredBy);
 void pollDatabase();
 void pollAlarms();
 void sendHeartbeat();
@@ -1442,7 +1445,7 @@ bool resolveBoardAndDevices() {
   HTTPClient http;
 
   // 1. Find Board UUID
-  http.begin(String(SUPABASE_BASE) + "/boards?board_identifier=eq." + BOARD_IDENTIFIER + "&select=id");
+  http.begin(String(SUPABASE_BASE) + "/boards?board_identifier=eq." + BOARD_IDENTIFIER + "&select=id,user_id");
   configureHttp(http);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
@@ -1451,6 +1454,7 @@ bool resolveBoardAndDevices() {
     DynamicJsonDocument doc(512); deserializeJson(doc, http.getString());
     if (doc.size() > 0) {
       boardUUID = doc[0]["id"].as<String>();
+      boardUserUUID = doc[0]["user_id"].as<String>();
       Serial.println("  -> Found Board UUID: " + boardUUID);
     }
   }
@@ -1459,7 +1463,7 @@ bool resolveBoardAndDevices() {
   // 2. Find ALL Device UUIDs for this board
   bool foundAny = false;
   if (boardUUID != "") {
-    http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=id,relay_index");
+    http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=id,relay_index,name");
     configureHttp(http);
     http.addHeader("apikey", SUPABASE_SERVICE_KEY);
     http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
@@ -1470,6 +1474,8 @@ bool resolveBoardAndDevices() {
         int rIndex = doc[i]["relay_index"];
         if (rIndex >= 0 && rIndex < NUM_DEVICES) {
           deviceUUIDs[rIndex] = doc[i]["id"].as<String>();
+          String resolvedName = doc[i]["name"].as<String>();
+          deviceNames[rIndex] = resolvedName.length() ? resolvedName : "Device " + String(rIndex + 1);
           Serial.printf("  -> Linked Device [%d]\n", rIndex);
           foundAny = true;
         }
@@ -1565,17 +1571,58 @@ void pollAlarms() {
   http.end();
 }
 
-void markAlarmFiredInDB(String alarmId) {
-  if (!isCloudConfigured() || alarmId.length() == 0) return;
+bool markAlarmFiredInDB(String alarmId) {
+  if (!isCloudConfigured() || alarmId.length() == 0) return false;
+
   HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/alarms?id=eq." + alarmId);
+  http.begin(String(SUPABASE_BASE) + "/alarms?id=eq." + alarmId + "&fired=eq.false&select=id");
   configureHttp(http);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");
-  http.PATCH("{\"fired\":true}");
+  http.addHeader("Prefer", "return=representation");
+
+  int code = http.PATCH("{\"fired\":true}");
+  String responseBody = code == 200 ? http.getString() : "";
   http.end();
-  Serial.println("Alarm marked as fired in Supabase.");
+
+  DynamicJsonDocument doc(256);
+  DeserializationError parseError = deserializeJson(doc, responseBody);
+  const bool claimed = code == 200 && !parseError && doc.is<JsonArray>() && doc.size() > 0;
+  if (claimed) {
+    Serial.println("Alarm atomically claimed in Supabase.");
+  } else {
+    Serial.printf("Alarm not claimed (HTTP %d); another executor may have claimed it or cloud is unavailable.\n", code);
+  }
+  return claimed;
+}
+
+bool logActivityInDB(int index, bool state, const String& triggeredBy) {
+  if (!isCloudConfigured() || index < 0 || index >= NUM_DEVICES ||
+      deviceUUIDs[index] == "" || boardUserUUID == "") return false;
+
+  DynamicJsonDocument doc(512);
+  doc["user_id"] = boardUserUUID;
+  doc["device_id"] = deviceUUIDs[index];
+  doc["device_name"] = deviceNames[index];
+  doc["action"] = state ? "turned ON" : "turned OFF";
+  doc["triggered_by"] = triggeredBy;
+
+  String payload;
+  serializeJson(doc, payload);
+
+  HTTPClient http;
+  http.begin(String(SUPABASE_BASE) + "/activity_logs");
+  configureHttp(http);
+  http.addHeader("apikey", SUPABASE_SERVICE_KEY);
+  http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
+  http.addHeader("Content-Type", "application/json");
+  int code = http.POST(payload);
+  http.end();
+
+  if (code == 201 || code == 200 || code == 204) return true;
+  Serial.printf("Activity log insert failed for device %d (HTTP %d).\n", index, code);
+  return false;
 }
 
 void sendHeartbeat() {
@@ -1673,14 +1720,21 @@ void cloudSyncTask(void* parameter) {
         for (int i = 0; i < MAX_ALARMS; i++) {
           if (!alarms[i].active || nowIso < alarms[i].triggerAt) continue;
 
-          Serial.println("ALARM FIRED! ID: " + alarms[i].id);
+          Serial.println("ALARM DUE. Claiming atomically: " + alarms[i].id);
+          const String alarmId = alarms[i].id;
+          const int targetDev = alarms[i].deviceIndex;
+          const bool targetState = alarms[i].action;
           alarms[i].active = false;
-          int targetDev = alarms[i].deviceIndex;
+
+          // The web AlarmExecutor uses the same fired=false compare-and-set.
+          // Only the executor that receives the returned row may actuate/log.
+          if (!markAlarmFiredInDB(alarmId)) continue;
+
           if (targetDev >= 0 && targetDev < NUM_DEVICES) {
-            enqueueOfflineUpdate(targetDev, alarms[i].action, false);
-            setRelay(targetDev, alarms[i].action);
+            enqueueOfflineUpdate(targetDev, targetState, false);
+            setRelay(targetDev, targetState);
+            logActivityInDB(targetDev, targetState, "Alarm (ESP32)");
           }
-          markAlarmFiredInDB(alarms[i].id);
         }
       }
     }
