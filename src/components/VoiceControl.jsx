@@ -156,10 +156,14 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
   // Fetch missing prop data on mount if self-contained
   useEffect(() => {
     const fetchMissingData = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       if (!propDevices || propDevices.length === 0) {
         const { data: devs, error } = await supabase
           .from('devices')
           .select('id, name, is_on, board_id, relay_index, boards(name, board_identifier)')
+          .eq('user_id', user.id)
           .order('relay_index');
         if (!error && devs) {
           devicesRef.current = devs.map((device) => ({
@@ -172,17 +176,25 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       if (!propBoards || propBoards.length === 0) {
         const { data: bds, error } = await supabase
           .from('boards')
-          .select('id, name, board_identifier');
+          .select('id, name, board_identifier')
+          .eq('user_id', user.id);
         if (!error && bds) {
           boardsRef.current = bds;
         }
       }
       if (!propPresets || propPresets.length === 0) {
-        const { data: prs } = await supabase
+        const { data: prs, error } = await supabase
           .from('presets')
-          .select('id, name, actions');
-        if (prs) {
-          presetsRef.current = prs;
+          .select('id, name, actions')
+          .eq('user_id', user.id);
+        if (!error && prs) {
+          presetsRef.current = prs.map((preset) => {
+            let actions = preset.actions;
+            if (typeof actions === 'string') {
+              try { actions = JSON.parse(actions); } catch { actions = []; }
+            }
+            return { ...preset, actions: Array.isArray(actions) ? actions : [] };
+          });
         }
       }
     };
@@ -252,9 +264,12 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
   // Fetch fresh devices (prefer live refs, DB fallback).
   const getLatestDevices = useCallback(async () => {
     if (devicesRef.current?.length) return enrichDevices(devicesRef.current);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
     const { data, error } = await supabase
       .from('devices')
       .select('id, name, is_on, board_id, relay_index, boards(name, board_identifier)')
+      .eq('user_id', user.id)
       .order('relay_index');
     if (error) return [];
     const enriched = enrichDevices(data || []);
@@ -373,14 +388,80 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       }
 
       case 'APPLY_PRESET': {
-        const preset = presetsRef.current.find(p => p.id === presetId);
-        if (preset) {
-          if (!applyPreset) {
-            provideFeedback('Preset voice commands are available from the dashboard.');
-            break;
-          }
+        const preset = presetsRef.current.find((item) => item.id === presetId);
+        if (!preset) {
+          provideFeedback('That preset is no longer available. Please try again.');
+          break;
+        }
+        if (applyPreset) {
           await applyPreset(preset, result.deactivate || false);
-          provideFeedback(`${result.deactivate ? 'Deactivated' : 'Activated'} preset: ${presetName}`);
+          provideFeedback(`${result.deactivate ? 'Deactivated' : 'Activated'} preset: ${presetName || preset.name}`);
+          break;
+        }
+
+        let actions = preset.actions;
+        if (typeof actions === 'string') {
+          try { actions = JSON.parse(actions); } catch { actions = []; }
+        }
+        if (!Array.isArray(actions) || actions.length === 0) {
+          provideFeedback(`Preset ${preset.name} has no saved device actions.`);
+          break;
+        }
+
+        const latestDevices = await getLatestDevices();
+        let localGatewayAvailable = false;
+        try {
+          await discoverLocalNode(1500);
+          localGatewayAvailable = true;
+        } catch {
+          // Cloud-only execution remains available below.
+        }
+
+        let succeeded = 0;
+        let failed = 0;
+        for (const action of actions) {
+          const device = latestDevices.find((item) => item.id === action.device_id);
+          if (!device) {
+            failed++;
+            continue;
+          }
+
+          const targetState = result.deactivate ? !Boolean(action.is_on) : Boolean(action.is_on);
+          let localDispatched = false;
+          if (localGatewayAvailable) {
+            try {
+              await setLocalDeviceState(Number(device.relay_index), targetState, device.node_id || null);
+              localDispatched = true;
+            } catch {
+              // Fall back to persisted state; firmware sync will pick it up when connected.
+            }
+          }
+
+          const { error: updateError } = await supabase.from('devices')
+            .update({ is_on: targetState, last_changed: new Date().toISOString() })
+            .eq('id', device.id)
+            .eq('user_id', user.id);
+          if (!updateError) {
+            const { error: logError } = await supabase.from('activity_logs').insert({
+              user_id: user.id,
+              device_id: device.id,
+              device_name: device.name,
+              action: `turned ${targetState ? 'ON' : 'OFF'}`,
+              triggered_by: `Voice Command (AI) Preset: ${preset.name}`,
+            });
+            if (logError) console.warn('Preset activity log insert failed:', logError);
+          }
+
+          if (!updateError || localDispatched) succeeded++;
+          else failed++;
+        }
+
+        if (succeeded === actions.length) {
+          provideFeedback(`${result.deactivate ? 'Deactivated' : 'Activated'} preset: ${preset.name}`);
+        } else if (succeeded > 0) {
+          provideFeedback(`Preset ${preset.name} was only partly applied. Please check the device states.`);
+        } else {
+          provideFeedback(`Could not apply preset ${preset.name}. Please try again.`);
         }
         break;
       }
@@ -388,6 +469,10 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       case 'CREATE_ALARM': {
         const latestDevices = await getLatestDevices();
         const device = latestDevices.find(d => d.id === deviceId);
+        if (!device) {
+          provideFeedback('That alarm device could not be found. Please try again.');
+          break;
+        }
         if (device) {
           // ── Guard 1: Reject past timestamps immediately ──────────────────
           const triggerDate = new Date(triggerAt);
@@ -400,12 +485,16 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           const triggerMs = triggerDate.getTime();
           const windowMs = 60 * 1000;
           const actionBool = isOn === true || isOn === 'true';
-          const { data: existingAlarms } = await supabase
+          const { data: existingAlarms, error: alarmQueryError } = await supabase
             .from('alarms')
             .select('id, trigger_at, action')
             .eq('device_id', deviceId)
             .eq('user_id', user.id)
             .eq('fired', false);
+          if (alarmQueryError) {
+            provideFeedback('Could not check existing alarms. Please try again.');
+            break;
+          }
 
           const duplicate = (existingAlarms || []).find(a => {
             const diff = Math.abs(new Date(a.trigger_at).getTime() - triggerMs);
@@ -439,6 +528,10 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       case 'CREATE_SCHEDULE': {
         const latestDevices = await getLatestDevices();
         const device = latestDevices.find(d => d.id === deviceId);
+        if (!device) {
+          provideFeedback('That schedule device could not be found. Please try again.');
+          break;
+        }
         if (device) {
           // Normalise: take first 5 chars of time (HH:MM) to handle DB storing HH:MM:SS
           const normTime = (time || '').trim().slice(0, 5);
@@ -452,11 +545,15 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           }
 
           // Deduplication: same device + same HH:MM + same action — filter by user_id too
-          const { data: existingSchedules } = await supabase
+          const { data: existingSchedules, error: schedulesQueryError } = await supabase
             .from('schedules')
             .select('id, time, action, days, enabled')
             .eq('device_id', deviceId)
             .eq('user_id', user.id);
+          if (schedulesQueryError) {
+            provideFeedback('Could not check existing schedules. Please try again.');
+            break;
+          }
 
           const requestedDays = [...new Set(days || [])].sort((a, b) => a - b);
           const duplicate = (existingSchedules || []).find((schedule) => {
@@ -908,30 +1005,19 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     // Note: Local hardcoded parsing for turning specific devices/boards/presets on and off has been removed.
     // We now rely entirely on the AI API for these actions.
 
-    // 8. Fallback: If no activation/deactivation prefix, check direct preset name match (assumes activation)
-    const matchedPresetDirect = presetsRef.current.find(p =>
-      normalizeText(p.name) === text || fuzzyScore(text, normalizeText(p.name)) >= 0.8
+    // 8. Fallback: a direct preset name still goes through the same
+    // local+cloud executor as an AI-classified preset action.
+    const matchedPresetDirect = presetsRef.current.find((preset) =>
+      normalizeText(preset.name) === text || fuzzyScore(text, normalizeText(preset.name)) >= 0.8
     );
     if (matchedPresetDirect) {
-      if (applyPreset) {
-        await applyPreset(matchedPresetDirect);
-      } else {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          setAgentState('idle');
-          return;
-        }
-        await Promise.all(
-          matchedPresetDirect.actions.map(action =>
-            supabase.from('devices')
-              .update({ is_on: action.is_on, last_changed: new Date().toISOString() })
-              .eq('user_id', user.id)
-              .eq('id', action.device_id)
-          )
-        );
-      }
-      safeToast(`Activated preset: ${matchedPresetDirect.name}`);
-      speak(`Activated preset ${matchedPresetDirect.name}`);
+      await executeLLMAction({
+        actionType: 'APPLY_PRESET',
+        presetId: matchedPresetDirect.id,
+        presetName: matchedPresetDirect.name,
+        deactivate: false,
+        language: selectedLang,
+      }, safeToast);
       setAgentState('idle');
       return;
     }
