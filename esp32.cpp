@@ -74,7 +74,9 @@ TaskHandle_t cloudPollTaskHandle = nullptr;
 volatile bool cloudDevicesReady = false;
 
 // Cloud polling runs in the background worker, not in the local HTTP loop.
-const unsigned long POLL_INTERVAL = 1000;
+// A cloud-to-relay read is only a fallback path; local controls remain immediate.
+// Ten seconds cuts idle PostgREST traffic by 90% compared with one-second polling.
+const unsigned long POLL_INTERVAL = 10000;
 
 // Heartbeat
 const unsigned long HEARTBEAT_INTERVAL = 20000;
@@ -1365,9 +1367,9 @@ void pollDatabase() {
   if (!isCloudConfigured() || boardUUID == "") return;
 
   HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=relay_index,is_on");
-  // This poll is the cloud-to-relay latency budget. Bound failures so a
-  // stalled endpoint cannot suppress later one-second checks indefinitely.
+  http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=id,relay_index,is_on");
+  // This poll is the cloud-to-relay fallback latency budget. Local commands
+  // still reach the ESP32 directly and do not wait for this interval.
   configureHttp(http, 2000, 2000);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
@@ -1377,11 +1379,14 @@ void pollDatabase() {
     deserializeJson(doc, http.getString());
 
     for (int i = 0; i < doc.size(); i++) {
+      String rowDeviceId = doc[i]["id"].as<String>();
       int rIndex = doc[i]["relay_index"];
       bool dbState = doc[i]["is_on"];
 
-      // Never let an unlinked/stale cloud row control an ESP32 output.
-      if (rIndex >= 0 && rIndex < NUM_DEVICES && deviceUUIDs[rIndex] != "") {
+      // Only the exact device row linked during board resolution may control
+      // this relay. Duplicate/stale rows for the same relay index are ignored.
+      if (rIndex >= 0 && rIndex < NUM_DEVICES &&
+          deviceUUIDs[rIndex] != "" && rowDeviceId == deviceUUIDs[rIndex]) {
         if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
         bool updatePending = false;
         for (int q = 0; q < queueCount; q++) {
@@ -1481,8 +1486,8 @@ bool resolveBoardAndDevices() {
 }
 
 // Push current relay states to the cloud before enabling cloud-to-relay polling.
-// The current firmware does not read AC-current feedback from the 74HC165, so
-// feedback_on is deliberately not overwritten with wall-switch GPIO state.
+// feedback_on represents the directly-read GPIO input state; this function only
+// reconciles commanded relay state and deliberately leaves feedback_on untouched.
 // This prevents stale cloud relay values from changing outputs immediately after boot.
 bool syncAllStatesToDB() {
   if (!isCloudConfigured() || boardUUID == "") return false;
@@ -1632,7 +1637,7 @@ void cloudSyncTask(void* parameter) {
     // database values to the hardware.
     if (boardUUID != "" && !cloudDevicesReady) {
       if (syncAllStatesToDB()) {
-        Serial.println("-> Cloud state reconciled; one-second cloud polling enabled.");
+        Serial.println("-> Cloud state reconciled; 10-second cloud polling enabled.");
         cloudDevicesReady = true;
       } else {
         Serial.println("-> Initial relay-state sync failed; cloud polling paused to prevent stale-state switching.");
@@ -1685,8 +1690,8 @@ void cloudSyncTask(void* parameter) {
 }
 
 // Poll Supabase independently from queue writes, alarms, and heartbeats.
-// This preserves the one-second cloud-to-relay response even if any other
-// cloud request is slow or being retried.
+// Cloud-originated relay changes may take up to POLL_INTERVAL to reach the board;
+// local web/LAN commands are immediate and don't depend on this polling loop.
 void cloudPollTask(void* parameter) {
   (void)parameter;
   TickType_t nextPoll = xTaskGetTickCount();

@@ -21,16 +21,27 @@ export default function AlarmExecutor() {
       if (!user || !active) return;
       
       const [devRes, alarmRes, schedRes] = await Promise.all([
-        supabase.from('devices').select('id, name, relay_index, node_id, is_on').eq('user_id', user.id),
+        supabase.from('devices').select('id, name, relay_index, board_id, is_on, boards(board_identifier)').eq('user_id', user.id),
         supabase.from('alarms').select('id, trigger_at, action, fired, device_id').eq('user_id', user.id).eq('fired', false),
         supabase.from('schedules').select('id, time, days, action, device_id, enabled').eq('user_id', user.id).eq('enabled', true)
       ]);
 
       if (!active) return;
 
+      const deviceRows = devRes.data || [];
+      const boardIdentifierById = Object.fromEntries(
+        deviceRows
+          .filter((device) => device.board_id && device.boards?.board_identifier)
+          .map((device) => [device.board_id, device.boards.board_identifier]),
+      );
+
       dataRef.current = {
         user,
-        devices: devRes.data || [],
+        devices: deviceRows.map((device) => ({
+          ...device,
+          // node_id lives on boards.board_identifier, not on devices.
+          node_id: device.boards?.board_identifier || null,
+        })),
         alarms: alarmRes.data || [],
         schedules: schedRes.data || [],
       };
@@ -39,7 +50,16 @@ export default function AlarmExecutor() {
       const channels = supabase.channel('executor-realtime')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'devices', filter: `user_id=eq.${user.id}` }, (payload) => {
           if (payload.eventType === 'UPDATE') {
-            dataRef.current.devices = dataRef.current.devices.map(d => d.id === payload.new.id ? payload.new : d);
+            dataRef.current.devices = dataRef.current.devices.map((device) =>
+              device.id === payload.new.id
+                ? {
+                    ...device,
+                    ...payload.new,
+                    // Realtime row payloads don't include joined board fields.
+                    node_id: boardIdentifierById[payload.new.board_id] || device.node_id || null,
+                  }
+                : device,
+            );
           }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'alarms', filter: `user_id=eq.${user.id}` }, async () => {
