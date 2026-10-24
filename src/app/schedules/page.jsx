@@ -883,7 +883,7 @@ export default function SchedulesPage() {
               <h2 className="text-lg font-extrabold text-text">
                 {editingSchedule ? "Edit Schedule" : "New Schedule"}
               </h2>
-              <div>
+              <div className="flex flex-col gap-2">
                 {selectedDevices.length > 0 && (
                   <p className="text-[10px] font-bold text-accent/80">
                     Selected: {selectedDevices.length} device
