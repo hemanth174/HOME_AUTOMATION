@@ -129,6 +129,9 @@ function unknownToggle(message, language) {
 function resolveRequestedToggle(transcript, devices, boards = [], language = 'en-US') {
   const norm = normalizeCommand(transcript);
   if (!norm || /\b(?:do not|dont|never|should not|shouldnt|would not|wouldnt)\b/.test(norm)) return null;
+  // These are management actions, not relay toggles. In particular,
+  // "deactivate schedule for Fan" must never switch the fan itself off.
+  if (/\b(?:schedule|alarm|timer|preset|scene|routine|mode)\b/.test(norm)) return null;
 
   const commandVerbPattern = /\b(?:turn|switch|power|activate|deactivate)\b/g;
   const commandVerbs = [...norm.matchAll(commandVerbPattern)];
