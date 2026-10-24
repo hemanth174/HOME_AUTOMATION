@@ -71,6 +71,7 @@ WebServer server(80);
 Preferences preferences;
 SemaphoreHandle_t preferencesMutex = nullptr;
 SemaphoreHandle_t offlineQueueMutex = nullptr;
+SemaphoreHandle_t relayMutex = nullptr;
 TaskHandle_t cloudSyncTaskHandle = nullptr;
 TaskHandle_t cloudPollTaskHandle = nullptr;
 volatile bool cloudDevicesReady = false;
@@ -90,10 +91,21 @@ Alarm alarms[MAX_ALARMS];
 const unsigned long ALARM_POLL_INTERVAL = 30000;
 
 // Store-and-Forward Offline Queue
-struct PendingUpdate { int deviceIndex; bool state; bool isFeedback; bool pending; };
+struct PendingUpdate {
+  int deviceIndex;
+  bool state;
+  bool isFeedback;
+  bool pending;
+  // UTC timestamp of the local command. This lets a newer Supabase command
+  // supersede an older queued command after reconnecting.
+  String queuedAt;
+  // Used only when NTP was unavailable while the command was created.
+  unsigned long queuedAtMillis;
+};
 #define MAX_PENDING 16
 PendingUpdate offlineQueue[MAX_PENDING];
 int queueCount = 0;
+const unsigned long QUEUED_COMMAND_GRACE_MS = 30000;
 
 // ============================================================
 //  LOCAL MESH (MULTI-BOARD SUPPORT)
@@ -172,6 +184,9 @@ void configureHttp(HTTPClient& http, uint16_t connectTimeout = 2500, uint16_t re
 bool isCloudConfigured();
 void loadHomeWifiCredentials();
 void applyPendingWifiConfiguration();
+bool cloudStateSupersedesQueue(const PendingUpdate& queued, const String& cloudChangedAt);
+bool getPendingRelayUpdate(int index, PendingUpdate& result);
+bool discardPendingRelayUpdate(const PendingUpdate& expected);
 
 // ============================================================
 //  SMALL HELPERS
@@ -222,11 +237,16 @@ unsigned long nodeIdHashDelay() {
 void setRelay(int index, bool on, bool saveToNVS) {
   if (index < 0 || index >= NUM_DEVICES) return;
 
+  if (relayMutex) xSemaphoreTake(relayMutex, portMAX_DELAY);
+
+  const bool stateChanged = isRelayOn[index] != on;
   isRelayOn[index] = on;
 
   digitalWrite(RELAY_PINS[index], on ? LOW : HIGH); // Active-LOW relays
 
-  if (saveToNVS) {
+  // Avoid unnecessary flash writes when a repeated cloud poll reports the
+  // state that is already active. The GPIO write remains idempotent.
+  if (saveToNVS && stateChanged) {
     char key[8];
     sprintf(key, "r_%d", index);
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
@@ -235,6 +255,7 @@ void setRelay(int index, bool on, bool saveToNVS) {
   }
 
   Serial.printf(">> RELAY [%d] -> %s\n", index, on ? "ON" : "OFF");
+  if (relayMutex) xSemaphoreGive(relayMutex);
 }
 
 // ============================================================
@@ -1042,6 +1063,9 @@ void enqueueOfflineUpdate(int index, bool state, bool isFeedback) {
     if (offlineQueue[i].pending && offlineQueue[i].deviceIndex == index &&
         offlineQueue[i].isFeedback == isFeedback) {
       offlineQueue[i].state = state;
+      time_t now = time(nullptr);
+      offlineQueue[i].queuedAt = now >= 100000 ? getIsoTime() : "";
+      offlineQueue[i].queuedAtMillis = millis();
       saveOfflineQueue();
       if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
       return;
@@ -1053,6 +1077,9 @@ void enqueueOfflineUpdate(int index, bool state, bool isFeedback) {
     offlineQueue[queueCount].state = state;
     offlineQueue[queueCount].isFeedback = isFeedback;
     offlineQueue[queueCount].pending = true;
+    time_t now = time(nullptr);
+    offlineQueue[queueCount].queuedAt = now >= 100000 ? getIsoTime() : "";
+    offlineQueue[queueCount].queuedAtMillis = millis();
     queueCount++;
     saveOfflineQueue();
     Serial.printf("Enqueued offline action: Dev [%d] State: %d (Queue: %d)\n", index, state, queueCount);
@@ -1072,6 +1099,7 @@ void saveOfflineQueue() {
     sprintf(key, "q%d_i", i); preferences.putChar(key, offlineQueue[i].deviceIndex);
     sprintf(key, "q%d_s", i); preferences.putBool(key, offlineQueue[i].state);
     sprintf(key, "q%d_f", i); preferences.putBool(key, offlineQueue[i].isFeedback);
+    sprintf(key, "q%d_t", i); preferences.putString(key, offlineQueue[i].queuedAt);
   }
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
 }
@@ -1083,10 +1111,69 @@ void loadOfflineQueue() {
     sprintf(key, "q%d_i", i); offlineQueue[i].deviceIndex = preferences.getChar(key, -1);
     sprintf(key, "q%d_s", i); offlineQueue[i].state = preferences.getBool(key, false);
     sprintf(key, "q%d_f", i); offlineQueue[i].isFeedback = preferences.getBool(key, false);
+    sprintf(key, "q%d_t", i); offlineQueue[i].queuedAt = preferences.getString(key, "");
+    // An old queue entry has no timestamp. Do not let it block a newer cloud
+    // command after reboot; a current-session entry gets a short grace period.
+    offlineQueue[i].queuedAtMillis = offlineQueue[i].queuedAt.length() ? millis() : 0;
     offlineQueue[i].pending = offlineQueue[i].deviceIndex >= 0 && offlineQueue[i].deviceIndex < NUM_DEVICES;
   }
   Serial.printf("Restored %d pending offline updates.\\n", queueCount);
 }
+bool cloudStateSupersedesQueue(const PendingUpdate& queued, const String& cloudChangedAt) {
+  if (queued.queuedAt.length() >= 19 && cloudChangedAt.length() >= 19) {
+    // Both values are UTC ISO timestamps, so their first 19 characters sort
+    // chronologically without requiring a heavyweight date parser.
+    return cloudChangedAt.substring(0, 19) >= queued.queuedAt.substring(0, 19);
+  }
+
+  if (queued.queuedAt.length() == 0) {
+    // Legacy NVS entries have no ordering information. Give only a newly
+    // created command a chance to flush; an old entry must not overwrite a
+    // command already made in Supabase.
+    return queued.queuedAtMillis == 0 ||
+           millis() - queued.queuedAtMillis >= QUEUED_COMMAND_GRACE_MS;
+  }
+
+  // If the cloud row has no last_changed value, retain a timestamped local
+  // command and let the normal queue flush deliver it.
+  return false;
+}
+
+bool getPendingRelayUpdate(int index, PendingUpdate& result) {
+  bool found = false;
+  if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
+  for (int i = 0; i < queueCount; i++) {
+    if (offlineQueue[i].pending && offlineQueue[i].deviceIndex == index &&
+        !offlineQueue[i].isFeedback) {
+      result = offlineQueue[i];
+      found = true;
+      break;
+    }
+  }
+  if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
+  return found;
+}
+
+bool discardPendingRelayUpdate(const PendingUpdate& expected) {
+  bool discarded = false;
+  if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
+  for (int i = 0; i < queueCount; i++) {
+    if (offlineQueue[i].pending && offlineQueue[i].deviceIndex == expected.deviceIndex &&
+        !offlineQueue[i].isFeedback && offlineQueue[i].state == expected.state &&
+        offlineQueue[i].queuedAt == expected.queuedAt &&
+        offlineQueue[i].queuedAtMillis == expected.queuedAtMillis) {
+      for (int j = i; j < queueCount - 1; j++) offlineQueue[j] = offlineQueue[j + 1];
+      queueCount--;
+      offlineQueue[queueCount].pending = false;
+      saveOfflineQueue();
+      discarded = true;
+      break;
+    }
+  }
+  if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
+  return discarded;
+}
+
 bool flushOfflineQueue() {
   if (!isHomeWifiConnected() || boardUUID == "") return false;
 
@@ -1104,6 +1191,35 @@ bool flushOfflineQueue() {
   if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
   if (!found) return true;
 
+  // Re-check the cloud row immediately before replaying a relay command.
+  // This closes the reconnect race where a stale queued OFF could overwrite
+  // a newer website ON before the normal poll gets a chance to see it.
+  if (!work.isFeedback) {
+    HTTPClient stateHttp;
+    stateHttp.begin(String(SUPABASE_BASE) + "/devices?id=eq." +
+                    deviceUUIDs[work.deviceIndex] + "&select=is_on,last_changed");
+    configureHttp(stateHttp, 2000, 2000);
+    stateHttp.addHeader("apikey", SUPABASE_SERVICE_KEY);
+    stateHttp.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
+
+    if (stateHttp.GET() == 200) {
+      DynamicJsonDocument stateDoc(384);
+      if (!deserializeJson(stateDoc, stateHttp.getString()) && stateDoc.size() > 0) {
+        const bool cloudState = stateDoc[0]["is_on"] | false;
+        const String cloudChangedAt = stateDoc[0]["last_changed"].as<String>();
+        if (cloudState == work.state || cloudStateSupersedesQueue(work, cloudChangedAt)) {
+          if (cloudState != isRelayOn[work.deviceIndex]) setRelay(work.deviceIndex, cloudState);
+          if (discardPendingRelayUpdate(work)) {
+            Serial.printf("Skipped obsolete queued state for device %d.\n", work.deviceIndex);
+          }
+          stateHttp.end();
+          return true;
+        }
+      }
+    }
+    stateHttp.end();
+  }
+
   bool delivered = work.isFeedback
     ? updateFeedbackInDB(work.deviceIndex, work.state)
     : updateDeviceInDB(work.deviceIndex, work.state);
@@ -1117,7 +1233,9 @@ bool flushOfflineQueue() {
   if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
   for (int i = 0; i < queueCount; i++) {
     if (offlineQueue[i].pending && offlineQueue[i].deviceIndex == work.deviceIndex &&
-        offlineQueue[i].isFeedback == work.isFeedback && offlineQueue[i].state == work.state) {
+        offlineQueue[i].isFeedback == work.isFeedback && offlineQueue[i].state == work.state &&
+        offlineQueue[i].queuedAt == work.queuedAt &&
+        offlineQueue[i].queuedAtMillis == work.queuedAtMillis) {
       for (int j = i; j < queueCount - 1; j++) offlineQueue[j] = offlineQueue[j + 1];
       queueCount--;
       offlineQueue[queueCount].pending = false;
@@ -1145,7 +1263,8 @@ void setup() {
 
   preferencesMutex = xSemaphoreCreateMutex();
   offlineQueueMutex = xSemaphoreCreateMutex();
-  if (!preferencesMutex || !offlineQueueMutex) {
+  relayMutex = xSemaphoreCreateMutex();
+  if (!preferencesMutex || !offlineQueueMutex || !relayMutex) {
     Serial.println("ERROR: Failed to create persistence/queue mutexes.");
   }
 
@@ -1225,7 +1344,7 @@ void setup() {
   }
 
   BaseType_t taskCreated = pdFAIL;
-  if (preferencesMutex && offlineQueueMutex) {
+  if (preferencesMutex && offlineQueueMutex && relayMutex) {
     taskCreated = xTaskCreatePinnedToCore(
       cloudSyncTask,
       "cloud_sync",
@@ -1370,7 +1489,7 @@ void pollDatabase() {
   if (!isCloudConfigured() || boardUUID == "") return;
 
   HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=id,relay_index,is_on");
+  http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=id,relay_index,is_on,last_changed");
   // This poll is the cloud-to-relay fallback latency budget. Local commands
   // still reach the ESP32 directly and do not wait for this interval.
   configureHttp(http, 2000, 2000);
@@ -1378,33 +1497,38 @@ void pollDatabase() {
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
 
   if (http.GET() == 200) {
-    DynamicJsonDocument doc(1024);
+    DynamicJsonDocument doc(2048);
     deserializeJson(doc, http.getString());
 
     for (int i = 0; i < doc.size(); i++) {
       String rowDeviceId = doc[i]["id"].as<String>();
       int rIndex = doc[i]["relay_index"];
       bool dbState = doc[i]["is_on"];
+      String cloudChangedAt = doc[i]["last_changed"].as<String>();
 
       // Only the exact device row linked during board resolution may control
       // this relay. Duplicate/stale rows for the same relay index are ignored.
       if (rIndex >= 0 && rIndex < NUM_DEVICES &&
           deviceUUIDs[rIndex] != "" && rowDeviceId == deviceUUIDs[rIndex]) {
-        if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
-        bool updatePending = false;
-        for (int q = 0; q < queueCount; q++) {
-          if (offlineQueue[q].pending && offlineQueue[q].deviceIndex == rIndex &&
-              !offlineQueue[q].isFeedback) {
-            updatePending = true;
-            break;
+        PendingUpdate queued;
+        bool updatePending = getPendingRelayUpdate(rIndex, queued);
+
+        // A queued local command is allowed to win only while it is newer
+        // than the cloud row. This prevents an old queued OFF from reversing
+        // a newer ON command made from the website.
+        if (updatePending && dbState != queued.state &&
+            cloudStateSupersedesQueue(queued, cloudChangedAt)) {
+          if (discardPendingRelayUpdate(queued)) {
+            Serial.printf("Discarded stale queued state for device %d; cloud state is newer.\n", rIndex);
           }
+          updatePending = getPendingRelayUpdate(rIndex, queued);
         }
 
-        if (!updatePending && dbState != isRelayOn[rIndex]) {
+        bool relayState = isRelayOn[rIndex];
+        if (!updatePending && dbState != relayState) {
           Serial.printf("Cloud Toggle Dev [%d] -> %s\n", rIndex, dbState ? "ON" : "OFF");
           setRelay(rIndex, dbState);
         }
-        if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
       }
     }
   }
@@ -1420,7 +1544,10 @@ bool updateDeviceInDB(int index, bool state) {
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");
   configureHttp(http);
-  int code = http.PATCH("{\"is_on\":" + String(state ? "true" : "false") + "}");
+  String body = "{\"is_on\":" + String(state ? "true" : "false");
+  if (time(nullptr) >= 100000) body += ",\"last_changed\":\"" + getIsoTime() + "\"";
+  body += "}";
+  int code = http.PATCH(body);
   http.end();
   return code == 200 || code == 204;
 }
@@ -1491,40 +1618,70 @@ bool resolveBoardAndDevices() {
   return foundAny;
 }
 
-// Push current relay states to the cloud before enabling cloud-to-relay polling.
-// feedback_on represents the directly-read GPIO input state; this function only
-// reconciles commanded relay state and deliberately leaves feedback_on untouched.
-// This prevents stale cloud relay values from changing outputs immediately after boot.
+// Reconcile the persisted relay state with the cloud before enabling polling.
+// A newer queued local command is preserved, but otherwise the cloud state is
+// applied. The old implementation always PATCHed the local state to Supabase,
+// which could overwrite a website command during boot/reconnect.
 bool syncAllStatesToDB() {
   if (!isCloudConfigured() || boardUUID == "") return false;
 
-  int syncedDevices = 0;
-  bool allSynced = true;
+  HTTPClient http;
+  http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID +
+             "&select=id,relay_index,is_on,last_changed");
+  configureHttp(http);
+  http.addHeader("apikey", SUPABASE_SERVICE_KEY);
+  http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
+
+  int reconciledDevices = 0;
+  bool allSynced = http.GET() == 200;
+  DynamicJsonDocument doc(2048);
+  if (allSynced && deserializeJson(doc, http.getString())) allSynced = false;
+  http.end();
+  if (!allSynced) {
+    Serial.println("-> Initial relay-state read failed; cloud polling remains paused.");
+    return false;
+  }
+
   for (int i = 0; i < NUM_DEVICES; i++) {
     if (deviceUUIDs[i] == "") continue;
 
-    HTTPClient http;
-    http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUIDs[i]);
-    configureHttp(http);
-    http.addHeader("apikey", SUPABASE_SERVICE_KEY);
-    http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
-    http.addHeader("Content-Type", "application/json");
-
-    String body = "{\"is_on\":" + String(isRelayOn[i] ? "true" : "false") +
-                  ",\"last_changed\":\"" + getIsoTime() + "\"}";
-    int code = http.PATCH(body);
-    http.end();
-
-    if (code == 200 || code == 204) {
-      syncedDevices++;
-    } else {
-      allSynced = false;
-      Serial.printf("-> Initial relay-state sync failed for device %d (HTTP %d).\n", i, code);
+    bool rowFound = false;
+    bool cloudState = false;
+    String cloudChangedAt;
+    for (JsonObject row : doc.as<JsonArray>()) {
+      if (row["id"].as<String>() == deviceUUIDs[i]) {
+        rowFound = true;
+        cloudState = row["is_on"] | false;
+        cloudChangedAt = row["last_changed"].as<String>();
+        break;
+      }
     }
+    if (!rowFound) {
+      allSynced = false;
+      Serial.printf("-> Initial relay-state row missing for device %d.\n", i);
+      continue;
+    }
+
+    PendingUpdate queued;
+    bool updatePending = getPendingRelayUpdate(i, queued);
+    if (updatePending && cloudState != queued.state &&
+        cloudStateSupersedesQueue(queued, cloudChangedAt)) {
+      if (discardPendingRelayUpdate(queued)) {
+        Serial.printf("Discarded stale queued state for device %d during reconciliation.\n", i);
+      }
+      updatePending = getPendingRelayUpdate(i, queued);
+    }
+
+    const bool targetState = updatePending ? queued.state : cloudState;
+    if (targetState != isRelayOn[i]) setRelay(i, targetState);
+    reconciledDevices++;
   }
 
-  if (syncedDevices == 0 || !allSynced) return false;
-  Serial.println("-> Current relay states synced to cloud before polling.");
+  if (reconciledDevices == 0 || !allSynced) {
+    Serial.println("-> Initial relay-state reconciliation incomplete; cloud polling remains paused.");
+    return false;
+  }
+  Serial.println("-> Relay states reconciled before cloud polling.");
   return true;
 }
 
@@ -1660,6 +1817,9 @@ void cloudSyncTask(void* parameter) {
 
   for (;;) {
     if (!isHomeWifiConnected() || !isCloudConfigured()) {
+      // A reconnect must reconcile cloud/local state again. Otherwise the
+      // polling task could resume from a stale pre-disconnect snapshot.
+      cloudDevicesReady = false;
       vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
     }
@@ -1679,15 +1839,15 @@ void cloudSyncTask(void* parameter) {
       }
     }
 
-    // Keep cloud-to-relay polling disabled until the persisted physical state
-    // has been written successfully. A failed sync must never apply stale
-    // database values to the hardware.
+    // Keep cloud-to-relay polling disabled until the cloud/local state
+    // reconciliation read succeeds. A failed read must never apply an
+    // incomplete or stale database response to the hardware.
     if (boardUUID != "" && !cloudDevicesReady) {
       if (syncAllStatesToDB()) {
         Serial.println("-> Cloud state reconciled; 10-second cloud polling enabled.");
         cloudDevicesReady = true;
       } else {
-        Serial.println("-> Initial relay-state sync failed; cloud polling paused to prevent stale-state switching.");
+        Serial.println("-> Initial relay-state reconciliation failed; cloud polling paused.");
         vTaskDelay(pdMS_TO_TICKS(3000));
         continue;
       }
