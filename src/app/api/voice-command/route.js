@@ -87,8 +87,14 @@ function resolveRequestedToggle(transcript, devices, boards = [], language = 'en
   const norm = normalizeCommand(transcript);
   if (!norm || /\b(?:do not|dont|never|should not|shouldnt|would not|wouldnt)\b/.test(norm)) return null;
 
-  const hasCommandVerb = /\b(?:turn|switch|power|activate|deactivate)\b/.test(norm);
-  if (!hasCommandVerb) return null;
+  const commandVerbPattern = /\b(?:turn|switch|power|activate|deactivate)\b/g;
+  const commandVerbs = [...norm.matchAll(commandVerbPattern)];
+  if (!commandVerbs.length) return null;
+  // The agent is deliberately single-command-per-utterance. Do not execute
+  // only the first half of a compound utterance such as "turn off A and turn on B".
+  if (commandVerbs.length > 1) {
+    return unknownToggle('Please give me one device command at a time so I do not control the wrong relay.', language);
+  }
 
   // Leave whole-home commands to the explicit TOGGLE_ALL path.
   if (/\b(?:all|everything|every device|whole house|whole home|entire home)\b/.test(norm)) return null;
