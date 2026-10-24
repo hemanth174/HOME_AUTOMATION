@@ -285,15 +285,9 @@ export default function AlarmExecutor({ user: propUser = null }) {
     const device = devices.find(d => d.id === deviceId);
     if (!device) return false;
 
-    // STATE-AWARE CHECK: Only execute if the device is not already in the target state
-    if (device.is_on === targetAction) {
-      // It's already in the correct state, just skip the hardware command but still notify
-      window.dispatchEvent(new CustomEvent('show-global-toast', {
-        detail: `Skipped ${sourceName}: ${device.name} is already ${targetAction ? 'ON' : 'OFF'}`,
-      }));
-      return true;
-    }
-
+    // A schedule/alarm is a desired-state command, not a toggle. Always send
+    // the explicit target to the relay even if the cached cloud row already
+    // matches; the persisted row can be stale relative to the physical output.
     // Update the local relay first when the ESP32 mesh is available. Cloud
     // persistence still follows so both planes converge.
     let localDispatched = false;
