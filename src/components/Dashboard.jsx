@@ -35,6 +35,7 @@ import { isBoardOnline } from "@/components/pg/deviceKind";
 // Collapsed rooms persist in a cookie: { [boardId]: true } = collapsed.
 // Only collapsed rooms are stored; expanding deletes the key.
 const ROOM_COOKIE = "vt_rooms_collapsed";
+const SELECTED_ROOM_COOKIE = "vt_selected_room";
 function readCollapsedRooms() {
   try {
     const m = document.cookie.match(/(?:^|;\s*)vt_rooms_collapsed=([^;]*)/);
@@ -105,6 +106,7 @@ export default function Dashboard() {
   const restoredCarouselRef = useRef("");
 
   const deviceViewCookie = user?.id ? `vt_device_view_${user.id}` : null;
+  const selectedRoomCookie = user?.id ? `${SELECTED_ROOM_COOKIE}_${user.id}` : null;
   const carouselCookie = useCallback(
     (boardId) =>
       user?.id && boardId ? `vt_device_carousel_${user.id}_${boardId}` : null,
@@ -289,10 +291,18 @@ export default function Dashboard() {
       setSelectedBoardId(null);
       return;
     }
-    setSelectedBoardId((prev) =>
-      prev && boards.some((b) => b.id === prev) ? prev : boards[0].id,
-    );
-  }, [boards]);
+    const saved = selectedRoomCookie ? readCookieValue(selectedRoomCookie) : null;
+    setSelectedBoardId((prev) => {
+      if (prev && boards.some((b) => b.id === prev)) return prev;
+      if (saved && boards.some((b) => String(b.id) === String(saved))) return saved;
+      return boards[0].id;
+    });
+  }, [boards, selectedRoomCookie]);
+
+  const selectBoard = useCallback((boardId) => {
+    setSelectedBoardId(boardId);
+    if (selectedRoomCookie) writeCookieValue(selectedRoomCookie, boardId);
+  }, [selectedRoomCookie]);
 
   // Re-apply collapsed rooms saved in the cookie on every boards change.
   // This also restores the preference after a full page reload.
@@ -993,7 +1003,7 @@ export default function Dashboard() {
                   boards={boards}
                   devices={devices}
                   selectedId={selectedBoard?.id}
-                  onSelect={setSelectedBoardId}
+                   onSelect={selectBoard}
                 />
                 <button
                   onClick={() => setShowAddBoardModal(true)}

@@ -6,6 +6,7 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <time.h>
+#include <esp_system.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
@@ -78,8 +79,9 @@ volatile bool cloudDevicesReady = false;
 
 // Cloud polling runs in the background worker, not in the local HTTP loop.
 // A cloud-to-relay read is only a fallback path; local controls remain immediate.
-// Ten seconds cuts idle PostgREST traffic by 90% compared with one-second polling.
-const unsigned long POLL_INTERVAL = 10000;
+// Cloud-originated commands are checked once per second. Local commands do
+// not wait for this worker and remain immediate.
+const unsigned long POLL_INTERVAL = 1000;
 
 // Heartbeat
 const unsigned long HEARTBEAT_INTERVAL = 20000;
@@ -106,6 +108,7 @@ struct PendingUpdate {
 PendingUpdate offlineQueue[MAX_PENDING];
 int queueCount = 0;
 const unsigned long QUEUED_COMMAND_GRACE_MS = 30000;
+const unsigned long RELAY_STARTUP_STAGGER_MS = 150;
 
 // ============================================================
 //  LOCAL MESH (MULTI-BOARD SUPPORT)
@@ -139,7 +142,8 @@ struct MeshDeviceCache {
 MeshDeviceCache meshDeviceCache[MAX_MESH_DEVICE_CACHE];
 int meshCacheCount = 0;
 
-// Timers - deliberately SLOW. No aggressive polling anywhere.
+// Mesh/connectivity timers remain deliberately slow. Cloud command polling
+// is handled separately at POLL_INTERVAL below.
 unsigned long lastWifiRetry     = 0;  const unsigned long WIFI_RETRY_INTERVAL      = 3000;   // Station reconnect attempts (was: every loop!)
 unsigned long lastLeaderWifiTry = 0;  const unsigned long LEADER_WIFI_RETRY_INTERVAL = 30000; // Leader home-Wi-Fi probes (non-blocking begin)
 unsigned long lastRoleEval      = 0;  const unsigned long ROLE_EVAL_INTERVAL       = 5000;   // Role decision cadence
@@ -184,6 +188,7 @@ void configureHttp(HTTPClient& http, uint16_t connectTimeout = 2500, uint16_t re
 bool isCloudConfigured();
 void loadHomeWifiCredentials();
 void applyPendingWifiConfiguration();
+void logResetReason();
 bool cloudStateSupersedesQueue(const PendingUpdate& queued, const String& cloudChangedAt);
 bool getPendingRelayUpdate(int index, PendingUpdate& result);
 bool discardPendingRelayUpdate(const PendingUpdate& expected);
@@ -198,6 +203,14 @@ bool isHomeWifiConnected() {
 
 bool isCloudConfigured() {
   return strlen(SUPABASE_BASE) > 0 && strlen(SUPABASE_SERVICE_KEY) > 0;
+}
+
+void logResetReason() {
+  const esp_reset_reason_t reason = esp_reset_reason();
+  Serial.printf("-> ESP32 reset reason code: %d\n", (int)reason);
+  if (reason == ESP_RST_BROWNOUT) {
+    Serial.println("!! Brownout reset detected. Check the external 5V supply, relay current, wiring, and decoupling.");
+  }
 }
 
 void loadHomeWifiCredentials() {
@@ -921,6 +934,7 @@ void becomeLeader() {
   // ESP32's shared radio. The main loop retries explicitly only when no
   // phone/member is currently attached to this AP.
   WiFi.mode(WIFI_AP_STA);
+  WiFi.setTxPower(WIFI_POWER_15dBm);
   WiFi.setAutoReconnect(false);
   WiFi.disconnect(false, false);
   WiFi.softAPConfig(AP_IP, AP_GATEWAY, AP_SUBNET);
@@ -1253,6 +1267,7 @@ bool flushOfflineQueue() {
 void setup() {
   Serial.begin(115200);
   delay(500);
+  logResetReason();
   Serial.println("\n===========================================");
   Serial.println("  ESP32 Dual-Plane Mesh Node (4 Devices)");
   Serial.println("===========================================");
@@ -1272,22 +1287,36 @@ void setup() {
   loadHomeWifiCredentials();
   loadOfflineQueue();
 
-  // Initialize GPIOs & restore saved relay states.
+  // Initialize GPIOs safely first, then restore saved ON relays one at a
+  // time. Restoring four relay coils at the same instant can dip a shared
+  // external 5V rail and reset the ESP32.
+  bool savedRelayStates[NUM_DEVICES];
   for (int i = 0; i < NUM_DEVICES; i++) {
     char key[8];
     sprintf(key, "r_%d", i);
-    bool savedState = preferences.getBool(key, false);
+    savedRelayStates[i] = preferences.getBool(key, false);
     // Relays are active-LOW. Preload the output latch before enabling OUTPUT
     // mode, avoiding a brief default-LOW pulse on startup.
-    digitalWrite(RELAY_PINS[i], savedState ? LOW : HIGH);
+    digitalWrite(RELAY_PINS[i], HIGH);
     pinMode(RELAY_PINS[i], OUTPUT);
-    setRelay(i, savedState, false);
+    setRelay(i, false, false);
 
     pinMode(INPUT_PINS[i], INPUT_PULLUP);
     confirmedInputState[i] = digitalRead(INPUT_PINS[i]);
     lastInputRead[i] = confirmedInputState[i];
   }
+
+  for (int i = 0; i < NUM_DEVICES; i++) {
+    if (!savedRelayStates[i]) continue;
+    setRelay(i, true, false);
+    delay(RELAY_STARTUP_STAGGER_MS);
+  }
   Serial.println("-> Relay GPIOs & NVS States restored.");
+
+  // Let the external rail settle before starting the Wi-Fi radio. Wi-Fi
+  // association has a short current peak that can expose a marginal relay
+  // supply as an ESP32 brownout.
+  delay(500);
 
   // Lower TX power = less RF heat, still plenty for in-home range.
   // (Must come after WiFi.mode so the radio stack is started.)
@@ -1303,6 +1332,7 @@ void setup() {
   //    network and stall the home Wi-Fi connection.
   // SoftAP is started later by becomeLeader() ONLY when home Wi-Fi is down.
   WiFi.mode(WIFI_STA);
+  WiFi.setTxPower(WIFI_POWER_15dBm);
 
   if (homeWifiSSID.length() > 0) {
     wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
@@ -1323,8 +1353,6 @@ void setup() {
   } else {
     Serial.println("-> No Home Wi-Fi credentials configured; skipping STA scans.");
   }
-  WiFi.setTxPower(WIFI_POWER_15dBm);
-
   // mDNS responder (http://home-automation.local)
   if (MDNS.begin("home-automation")) {
     Serial.println("-> mDNS responder started: http://home-automation.local");
@@ -1844,7 +1872,7 @@ void cloudSyncTask(void* parameter) {
     // incomplete or stale database response to the hardware.
     if (boardUUID != "" && !cloudDevicesReady) {
       if (syncAllStatesToDB()) {
-        Serial.println("-> Cloud state reconciled; 10-second cloud polling enabled.");
+        Serial.println("-> Cloud state reconciled; 1-second cloud polling enabled.");
         cloudDevicesReady = true;
       } else {
         Serial.println("-> Initial relay-state reconciliation failed; cloud polling paused.");
@@ -1908,16 +1936,17 @@ void cloudSyncTask(void* parameter) {
 // local web/LAN commands are immediate and don't depend on this polling loop.
 void cloudPollTask(void* parameter) {
   (void)parameter;
-  TickType_t nextPoll = xTaskGetTickCount();
 
   for (;;) {
     if (!isHomeWifiConnected() || !cloudDevicesReady || !isCloudConfigured()) {
-      nextPoll = xTaskGetTickCount();
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
     }
 
     pollDatabase();
-    vTaskDelayUntil(&nextPoll, pdMS_TO_TICKS(POLL_INTERVAL));
+    // Wait after each request instead of using vTaskDelayUntil(). If a slow
+    // request exceeds the interval, delayUntil() would immediately start
+    // another request and create unnecessary Wi-Fi/power spikes.
+    vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL));
   }
 }
