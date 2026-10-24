@@ -102,14 +102,21 @@ const findBestDevice = (query, list) => {
  * Parse time string (e.g. "9:30 pm", "8 am", "14:00") into hour and minute.
  */
 const parseTime = (timeStr) => {
-  const match = timeStr.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  const match = String(timeStr || '').match(/^\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*$/i);
   if (!match) return null;
-  let hour = parseInt(match[1], 10);
-  const minute = match[2] ? parseInt(match[2], 10) : 0;
+
+  let hour = Number(match[1]);
+  const minute = match[2] ? Number(match[2]) : 0;
   const ampm = match[3] ? match[3].toLowerCase() : null;
 
-  if (ampm === 'pm' && hour < 12) hour += 12;
-  if (ampm === 'am' && hour === 12) hour = 0;
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute < 0 || minute > 59) return null;
+  if (ampm) {
+    if (hour < 1 || hour > 12) return null;
+    if (ampm === 'pm' && hour < 12) hour += 12;
+    if (ampm === 'am' && hour === 12) hour = 0;
+  } else if (hour < 0 || hour > 23) {
+    return null;
+  }
 
   return { hour, minute };
 };
@@ -622,24 +629,27 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     // Note: Local hardcoded parsing for "All on / All off" has been removed.
     // We now rely entirely on the AI API for turning devices on and off.
 
-    // 2. Clear/Delete All Alarms or Schedules
-    if (text === 'delete all alarms' || text === 'clear all alarms') {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.from('alarms').delete().eq('user_id', user.id);
-        safeToast('All alarms deleted');
-        speak('All alarms deleted');
-      }
+    // 2. Clear/Delete All Alarms or Schedules.
+    // Bulk deletion always requires a separate spoken confirmation.
+    if (/^(?:delete|clear|remove) (?:all|every) alarms?$/.test(text)) {
+      pendingActionRef.current = {
+        actionType: 'DELETE_ALL_ALARMS',
+        message: 'This will delete every alarm. Say yes to confirm, or no to cancel.',
+        language: selectedLang,
+      };
+      safeToast(pendingActionRef.current.message);
+      speak(pendingActionRef.current.message, selectedLang);
       setAgentState('idle');
       return;
     }
-    if (text === 'delete all schedules' || text === 'clear all schedules') {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.from('schedules').delete().eq('user_id', user.id);
-        safeToast('All schedules deleted');
-        speak('All schedules deleted');
-      }
+    if (/^(?:delete|clear|remove) (?:all|every) schedules?$/.test(text)) {
+      pendingActionRef.current = {
+        actionType: 'DELETE_ALL_SCHEDULES',
+        message: 'This will delete every schedule. Say yes to confirm, or no to cancel.',
+        language: selectedLang,
+      };
+      safeToast(pendingActionRef.current.message);
+      speak(pendingActionRef.current.message, selectedLang);
       setAgentState('idle');
       return;
     }
@@ -658,8 +668,8 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       if (!matchedDevice) {
         safeToast(`Device "${deviceQuery}" not found for alarm`);
         speak(`Device ${deviceQuery} not found`);
-       setAgentState('idle');
-       return;
+        setAgentState('idle');
+        return;
       }
 
       const parsedTime = parseTime(timeStr);
@@ -749,8 +759,8 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       if (!matchedDevice) {
         safeToast(`Device "${deviceQuery}" not found for schedule`);
         speak(`Device ${deviceQuery} not found`);
-       setAgentState('idle');
-       return;
+        setAgentState('idle');
+        return;
       }
 
       const parsedTime = parseTime(timeStr);
@@ -842,6 +852,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       if (!matchedDevice) {
         safeToast(`Device "${deviceQuery}" not found`);
         speak(`Device ${deviceQuery} not found`);
+        setAgentState('idle');
         return;
       }
 
@@ -860,6 +871,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           speak(`Schedules deleted for ${matchedDevice.name}`);
         }
       }
+      setAgentState('idle');
       return;
     }
 
@@ -878,6 +890,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       if (!matchedDevice) {
         safeToast(`Device "${deviceQuery}" not found`);
         speak(`Device ${deviceQuery} not found`);
+        setAgentState('idle');
         return;
       }
 
@@ -888,6 +901,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         safeToast(`Schedules ${enableVal ? 'enabled' : 'disabled'} for ${matchedDevice.name}`);
         speak(`Schedules ${enableVal ? 'enabled' : 'disabled'} for ${matchedDevice.name}`);
       }
+      setAgentState('idle');
       return;
     }
 
@@ -918,6 +932,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       }
       safeToast(`Activated preset: ${matchedPresetDirect.name}`);
       speak(`Activated preset ${matchedPresetDirect.name}`);
+      setAgentState('idle');
       return;
     }
 
