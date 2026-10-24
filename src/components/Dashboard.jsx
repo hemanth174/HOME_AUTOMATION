@@ -471,18 +471,38 @@ export default function Dashboard() {
       if (typeof actions === "string") {
         try {
           actions = JSON.parse(actions);
-        } catch (e) {
+        } catch {
           actions = [];
         }
       }
-      for (const action of actions || []) {
-        const targetState = deactivate ? !action.is_on : action.is_on;
-        const device = devices.find((d) => d.id === action.device_id);
-        if (device) {
-          await controlDevice(device, targetState, `Preset: ${preset.name}`);
-        }
+      if (!Array.isArray(actions) || actions.length === 0) {
+        showToast(`Preset ${preset.name} has no saved device actions.`);
+        return { success: false, succeeded: 0, failed: 0 };
       }
-      showToast(`${deactivate ? "Deactivated" : "Activated"}: ${preset.name}`);
+
+      let succeeded = 0;
+      let failed = 0;
+      for (const action of actions) {
+        const targetState = deactivate ? !action.is_on : action.is_on;
+        const device = devices.find((item) => item.id === action.device_id);
+        if (!device) {
+          failed++;
+          continue;
+        }
+        const result = await controlDevice(device, targetState, `Preset: ${preset.name}`);
+        if (result?.success) succeeded++;
+        else failed++;
+      }
+
+      const outcome = { success: failed === 0, succeeded, failed };
+      if (failed === 0) {
+        showToast(`${deactivate ? "Deactivated" : "Activated"}: ${preset.name}`);
+      } else if (succeeded > 0) {
+        showToast(`Preset ${preset.name} was only partly applied. Check device states.`);
+      } else {
+        showToast(`Could not apply preset ${preset.name}. Please try again.`);
+      }
+      return outcome;
     },
     [devices, controlDevice, showToast],
   );
