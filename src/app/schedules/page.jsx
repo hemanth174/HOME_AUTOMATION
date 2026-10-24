@@ -242,20 +242,17 @@ export default function SchedulesPage() {
     const devName = schedule.devices?.name || 'device';
 
     if (text.includes('delete') || text.includes('remove') || text.includes('trash') || text.includes('cancel')) {
-      await deleteSchedule(schedule.id);
-      speak(`Schedule for ${devName} deleted`);
+      if (await deleteSchedule(schedule.id)) speak(`Schedule for ${devName} deleted`);
     } else if (text.includes('disable') || text.includes('turn off') || text.includes('deactivate') || text.includes('deactive')) {
       if (schedule.enabled) {
-        await toggleSchedule(schedule);
-        speak(`Schedule for ${devName} disabled`);
+        if (await toggleSchedule(schedule)) speak(`Schedule for ${devName} disabled`);
       } else {
         setToast(`Schedule for ${devName} is already disabled`);
         speak(`Schedule for ${devName} is already disabled`);
       }
     } else if (text.includes('enable') || text.includes('turn on') || text.includes('activate')) {
       if (!schedule.enabled) {
-        await toggleSchedule(schedule);
-        speak(`Schedule for ${devName} enabled`);
+        if (await toggleSchedule(schedule)) speak(`Schedule for ${devName} enabled`);
       } else {
         setToast(`Schedule for ${devName} is already enabled`);
         speak(`Schedule for ${devName} is already enabled`);
