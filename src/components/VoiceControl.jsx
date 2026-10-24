@@ -1100,7 +1100,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         actionType: 'APPLY_PRESET',
         presetId: matchedPresetDirect.id,
         presetName: matchedPresetDirect.name,
-        deactivate: false,
+        deactivate: /\b(?:deactivate|deactive|disable|off)\b/.test(text),
         language: selectedLang,
       }, safeToast);
       setAgentState('idle');
