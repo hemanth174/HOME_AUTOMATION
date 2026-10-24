@@ -744,15 +744,8 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       console.warn('AI voice command failed, falling back to local parser:', e);
     }
 
-    if (commandDevices.length === 0) {
-      safeToast('No devices found. Please add a board first.');
-      speak('No devices found. Please add a board first.');
-      setAgentState('idle');
-      return;
-    }
-
-    // Note: Local hardcoded parsing for "All on / All off" has been removed.
-    // We now rely entirely on the AI API for turning devices on and off.
+    // Device-independent maintenance commands (for example, clearing an
+    // orphaned alarm list) are handled below even when no device rows exist.
 
     // 2. Clear/Delete All Alarms or Schedules.
     // Bulk deletion always requires a separate spoken confirmation.
@@ -1089,6 +1082,13 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
 
     // Note: Local hardcoded parsing for turning specific devices/boards/presets on and off has been removed.
     // We now rely entirely on the AI API for these actions.
+
+    if (commandDevices.length === 0) {
+      safeToast('No devices found. Please add a board first.');
+      speak('No devices found. Please add a board first.');
+      setAgentState('idle');
+      return;
+    }
 
     // 8. Fallback: a direct preset name still goes through the same
     // local+cloud executor as an AI-classified preset action.
