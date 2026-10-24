@@ -47,7 +47,7 @@ function scheduleOccurrenceKey(now, time) {
   return `${date}T${time}`;
 }
 
-export default function AlarmExecutor() {
+export default function AlarmExecutor({ user: propUser = null }) {
   const { isLocalConnected } = useLocalConnection();
   // We use refs to hold the latest data so the interval doesn't need to be recreated,
   // which prevents missing ticks or stale closures.
@@ -57,39 +57,71 @@ export default function AlarmExecutor() {
 
   useEffect(() => {
     let active = true;
+    let refreshInFlight = false;
+
+    const refreshData = async (user) => {
+      if (!user || refreshInFlight) return false;
+      refreshInFlight = true;
+      try {
+        const [devRes, alarmRes, schedRes] = await Promise.all([
+          supabase.from('devices').select('id, name, relay_index, board_id, is_on, boards(board_identifier)').eq('user_id', user.id),
+          supabase.from('alarms').select('id, trigger_at, action, fired, device_id').eq('user_id', user.id).eq('fired', false),
+          supabase.from('schedules').select('id, time, days, action, device_id, enabled').eq('user_id', user.id).eq('enabled', true),
+        ]);
+
+        if (!active) return false;
+        const queryError = devRes.error || alarmRes.error || schedRes.error;
+        if (queryError) {
+          console.warn('Alarm/schedule data refresh failed:', queryError.message);
+          return false;
+        }
+
+        const deviceRows = devRes.data || [];
+        const boardIdentifierById = Object.fromEntries(
+          deviceRows
+            .filter((device) => device.board_id && device.boards?.board_identifier)
+            .map((device) => [device.board_id, device.boards.board_identifier]),
+        );
+
+        dataRef.current = {
+          user,
+          devices: deviceRows.map((device) => ({
+            ...device,
+            // node_id lives on boards.board_identifier, not on devices.
+            node_id: device.boards?.board_identifier || null,
+          })),
+          alarms: alarmRes.data || [],
+          schedules: schedRes.data || [],
+        };
+        return true;
+      } catch (error) {
+        console.warn('Alarm/schedule data refresh failed:', error);
+        return false;
+      } finally {
+        refreshInFlight = false;
+      }
+    };
 
     const initData = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !active) return;
-      
-      const [devRes, alarmRes, schedRes] = await Promise.all([
-        supabase.from('devices').select('id, name, relay_index, board_id, is_on, boards(board_identifier)').eq('user_id', user.id),
-        supabase.from('alarms').select('id, trigger_at, action, fired, device_id').eq('user_id', user.id).eq('fired', false),
-        supabase.from('schedules').select('id, time, days, action, device_id, enabled').eq('user_id', user.id).eq('enabled', true)
-      ]);
+      let user = propUser;
+      if (!user) {
+        const { data: { user: authUser }, error } = await supabase.auth.getUser();
+        if (error) console.warn('Alarm/schedule executor could not read auth:', error.message);
+        user = authUser || null;
+      }
+      if (!active) return undefined;
+      if (!user) {
+        dataRef.current = { user: null, devices: [], alarms: [], schedules: [] };
+        return undefined;
+      }
+      if (dataRef.current.user?.id !== user.id) {
+        dataRef.current = { user, devices: [], alarms: [], schedules: [] };
+      }
 
-      if (!active) return;
+      await refreshData(user);
+      if (!active) return undefined;
 
-      const deviceRows = devRes.data || [];
-      const boardIdentifierById = Object.fromEntries(
-        deviceRows
-          .filter((device) => device.board_id && device.boards?.board_identifier)
-          .map((device) => [device.board_id, device.boards.board_identifier]),
-      );
-
-      dataRef.current = {
-        user,
-        devices: deviceRows.map((device) => ({
-          ...device,
-          // node_id lives on boards.board_identifier, not on devices.
-          node_id: device.boards?.board_identifier || null,
-        })),
-        alarms: alarmRes.data || [],
-        schedules: schedRes.data || [],
-      };
-
-      // Subscribe to realtime changes so our executor always has live state
-      const channels = supabase.channel('executor-realtime')
+      const channels = supabase.channel(`executor-realtime-${user.id}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'devices', filter: `user_id=eq.${user.id}` }, (payload) => {
           if (payload.eventType === 'UPDATE') {
             dataRef.current.devices = dataRef.current.devices.map((device) =>
@@ -97,26 +129,49 @@ export default function AlarmExecutor() {
                 ? {
                     ...device,
                     ...payload.new,
-                    // Realtime row payloads don't include joined board fields.
-                    node_id: boardIdentifierById[payload.new.board_id] || device.node_id || null,
+                    node_id: device.node_id || null,
                   }
                 : device,
             );
+          } else if (payload.eventType === 'INSERT') {
+            void refreshData(user);
+          } else if (payload.eventType === 'DELETE') {
+            dataRef.current.devices = dataRef.current.devices.filter((device) => device.id !== payload.old.id);
           }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'alarms', filter: `user_id=eq.${user.id}` }, async () => {
           const res = await supabase.from('alarms').select('id, trigger_at, action, fired, device_id').eq('user_id', user.id).eq('fired', false);
-          dataRef.current.alarms = res.data || [];
+          if (active && !res.error && res.data) dataRef.current.alarms = res.data;
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'schedules', filter: `user_id=eq.${user.id}` }, async () => {
           const res = await supabase.from('schedules').select('id, time, days, action, device_id, enabled').eq('user_id', user.id).eq('enabled', true);
-          dataRef.current.schedules = res.data || [];
+          if (active && !res.error && res.data) dataRef.current.schedules = res.data;
         })
-        .subscribe();
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            if (firstSubscription) firstSubscription = false;
+            else void refreshData(user);
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            console.warn('Alarm/schedule Realtime channel status:', status);
+          }
+        });
 
-      return channels;
+      const refreshOnOnline = () => { void refreshData(user); };
+      const refreshWhenVisible = () => {
+        if (document.visibilityState === 'visible') void refreshData(user);
+      };
+      window.addEventListener('online', refreshOnOnline);
+      document.addEventListener('visibilitychange', refreshWhenVisible);
+      return {
+        channels,
+        dispose: () => {
+          window.removeEventListener('online', refreshOnOnline);
+          document.removeEventListener('visibilitychange', refreshWhenVisible);
+        },
+      };
     };
 
+    let firstSubscription = true;
     let channelsPromise = initData();
 
     // Serialize ticks so a slow Supabase response cannot overlap another
@@ -218,9 +273,12 @@ export default function AlarmExecutor() {
     return () => {
       active = false;
       clearInterval(interval);
-      channelsPromise.then(chan => chan && supabase.removeChannel(chan));
+      channelsPromise.then((resources) => {
+        if (resources?.channels) supabase.removeChannel(resources.channels);
+        resources?.dispose?.();
+      });
     };
-  }, [isLocalConnected]);
+  }, [isLocalConnected, propUser?.id]);
 
   // Executes a hardware action (ON/OFF) checking live feedback
   const executeAction = async (user, devices, deviceId, targetAction, sourceName) => {
