@@ -413,7 +413,9 @@ export async function POST(request) {
       /^(?:delete|cancel|remove)\s+(?:an?\s+)?(?:alarm|schedule)\s+for\b/.test(normalizedTranscript) ||
       /^(?:enable|disable|activate|deactivate|deactive)\s+schedule\s+for\b/.test(normalizedTranscript);
     const isClientFallbackCommand = isAlarmCreation || isScheduleCreation ||
-      isBulkAlarmDeletion || isBulkScheduleDeletion || isSingleMaintenanceCommand;
+      /^(?:delete|clear|remove|erase)\s+(?:all|every)\s+alarms?$/.test(normalizedTranscript) ||
+      /^(?:delete|clear|remove|erase)\s+(?:all|every)\s+schedules?$/.test(normalizedTranscript) ||
+      isSingleMaintenanceCommand;
 
     // Keep schedule/alarm creation available through the client's deterministic
     // parser when OpenRouter is not configured; don't misreport "set alarm"
