@@ -29,8 +29,14 @@ function validateAction(result, devices, presets, transcript = '', boards = []) 
   if (result.actionType === 'GUIDANCE') {
     return { ...result, redirectTo: ALLOWED_REDIRECTS.has(result.redirectTo) ? result.redirectTo : undefined };
   }
-  if (result.actionType === 'TOGGLE_ALL' || result.actionType === 'DELETE_ALL_ALARMS' || result.actionType === 'DELETE_ALL_SCHEDULES') {
-    if (result.actionType === 'TOGGLE_ALL' && typeof result.isOn !== 'boolean') return null;
+  if (result.actionType === 'TOGGLE_ALL') {
+    if (typeof result.isOn !== 'boolean' || !hasExplicitAllIntent(transcript)) return null;
+    const requestedState = getExplicitStateIntent(transcript);
+    if (!requestedState.recognized || requestedState.conflict || requestedState.state !== result.isOn) return null;
+    return result;
+  }
+  if (result.actionType === 'DELETE_ALL_ALARMS' || result.actionType === 'DELETE_ALL_SCHEDULES') {
+    if (!hasExplicitDeleteAllIntent(transcript, result.actionType === 'DELETE_ALL_ALARMS' ? 'alarms' : 'schedules')) return null;
     return result;
   }
   if (result.actionType === 'APPLY_PRESET') {
@@ -77,6 +83,43 @@ function hasPhrase(text, phrase) {
   const normalizedPhrase = normalizeCommand(phrase);
   if (!normalizedPhrase) return false;
   return ` ${text} `.includes(` ${normalizedPhrase} `);
+}
+
+function hasExplicitAllIntent(transcript) {
+  const raw = String(transcript || '').toLowerCase();
+  const normalized = normalizeCommand(raw);
+  return /\b(?:all|everything|every device|whole house|whole home|entire home)\b/.test(normalized) ||
+    ['सभी', 'सब', 'सारे', 'सभी उपकरण', 'అన్ని', 'అంతా', 'మొత్తం'].some((term) => raw.includes(term));
+}
+
+function getExplicitStateIntent(transcript) {
+  const raw = String(transcript || '').toLowerCase();
+  const normalized = normalizeCommand(raw);
+  const on = /\bactivate\b/.test(normalized) ||
+    /\b(?:turn|switch|power)\s+(?:the\s+)?on\b/.test(normalized) ||
+    /\b(?:turn|switch|power)\b(?:\s+\w+){0,6}?\s+on\b/.test(normalized) ||
+    /\b(?:all|everything|every device|whole house|whole home|entire home)\s+on\b/.test(normalized) ||
+    /\bon\s+(?:all|everything|every device)\b/.test(normalized) ||
+    ['चालू', 'जलाओ', 'जला', 'ஆன்', 'ఆన్', 'వెలిగించు'].some((term) => raw.includes(term));
+  const off = /\bdeactivate\b/.test(normalized) ||
+    /\b(?:turn|switch|power)\s+(?:the\s+)?off\b/.test(normalized) ||
+    /\b(?:turn|switch|power)\b(?:\s+\w+){0,6}?\s+off\b/.test(normalized) ||
+    /\b(?:all|everything|every device|whole house|whole home|entire home)\s+off\b/.test(normalized) ||
+    /\boff\s+(?:all|everything|every device)\b/.test(normalized) ||
+    ['बंद', 'बुझा', 'ஆஃப்', 'ఆఫ్', 'ఆపేయి', 'ఆపివేయి'].some((term) => raw.includes(term));
+  return { recognized: on || off, conflict: on && off, state: on === off ? null : on };
+}
+
+function hasExplicitDeleteAllIntent(transcript, kind) {
+  const raw = String(transcript || '').toLowerCase();
+  const normalized = normalizeCommand(raw);
+  const deleteVerb = /\b(?:delete|clear|remove|erase)\b/.test(normalized) ||
+    ['हटाओ', 'मिटाओ', 'डिलीट', 'తొలగించు', 'తీసేయి', 'డిలీట్'].some((term) => raw.includes(term));
+  const allIntent = hasExplicitAllIntent(raw);
+  const targetIntent = kind === 'alarms'
+    ? /\balarms?\b/.test(normalized) || raw.includes('अलार्म') || raw.includes('అలారం')
+    : /\bschedules?\b/.test(normalized) || raw.includes('शेड्यूल') || raw.includes('షెడ్యూల్');
+  return deleteVerb && allIntent && targetIntent;
 }
 
 function unknownToggle(message, language) {
@@ -364,13 +407,19 @@ export async function POST(request) {
     const normalizedTranscript = normalizeCommand(transcript);
     const isAlarmCreation = /\b(?:set|create)\s+(?:an?\s+)?alarm\b/.test(normalizedTranscript);
     const isScheduleCreation = /\b(?:set|create)\s+(?:a\s+)?schedule\b/.test(normalizedTranscript);
-    const isComplexCreation = isAlarmCreation || isScheduleCreation;
+    const isBulkAlarmDeletion = hasExplicitDeleteAllIntent(transcript, 'alarms');
+    const isBulkScheduleDeletion = hasExplicitDeleteAllIntent(transcript, 'schedules');
+    const isSingleMaintenanceCommand =
+      /^(?:delete|cancel|remove)\s+(?:an?\s+)?(?:alarm|schedule)\s+for\b/.test(normalizedTranscript) ||
+      /^(?:enable|disable|activate|deactivate|deactive)\s+schedule\s+for\b/.test(normalizedTranscript);
+    const isClientFallbackCommand = isAlarmCreation || isScheduleCreation ||
+      isBulkAlarmDeletion || isBulkScheduleDeletion || isSingleMaintenanceCommand;
 
     // Keep schedule/alarm creation available through the client's deterministic
     // parser when OpenRouter is not configured; don't misreport "set alarm"
     // as merely navigation to the alarms page.
     if (!apiKey || apiKey.trim() === '') {
-      if (isComplexCreation) {
+      if (isClientFallbackCommand) {
         return NextResponse.json(
           { error: 'AI command service unavailable; using local command parser.' },
           { status: 503, headers: { 'Cache-Control': 'no-store' } }
@@ -466,7 +515,7 @@ Return EXACTLY ONE of these JSON formats:
 
     // If OpenRouter cannot classify an alarm/schedule request, return a
     // non-OK status so VoiceControl can run its deterministic date/time parser.
-    if (isComplexCreation) {
+    if (isClientFallbackCommand) {
       return NextResponse.json(
         { error: 'AI command service unavailable; using local command parser.' },
         { status: 503, headers: { 'Cache-Control': 'no-store' } }
