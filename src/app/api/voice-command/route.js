@@ -19,7 +19,7 @@ function getAuthenticatedClient(request) {
   });
 }
 
-function validateAction(result, devices, presets) {
+function validateAction(result, devices, presets, transcript = '', boards = []) {
   if (!result || !ACTION_TYPES.has(result.actionType)) return null;
   if (result.actionType === 'UNKNOWN' || result.actionType === 'ANSWER') {
     return typeof result.message === 'string' && result.message.trim()
@@ -40,39 +40,168 @@ function validateAction(result, devices, presets) {
   }
   const device = devices.find((item) => item.id === result.deviceId);
   if (!device || typeof result.isOn !== 'boolean') return null;
+  if (['TOGGLE_DEVICE', 'CREATE_ALARM', 'CREATE_SCHEDULE'].includes(result.actionType) && !isDeviceExplicitlyIdentified(transcript, device, devices, boards)) return null;
   if (result.actionType === 'CREATE_ALARM' && (!result.triggerAt || Number.isNaN(new Date(result.triggerAt).getTime()) || new Date(result.triggerAt).getTime() <= Date.now())) return null;
-  if (result.actionType === 'CREATE_SCHEDULE' && !/^\d{2}:\d{2}$/.test(result.time || '')) return null;
-  if (result.actionType === 'CREATE_SCHEDULE' && (!Array.isArray(result.days) || result.days.some((day) => !Number.isInteger(day) || day < 0 || day > 6))) return null;
+  if (result.actionType === 'CREATE_SCHEDULE') {
+    if (!/^\d{2}:\d{2}$/.test(result.time || '')) return null;
+    const [hours, minutes] = result.time.split(':').map(Number);
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+    if (!Array.isArray(result.days) || result.days.length === 0 ||
+        result.days.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) return null;
+  }
   return { ...result, deviceId: device.id, deviceName: device.name };
 }
 
-const ORDINALS = {
-  one: 0, first: 0, two: 1, second: 1, three: 2, third: 2,
-  four: 3, fourth: 3, five: 4, fifth: 4, six: 5, sixth: 5,
+const NUMBER_WORDS = {
+  zero: '0', one: '1', first: '1', two: '2', second: '2', three: '3', third: '3',
+  four: '4', fourth: '4', five: '5', fifth: '5', six: '6', sixth: '6',
+  seven: '7', seventh: '7', eight: '8', eighth: '8', nine: '9', ninth: '9',
+  ten: '10', tenth: '10', eleven: '11', twelve: '12',
 };
 
-function resolveExplicitToggle(transcript, devices, language) {
-  const norm = String(transcript || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-  const on = /\b(?:turn|switch|power|activate)\s+(?:the\s+)?(?:device|relay|channel)?\s*(?:one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|\d+)\s+on\b|\b(?:turn|switch|power|activate)\s+on\b/.test(norm);
-  const off = /\b(?:turn|switch|power|deactivate)\s+(?:the\s+)?(?:device|relay|channel)?\s*(?:one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|\d+)\s+off\b|\b(?:turn|switch|power|deactivate)\s+off\b/.test(norm);
-  if (!on && !off) return null;
+function normalizeCommand(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\b(?:the|a|an|please|hey|okay|ok)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((word) => NUMBER_WORDS[word] || word)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-  const match = norm.match(/\b(?:device|relay|channel)\s*(one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|\d+)\b/);
-  if (!match) return null;
-  const requestedIndex = /^\d+$/.test(match[1]) ? Number(match[1]) - 1 : ORDINALS[match[1]];
-  if (!Number.isInteger(requestedIndex) || requestedIndex < 0) return null;
+function hasPhrase(text, phrase) {
+  const normalizedPhrase = normalizeCommand(phrase);
+  if (!normalizedPhrase) return false;
+  return ` ${text} `.includes(` ${normalizedPhrase} `);
+}
 
-  const matches = devices.filter((device) => Number(device.relay_index) === requestedIndex);
-  if (matches.length !== 1) return null;
-  const device = matches[0];
+function unknownToggle(message, language) {
+  return { actionType: 'UNKNOWN', message, language };
+}
+
+function resolveRequestedToggle(transcript, devices, boards = [], language = 'en-US') {
+  const norm = normalizeCommand(transcript);
+  if (!norm || /\b(?:do not|dont|never|should not|shouldnt|would not|wouldnt)\b/.test(norm)) return null;
+
+  const commandVerbPattern = /\b(?:turn|switch|power|activate|deactivate)\b/g;
+  const commandVerbs = [...norm.matchAll(commandVerbPattern)];
+  if (!commandVerbs.length) return null;
+  // The agent is deliberately single-command-per-utterance. Do not execute
+  // only the first half of a compound utterance such as "turn off A and turn on B".
+  if (commandVerbs.length > 1) {
+    return unknownToggle('Please give me one device command at a time so I do not control the wrong relay.', language);
+  }
+
+  // Leave whole-home commands to the explicit TOGGLE_ALL path.
+  if (/\b(?:all|everything|every device|whole house|whole home|entire home)\b/.test(norm)) return null;
+
+  // "on" can be a preposition ("the fan on the second floor"), so state is
+  // detected only in an action phrase, not by the presence of that word alone.
+  const prefixState = norm.match(/\b(?:turn|switch|power)\s+(?:the\s+)?(on|off)\b/);
+  const objectState = norm.match(/\b(?:turn|switch|power)\b(?:\s+\w+){0,6}?\s+(on|off)\b/);
+  const requestsOn = /\bactivate\b/.test(norm) || (prefixState?.[1] === 'on') || (!prefixState && objectState?.[1] === 'on');
+  const requestsOff = /\bdeactivate\b/.test(norm) || (prefixState?.[1] === 'off') || (!prefixState && objectState?.[1] === 'off');
+  if (!requestsOn && !requestsOff) return null;
+  if (requestsOn && requestsOff) {
+    return unknownToggle('I heard both ON and OFF. Please say one clear action.', language);
+  }
+  const isOn = requestsOn && !requestsOff;
+
+  const mentionedBoards = (boards || []).filter((board) =>
+    hasPhrase(norm, board.name) || hasPhrase(norm, board.board_identifier)
+  );
+  if (mentionedBoards.length > 1) {
+    return unknownToggle('I heard more than one room or board. Please name just one room and device.', language);
+  }
+
+  let candidates = devices || [];
+  if (mentionedBoards.length === 1) {
+    candidates = candidates.filter((device) => device.board_id === mentionedBoards[0].id);
+  }
+
+  const ordinalMatch = norm.match(/\b(?:device|relay|channel)\s*(\d+)\b/);
+  if (ordinalMatch) {
+    const requestedIndex = Number(ordinalMatch[1]) - 1;
+    if (!Number.isInteger(requestedIndex) || requestedIndex < 0) {
+      return unknownToggle('Please specify a valid device number.', language);
+    }
+    const matches = candidates.filter((device) => Number(device.relay_index) === requestedIndex);
+    if (matches.length === 1) {
+      const device = matches[0];
+      return {
+        actionType: 'TOGGLE_DEVICE', deviceId: device.id, deviceName: device.name,
+        isOn, message: `${device.name} turned ${isOn ? 'on' : 'off'}`, language,
+      };
+    }
+    if (matches.length > 1) {
+      return unknownToggle('That device number exists in multiple rooms. Please say the room name too.', language);
+    }
+    return unknownToggle('I could not find that device number in the selected room.', language);
+  }
+
+  const matched = candidates.map((device) => {
+    const aliases = [
+      device.name,
+      device.board_name ? `${device.board_name} ${device.name}` : '',
+      device.board_identifier ? `${device.board_identifier} ${device.name}` : '',
+    ].filter(Boolean);
+    const scores = aliases
+      .map((alias) => normalizeCommand(alias))
+      .filter((alias) => hasPhrase(norm, alias))
+      .map((alias) => alias.split(' ').length);
+    return { device, score: scores.length ? Math.max(...scores) : 0 };
+  }).filter((item) => item.score > 0);
+
+  if (!matched.length) {
+    return unknownToggle('I could not identify the exact device. Please say its device name and room, for example, “turn off Bedroom Light”.', language);
+  }
+  const bestScore = Math.max(...matched.map((item) => item.score));
+  const best = matched.filter((item) => item.score === bestScore);
+  if (best.length !== 1) {
+    return unknownToggle('More than one device matches that name. Please say the room and device name so I do not control the wrong one.', language);
+  }
+
+  const device = best[0].device;
   return {
-    actionType: 'TOGGLE_DEVICE',
-    deviceId: device.id,
-    deviceName: device.name,
-    isOn: on,
-    message: `${device.name} turned ${on ? 'on' : 'off'}`,
-    language,
+    actionType: 'TOGGLE_DEVICE', deviceId: device.id, deviceName: device.name,
+    isOn, message: `${device.name} turned ${isOn ? 'on' : 'off'}`, language,
   };
+}
+
+function isDeviceExplicitlyIdentified(transcript, device, devices, boards) {
+  const norm = normalizeCommand(transcript);
+  const aliases = [
+    device.name,
+    device.board_name ? `${device.board_name} ${device.name}` : '',
+    device.board_identifier ? `${device.board_identifier} ${device.name}` : '',
+  ].filter(Boolean);
+  if (aliases.some((alias) => hasPhrase(norm, alias))) return true;
+
+  // Allow a short device alias (e.g. "fan") only when exactly one owned
+  // device has that meaningful name token. Never let common words pick among rooms.
+  const requestedTokens = normalizeCommand(transcript).split(' ').filter((token) =>
+    token.length >= 3 && !['turn', 'switch', 'power', 'activate', 'deactivate', 'please', 'device', 'relay', 'channel'].includes(token)
+  );
+  const tokenCandidates = (devices || []).filter((candidate) => {
+    const deviceTokens = normalizeCommand(candidate.name).split(' ');
+    return requestedTokens.some((token) => deviceTokens.includes(token));
+  });
+  if (tokenCandidates.length === 1 && tokenCandidates[0].id === device.id) return true;
+
+  const ordinalMatch = norm.match(/\b(?:device|relay|channel)\s*(\d+)\b/);
+  if (!ordinalMatch) return false;
+  const requestedIndex = Number(ordinalMatch[1]) - 1;
+  if (Number(device.relay_index) !== requestedIndex) return false;
+  const mentionedBoards = (boards || []).filter((board) =>
+    hasPhrase(norm, board.name) || hasPhrase(norm, board.board_identifier)
+  );
+  const sameIndexDevices = (devices || []).filter((item) => Number(item.relay_index) === requestedIndex);
+  if (mentionedBoards.length === 1) return device.board_id === mentionedBoards[0].id;
+  return sameIndexDevices.length === 1;
 }
 
 // Robust helper to extract and clean JSON from any LLM response
@@ -114,7 +243,7 @@ function extractJsonFromText(rawText) {
 }
 
 // Fallback rule-based parser in case the external AI API is slow or returns unexpected text
-function fallbackParseCommand(transcript, devices = [], presets = [], requestedLanguage = 'en-US') {
+function fallbackParseCommand(transcript, devices = [], presets = [], requestedLanguage = 'en-US', boards = []) {
   const norm = (transcript || '').toLowerCase().trim();
   const language = requestedLanguage || 'en-US';
   const isHindi = language === 'hi-IN';
@@ -172,21 +301,9 @@ function fallbackParseCommand(transcript, devices = [], presets = [], requestedL
     }
   }
 
-  // 4. Single device match
-  for (const d of devices) {
-    const dName = (d.name || '').toLowerCase();
-    if (norm.includes(dName) || dName.split(' ').some(word => word.length > 2 && norm.includes(word))) {
-      const targetState = !isOff;
-      return {
-        actionType: 'TOGGLE_DEVICE',
-        deviceId: d.id,
-        isOn: targetState,
-        deviceName: d.name,
-        message: local(`Turning ${targetState ? 'on' : 'off'} ${d.name}`, `${d.name} ${targetState ? 'चालू' : 'बंद'} कर रहा हूँ`, `${d.name}ని ${targetState ? 'ఆన్' : 'ఆఫ్'} చేస్తున్నాను`),
-        language
-      };
-    }
-  }
+  // A single-device action requires a deterministic, unambiguous target.
+  const requestedToggle = resolveRequestedToggle(transcript, devices, boards, language);
+  if (requestedToggle) return requestedToggle;
 
   return {
     actionType: 'UNKNOWN',
@@ -219,9 +336,19 @@ export async function POST(request) {
       authClient.from('presets').select('id, name').eq('user_id', user.id),
       authClient.from('boards').select('id, name, board_identifier').eq('user_id', user.id),
     ]);
-    const deviceList = (ownedDevices || []).map(d => ({ id: d.id, name: d.name, board_id: d.board_id, relay_index: d.relay_index, is_on: d.is_on }));
-    const presetList = (ownedPresets || []).map(p => ({ id: p.id, name: p.name }));
-    const boardList = (ownedBoards || []).map((board) => ({ id: board.id, name: board.name }));
+    const boardList = (ownedBoards || []).map((board) => ({
+      id: board.id, name: board.name, board_identifier: board.board_identifier,
+    }));
+    const boardById = new Map(boardList.map((board) => [board.id, board]));
+    const deviceList = (ownedDevices || []).map((device) => {
+      const board = boardById.get(device.board_id);
+      return {
+        id: device.id, name: device.name, board_id: device.board_id,
+        board_name: board?.name || '', board_identifier: board?.board_identifier || '',
+        relay_index: device.relay_index, is_on: device.is_on,
+      };
+    });
+    const presetList = (ownedPresets || []).map((preset) => ({ id: preset.id, name: preset.name }));
     const safeContext = Array.isArray(context)
       ? context.slice(-6).map((item) => ({
         role: item?.role === 'assistant' ? 'assistant' : 'user',
@@ -229,14 +356,28 @@ export async function POST(request) {
       }))
       : [];
 
-    // Explicit relay ordinals must not be left to an LLM to guess.
-    const explicitToggle = resolveExplicitToggle(transcript, deviceList, language);
+    // Resolve every English device-toggle command before calling the model.
+    // Never let an LLM guess which physical relay a user intended.
+    const explicitToggle = resolveRequestedToggle(transcript, deviceList, boardList, language);
     if (explicitToggle) return NextResponse.json(explicitToggle, { headers: { 'Cache-Control': 'no-store' } });
 
-    // If no API key configured, use intelligent local fallback
+    const normalizedTranscript = normalizeCommand(transcript);
+    const isAlarmCreation = /\b(?:set|create)\s+(?:an?\s+)?alarm\b/.test(normalizedTranscript);
+    const isScheduleCreation = /\b(?:set|create)\s+(?:a\s+)?schedule\b/.test(normalizedTranscript);
+    const isComplexCreation = isAlarmCreation || isScheduleCreation;
+
+    // Keep schedule/alarm creation available through the client's deterministic
+    // parser when OpenRouter is not configured; don't misreport "set alarm"
+    // as merely navigation to the alarms page.
     if (!apiKey || apiKey.trim() === '') {
-      const localResult = fallbackParseCommand(transcript, deviceList, presetList, language);
-      return NextResponse.json(localResult);
+      if (isComplexCreation) {
+        return NextResponse.json(
+          { error: 'AI command service unavailable; using local command parser.' },
+          { status: 503, headers: { 'Cache-Control': 'no-store' } }
+        );
+      }
+      const localResult = fallbackParseCommand(transcript, deviceList, presetList, language, boardList);
+      return NextResponse.json(localResult, { headers: { 'Cache-Control': 'no-store' } });
     }
 
     const systemPrompt = `You parse smart home voice commands and return ONLY a valid JSON object. Do not include markdown, thoughts, or explanations.
@@ -314,7 +455,7 @@ Return EXACTLY ONE of these JSON formats:
         const rawContent = choice?.message?.content || choice?.text || choice?.message?.reasoning || '';
         
         const extracted = extractJsonFromText(rawContent);
-        const validated = validateAction(extracted, deviceList, presetList);
+        const validated = validateAction(extracted, deviceList, presetList, transcript, boardList);
         if (validated) {
           return NextResponse.json(validated, { headers: { 'Cache-Control': 'no-store' } });
         }
@@ -323,9 +464,18 @@ Return EXACTLY ONE of these JSON formats:
       console.warn('OpenRouter fetch failed, using fallback:', aiErr);
     }
 
-    // If AI fails or returns non-parseable response, run reliable fallback parser
-    const fallbackResult = fallbackParseCommand(transcript, deviceList, presetList, language);
-    return NextResponse.json(fallbackResult);
+    // If OpenRouter cannot classify an alarm/schedule request, return a
+    // non-OK status so VoiceControl can run its deterministic date/time parser.
+    if (isComplexCreation) {
+      return NextResponse.json(
+        { error: 'AI command service unavailable; using local command parser.' },
+        { status: 503, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    // If AI fails or returns non-parseable text, use the safe local fallback.
+    const fallbackResult = fallbackParseCommand(transcript, deviceList, presetList, language, boardList);
+    return NextResponse.json(fallbackResult, { headers: { 'Cache-Control': 'no-store' } });
 
   } catch (error) {
     console.error('Error in voice-command route:', error);
