@@ -761,7 +761,11 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     const alarmCreateMatch = text.match(/^(?:set|create)\s+alarm\s+for\s+(.+?)\s+(?:to\s+turn\s+(on|off)\s+)?at\s+(.+)$/);
     if (alarmCreateMatch) {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setAgentState('idle');
+        safeToast('Please sign in before creating an alarm.');
+        return;
+      }
 
       const deviceQuery = normalizeText(alarmCreateMatch[1]);
       const actionWord = alarmCreateMatch[2]; // "on" or "off"
@@ -801,12 +805,18 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       const isAlarmOn = actionWord ? actionWord === 'on' : true;
 
       // ── Guard 2: Deduplication — same device + 1-min window + same action ─
-      const { data: existingAlarms } = await supabase
+      const { data: existingAlarms, error: alarmQueryError } = await supabase
         .from('alarms')
         .select('id, trigger_at, action')
         .eq('device_id', matchedDevice.id)
         .eq('user_id', user.id)
         .eq('fired', false);
+      if (alarmQueryError) {
+        safeToast('Could not check existing alarms. Please try again.');
+        speak('Could not check existing alarms. Please try again.');
+        setAgentState('idle');
+        return;
+      }
 
       const windowMs = 60 * 1000;
       const alarmTs = alarmDate.getTime();
@@ -851,7 +861,11 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
     const scheduleCreateMatch = text.match(/^(?:set|create)\s+schedule\s+for\s+(.+?)\s+(?:to\s+turn\s+(on|off)\s+)?at\s+(.+ ?)(?:\s+on\s+(.+))?$/);
     if (scheduleCreateMatch) {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setAgentState('idle');
+        safeToast('Please sign in before creating a schedule.');
+        return;
+      }
 
       const deviceQuery = normalizeText(scheduleCreateMatch[1]);
       const actionWord = scheduleCreateMatch[2]; // "on" or "off"
@@ -889,7 +903,12 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           }
         }
         if (matchedDays.length > 0) {
-          days = matchedDays.sort();
+          days = matchedDays.sort((a, b) => a - b);
+        } else {
+          safeToast(`I could not understand the schedule days "${daysStr}". Say weekdays, weekends, every day, or name the days.`);
+          speak('Please repeat the schedule days.', selectedLang);
+          setAgentState('idle');
+          return;
         }
       }
 
@@ -898,15 +917,27 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
 
       // Dedup: normalize time to HH:MM (5 chars) — DB may store HH:MM:SS
       // Cast action to boolean so type mismatches don't let duplicates through
-      const { data: existingSchedules } = await supabase
+      const { data: existingSchedules, error: scheduleQueryError } = await supabase
         .from('schedules')
-        .select('id, time, action')
+        .select('id, time, action, days, enabled')
         .eq('device_id', matchedDevice.id)
         .eq('user_id', user.id);
+      if (scheduleQueryError) {
+        safeToast('Could not check existing schedules. Please try again.');
+        speak('Could not check existing schedules. Please try again.');
+        setAgentState('idle');
+        return;
+      }
 
-      const dupSched = (existingSchedules || []).find(s =>
-        (s.time || '').slice(0, 5) === formattedTime && !!s.action === isScheduleOn
-      );
+      const requestedDays = [...new Set(days)].sort((a, b) => a - b);
+      const dupSched = (existingSchedules || []).find((schedule) => {
+        const existingDays = [...new Set(schedule.days || [])].sort((a, b) => a - b);
+        return schedule.enabled !== false &&
+          (schedule.time || '').slice(0, 5) === formattedTime &&
+          Boolean(schedule.action) === isScheduleOn &&
+          existingDays.length === requestedDays.length &&
+          existingDays.every((day, index) => day === requestedDays[index]);
+      });
 
       if (dupSched) {
         const timeDisplay = `${parsedTime.hour % 12 || 12}:${String(parsedTime.minute).padStart(2, '0')} ${parsedTime.hour >= 12 ? 'PM' : 'AM'}`;
