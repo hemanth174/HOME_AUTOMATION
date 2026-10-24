@@ -314,8 +314,7 @@ export default function AlarmsPage() {
     const devName = alarm.devices?.name || 'device';
 
     if (text.includes('delete') || text.includes('remove') || text.includes('cancel') || text.includes('trash')) {
-      await deleteAlarm(alarm.id);
-      speak(`Alarm for ${devName} deleted`);
+      if (await deleteAlarm(alarm.id)) speak(`Alarm for ${devName} deleted`);
     } else {
       setToast(`Command not recognized: "${transcript}". Try "delete" or "cancel".`);
       speak(`Command not recognized`);
