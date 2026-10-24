@@ -5,6 +5,48 @@ import { supabase } from '@/lib/supabase';
 import { setLocalDeviceState } from '@/lib/localApi';
 import useLocalConnection from '@/hooks/useLocalConnection';
 
+
+// Per-origin schedule claims prevent duplicate execution when the dashboard is open
+// in multiple tabs. Web Locks serialize the claim where supported.
+const localScheduleClaims = new Map();
+
+async function claimScheduleOccurrence(key, occurrence) {
+  const claim = () => {
+    if (localScheduleClaims.get(key) === occurrence) return false;
+    try {
+      if (localStorage.getItem(key) === occurrence) {
+        localScheduleClaims.set(key, occurrence);
+        return false;
+      }
+      localStorage.setItem(key, occurrence);
+    } catch {
+      // Keep an in-memory fallback if browser storage is unavailable.
+    }
+    localScheduleClaims.set(key, occurrence);
+    return true;
+  };
+
+  if (typeof navigator !== 'undefined' && navigator.locks?.request) {
+    return navigator.locks.request(`claim:${key}`, { mode: 'exclusive' }, claim);
+  }
+  return claim();
+}
+
+function releaseScheduleOccurrence(key, occurrence) {
+  if (localScheduleClaims.get(key) === occurrence) localScheduleClaims.delete(key);
+  try {
+    if (localStorage.getItem(key) === occurrence) localStorage.removeItem(key);
+  } catch {
+    // The next in-memory pass can retry if storage is unavailable.
+  }
+}
+
+function scheduleOccurrenceKey(now, time) {
+  const pad = (number) => String(number).padStart(2, '0');
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  return `${date}T${time}`;
+}
+
 export default function AlarmExecutor() {
   const { isLocalConnected } = useLocalConnection();
   // We use refs to hold the latest data so the interval doesn't need to be recreated,
@@ -77,62 +119,102 @@ export default function AlarmExecutor() {
 
     let channelsPromise = initData();
 
-    // The core execution loop
+    // Serialize ticks so a slow Supabase response cannot overlap another
+    // schedule/alarm pass and trigger duplicate actions in the same tab.
+    let tickInFlight = false;
     const interval = setInterval(async () => {
-      const { user, devices, alarms, schedules } = dataRef.current;
-      if (!user) return;
+      if (tickInFlight) return;
+      tickInFlight = true;
+      try {
+        const { user, devices, alarms, schedules } = dataRef.current;
+        if (!user) return;
 
-      const now = new Date();
-      const currentDay = now.getDay();
-      const currentHour = now.getHours();
-      const currentMinute = now.getMinutes();
-      const pad = (n) => String(n).padStart(2, '0');
-      const timeString24h = `${pad(currentHour)}:${pad(currentMinute)}`; // e.g. "08:30"
+        const now = new Date();
+        const currentDay = now.getDay();
+        const currentHour = now.getHours();
+        const currentMinute = now.getMinutes();
+        const pad = (number) => String(number).padStart(2, '0');
+        const timeString24h = `${pad(currentHour)}:${pad(currentMinute)}`;
 
-      // 1. Check Schedules
-      for (const schedule of schedules) {
-        if (!schedule.enabled) continue;
-        if (!schedule.days.includes(currentDay)) continue;
+        // 1. Check recurring schedules. Store a per-day slot claim so opening
+        // the same dashboard in another tab does not run that occurrence twice.
+        for (const schedule of schedules) {
+          if (!schedule.enabled || !Array.isArray(schedule.days) ||
+              !schedule.days.includes(currentDay) || !schedule.time) continue;
 
-        // Schedule time is usually "HH:MM:00" in Postgres, slice first 5 chars
-        const schedTime = schedule.time.substring(0, 5); 
-        if (schedTime === timeString24h) {
+          const schedTime = String(schedule.time).slice(0, 5);
+          if (schedTime !== timeString24h) continue;
+
           const lastRun = recentSchedulesRef.current.get(schedule.id);
-          // If we haven't run this schedule in the last 60 seconds
-          if (!lastRun || (now.getTime() - lastRun > 60000)) {
-            recentSchedulesRef.current.set(schedule.id, now.getTime());
-            await executeAction(user, devices, schedule.device_id, schedule.action, `Schedule: ${schedTime}`);
+          if (lastRun && now.getTime() - lastRun <= 60000) continue;
+
+          const occurrence = scheduleOccurrenceKey(now, schedTime);
+          const claimKey = `vika:schedule:${user.id}:${schedule.id}`;
+          const claimed = await claimScheduleOccurrence(claimKey, occurrence);
+          if (!claimed) continue;
+
+          recentSchedulesRef.current.set(schedule.id, now.getTime());
+          const executed = await executeAction(
+            user, devices, schedule.device_id, schedule.action, `Schedule: ${schedTime}`,
+          );
+          if (!executed) {
+            recentSchedulesRef.current.delete(schedule.id);
+            releaseScheduleOccurrence(claimKey, occurrence);
           }
         }
-      }
 
-      // 2. Check Alarms
-      for (const alarm of alarms) {
-        if (alarm.fired) continue;
-        const triggerTime = new Date(alarm.trigger_at).getTime();
-        
-        // Allow a slight buffer (e.g. 5 seconds) so it fires exactly on time or slightly after
-        if (now.getTime() >= triggerTime) {
-          // Optimistically mark as fired locally so we don't trigger it again next loop
-          dataRef.current.alarms = dataRef.current.alarms.map(a => a.id === alarm.id ? { ...a, fired: true } : a);
-          
-          // Mark fired in DB
-          await supabase.from('alarms').update({ fired: true }).eq('id', alarm.id);
-          
-          // Execute state-aware action
-          await executeAction(user, devices, alarm.device_id, alarm.action, 'Alarm');
+        // 2. Claim due alarms atomically. Only the client that changes fired
+        // from false to true receives a row and is allowed to execute it.
+        for (const alarm of alarms) {
+          if (alarm.fired) continue;
+          const triggerTime = new Date(alarm.trigger_at).getTime();
+          if (!Number.isFinite(triggerTime) || now.getTime() < triggerTime) continue;
+
+          const { data: claimedRows, error: claimError } = await supabase
+            .from('alarms')
+            .update({ fired: true })
+            .eq('id', alarm.id)
+            .eq('user_id', user.id)
+            .eq('fired', false)
+            .select('id');
+
+          if (claimError) {
+            console.warn('Could not claim due alarm:', claimError);
+            continue;
+          }
+          if (!claimedRows?.length) continue;
+
+          dataRef.current.alarms = dataRef.current.alarms.filter((item) => item.id !== alarm.id);
+          const executed = await executeAction(user, devices, alarm.device_id, alarm.action, 'Alarm');
+          if (!executed) {
+            // Permit retry if neither local dispatch nor cloud persistence worked.
+            const { error: resetError } = await supabase
+              .from('alarms')
+              .update({ fired: false })
+              .eq('id', alarm.id)
+              .eq('user_id', user.id)
+              .eq('fired', true);
+            if (!resetError) {
+              dataRef.current.alarms = [
+                ...dataRef.current.alarms,
+                { ...alarm, fired: false },
+              ];
+            } else {
+              console.warn('Failed to reset an alarm after unsuccessful execution:', resetError);
+            }
+          }
         }
-      }
 
-      // Cleanup old entries in recentSchedulesRef (older than 2 minutes)
-      for (const [id, timestamp] of recentSchedulesRef.current.entries()) {
-        if (now.getTime() - timestamp > 120000) {
-          recentSchedulesRef.current.delete(id);
+        // Avoid retaining obsolete in-memory guards.
+        for (const [id, timestamp] of recentSchedulesRef.current.entries()) {
+          if (now.getTime() - timestamp > 120000) recentSchedulesRef.current.delete(id);
         }
+      } catch (error) {
+        console.warn('Alarm/schedule executor pass failed:', error);
+      } finally {
+        tickInFlight = false;
       }
-
     }, 10000); // Check every 10 seconds
-
     return () => {
       active = false;
       clearInterval(interval);
@@ -143,7 +225,7 @@ export default function AlarmExecutor() {
   // Executes a hardware action (ON/OFF) checking live feedback
   const executeAction = async (user, devices, deviceId, targetAction, sourceName) => {
     const device = devices.find(d => d.id === deviceId);
-    if (!device) return;
+    if (!device) return false;
 
     // STATE-AWARE CHECK: Only execute if the device is not already in the target state
     if (device.is_on === targetAction) {
@@ -151,14 +233,16 @@ export default function AlarmExecutor() {
       window.dispatchEvent(new CustomEvent('show-global-toast', {
         detail: `Skipped ${sourceName}: ${device.name} is already ${targetAction ? 'ON' : 'OFF'}`,
       }));
-      return;
+      return true;
     }
 
     // Update the local relay first when the ESP32 mesh is available. Cloud
     // persistence still follows so both planes converge.
+    let localDispatched = false;
     if (isLocalConnected) {
       try {
         await setLocalDeviceState(device.relay_index, targetAction, device.node_id);
+        localDispatched = true;
       } catch (error) {
         console.warn('Local automation command failed; continuing with cloud sync:', error);
       }
@@ -180,12 +264,15 @@ export default function AlarmExecutor() {
         triggered_by: sourceName,
       });
       if (logError) console.warn('Activity log error:', logError);
+    }
 
-      // Global Notification
+    if (!error || localDispatched) {
       window.dispatchEvent(new CustomEvent('show-global-toast', {
         detail: `Executed ${sourceName}: ${device.name} turned ${targetAction ? 'ON' : 'OFF'}`,
       }));
+      return true;
     }
+    return false;
   };
 
   return null; // Headless component
