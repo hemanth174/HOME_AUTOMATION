@@ -502,6 +502,27 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
             break;
           }
 
+          const alarmTime = `${String(triggerDate.getHours()).padStart(2, '0')}:${String(triggerDate.getMinutes()).padStart(2, '0')}`;
+          const { data: activeSchedules, error: scheduleConflictError } = await supabase
+            .from('schedules')
+            .select('id, time, days, action, enabled')
+            .eq('device_id', deviceId)
+            .eq('user_id', user.id)
+            .eq('enabled', true);
+          if (scheduleConflictError) {
+            provideFeedback('Could not check schedule conflicts. Please try again.');
+            break;
+          }
+          const scheduleConflict = (activeSchedules || []).find((schedule) =>
+            Array.isArray(schedule.days) &&
+            schedule.days.includes(triggerDate.getDay()) &&
+            (schedule.time || '').slice(0, 5) === alarmTime
+          );
+          if (scheduleConflict) {
+            provideFeedback(`${device.name} already has a schedule at ${alarmTime} on that day. Edit it before adding an alarm at the same time.`);
+            break;
+          }
+
           const duplicate = (existingAlarms || []).find(a => {
             const diff = Math.abs(new Date(a.trigger_at).getTime() - triggerMs);
             return diff <= windowMs && !!a.action === actionBool;
@@ -562,17 +583,18 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           }
 
           const requestedDays = [...new Set(days || [])].sort((a, b) => a - b);
-          const duplicate = (existingSchedules || []).find((schedule) => {
-            const existingDays = [...new Set(schedule.days || [])].sort((a, b) => a - b);
+          const conflict = (existingSchedules || []).find((schedule) => {
+            const existingDays = [...new Set(schedule.days || [])];
             return schedule.enabled !== false &&
               (schedule.time || '').slice(0, 5) === normTime &&
-              Boolean(schedule.action) === actionBool &&
-              existingDays.length === requestedDays.length &&
-              existingDays.every((day, index) => day === requestedDays[index]);
+              existingDays.some((day) => requestedDays.includes(day));
           });
 
-          if (duplicate) {
-            provideFeedback(`${device.name} already has a schedule to turn ${actionBool ? 'on' : 'off'} at ${normTime}. Duplicate not created.`);
+          if (conflict) {
+            const sameAction = Boolean(conflict.action) === actionBool;
+            provideFeedback(sameAction
+              ? `${device.name} already has a schedule at ${normTime} on an overlapping day. Duplicate not created.`
+              : `Conflict: ${device.name} already has an opposite-action schedule at ${normTime} on an overlapping day.`);
           } else {
             const { error } = await supabase.from('schedules').insert({
               user_id: user.id,
@@ -818,6 +840,31 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
         return;
       }
 
+      const alarmTime = `${String(alarmDate.getHours()).padStart(2, '0')}:${String(alarmDate.getMinutes()).padStart(2, '0')}`;
+      const { data: activeSchedules, error: scheduleConflictError } = await supabase
+        .from('schedules')
+        .select('id, time, days, action, enabled')
+        .eq('device_id', matchedDevice.id)
+        .eq('user_id', user.id)
+        .eq('enabled', true);
+      if (scheduleConflictError) {
+        safeToast('Could not check schedule conflicts. Please try again.');
+        speak('Could not check schedule conflicts. Please try again.');
+        setAgentState('idle');
+        return;
+      }
+      const scheduleConflict = (activeSchedules || []).find((schedule) =>
+        Array.isArray(schedule.days) &&
+        schedule.days.includes(alarmDate.getDay()) &&
+        (schedule.time || '').slice(0, 5) === alarmTime
+      );
+      if (scheduleConflict) {
+        safeToast(`${matchedDevice.name} already has a schedule at ${alarmTime} on that day. Edit it before adding an alarm at the same time.`);
+        speak('There is already a schedule at that time. Please edit it first.');
+        setAgentState('idle');
+        return;
+      }
+
       const windowMs = 60 * 1000;
       const alarmTs = alarmDate.getTime();
       const duplicate = (existingAlarms || []).find(a => {
@@ -930,22 +977,23 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
       }
 
       const requestedDays = [...new Set(days)].sort((a, b) => a - b);
-      const dupSched = (existingSchedules || []).find((schedule) => {
-        const existingDays = [...new Set(schedule.days || [])].sort((a, b) => a - b);
+      const conflictingSchedule = (existingSchedules || []).find((schedule) => {
+        const existingDays = [...new Set(schedule.days || [])];
         return schedule.enabled !== false &&
           (schedule.time || '').slice(0, 5) === formattedTime &&
-          Boolean(schedule.action) === isScheduleOn &&
-          existingDays.length === requestedDays.length &&
-          existingDays.every((day, index) => day === requestedDays[index]);
+          existingDays.some((day) => requestedDays.includes(day));
       });
 
-      if (dupSched) {
+      if (conflictingSchedule) {
         const timeDisplay = `${parsedTime.hour % 12 || 12}:${String(parsedTime.minute).padStart(2, '0')} ${parsedTime.hour >= 12 ? 'PM' : 'AM'}`;
-        const dupMsg = `${matchedDevice.name} already has a schedule to turn ${isScheduleOn ? 'on' : 'off'} at ${timeDisplay}. Duplicate not created.`;
-        safeToast(dupMsg);
-        speak(`Duplicate schedule already exists for ${matchedDevice.name}`);
-       setAgentState('idle');
-       return;
+        const sameAction = Boolean(conflictingSchedule.action) === isScheduleOn;
+        const conflictMessage = sameAction
+          ? `${matchedDevice.name} already has a schedule at ${timeDisplay} on an overlapping day. Duplicate not created.`
+          : `Conflict: ${matchedDevice.name} already has an opposite-action schedule at ${timeDisplay} on an overlapping day.`;
+        safeToast(conflictMessage);
+        speak(conflictMessage);
+        setAgentState('idle');
+        return;
       }
 
       const { error } = await supabase.from('schedules').insert({
