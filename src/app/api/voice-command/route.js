@@ -355,10 +355,23 @@ export async function POST(request) {
     const explicitToggle = resolveRequestedToggle(transcript, deviceList, boardList, language);
     if (explicitToggle) return NextResponse.json(explicitToggle, { headers: { 'Cache-Control': 'no-store' } });
 
-    // If no API key configured, use intelligent local fallback
+    const normalizedTranscript = normalizeCommand(transcript);
+    const isAlarmCreation = /\b(?:set|create)\s+(?:an?\s+)?alarm\b/.test(normalizedTranscript);
+    const isScheduleCreation = /\b(?:set|create)\s+(?:a\s+)?schedule\b/.test(normalizedTranscript);
+    const isComplexCreation = isAlarmCreation || isScheduleCreation;
+
+    // Keep schedule/alarm creation available through the client's deterministic
+    // parser when OpenRouter is not configured; don't misreport "set alarm"
+    // as merely navigation to the alarms page.
     if (!apiKey || apiKey.trim() === '') {
+      if (isComplexCreation) {
+        return NextResponse.json(
+          { error: 'AI command service unavailable; using local command parser.' },
+          { status: 503, headers: { 'Cache-Control': 'no-store' } }
+        );
+      }
       const localResult = fallbackParseCommand(transcript, deviceList, presetList, language, boardList);
-      return NextResponse.json(localResult);
+      return NextResponse.json(localResult, { headers: { 'Cache-Control': 'no-store' } });
     }
 
     const systemPrompt = `You parse smart home voice commands and return ONLY a valid JSON object. Do not include markdown, thoughts, or explanations.
@@ -445,9 +458,18 @@ Return EXACTLY ONE of these JSON formats:
       console.warn('OpenRouter fetch failed, using fallback:', aiErr);
     }
 
-    // If AI fails or returns non-parseable response, run reliable fallback parser
+    // If OpenRouter cannot classify an alarm/schedule request, return a
+    // non-OK status so VoiceControl can run its deterministic date/time parser.
+    if (isComplexCreation) {
+      return NextResponse.json(
+        { error: 'AI command service unavailable; using local command parser.' },
+        { status: 503, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    // If AI fails or returns non-parseable text, use the safe local fallback.
     const fallbackResult = fallbackParseCommand(transcript, deviceList, presetList, language, boardList);
-    return NextResponse.json(fallbackResult);
+    return NextResponse.json(fallbackResult, { headers: { 'Cache-Control': 'no-store' } });
 
   } catch (error) {
     console.error('Error in voice-command route:', error);
