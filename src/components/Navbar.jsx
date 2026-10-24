@@ -27,6 +27,10 @@ import {
   WifiOff,
   Zap,
   Settings,
+  PanelLeft,
+  PanelLeftClose,
+  Pin,
+  PinOff,
 } from "lucide-react";
 
 import useLocalConnection from "@/hooks/useLocalConnection";
@@ -311,8 +315,33 @@ export default function Navbar() {
   const [showLocalMeshDropdownMobile, setShowLocalMeshDropdownMobile] =
     useState(false);
   const [sidebarLocalHover, setSidebarLocalHover] = useState(false);
+  const [sidebarPinned, setSidebarPinned] = useState(false);
   const localMeshDropdownRef = useRef(null);
   const localMeshDropdownRefMobile = useRef(null);
+
+  useEffect(() => {
+    setSidebarPinned(localStorage.getItem("vikatech_sidebar_pinned") === "true");
+  }, []);
+
+  const toggleSidebarPinned = () => {
+    setSidebarPinned((current) => {
+      const next = !current;
+      localStorage.setItem("vikatech_sidebar_pinned", String(next));
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    // Hover expands the rail visually; only pinning changes page layout.
+    const expanded = sidebarPinned;
+    document.documentElement.style.setProperty(
+      "--desktop-sidebar-width",
+      expanded ? "16rem" : "4rem",
+    );
+    window.dispatchEvent(
+      new CustomEvent("vikatech-sidebar-change", { detail: { expanded } }),
+    );
+  }, [sidebarPinned, sidebarLocalHover]);
 
   // Offline toast notification state
   const [offlineToast, setOfflineToast] = useState(null);
@@ -949,6 +978,7 @@ export default function Navbar() {
         rel={link.href === "/admin" ? "noopener noreferrer" : undefined}
         onClick={(e) => handleOfflineLinkClick(e, link)}
         aria-current={active ? "page" : undefined}
+        title={!sidebarPinned && !sidebarLocalHover ? link.label : undefined}
         className={`rounded-xl px-3 py-2.5 text-sm font-bold transition-all duration-200 ease-out flex items-center justify-between ${
           isCloudDisabled
             ? "opacity-40 cursor-not-allowed text-(--pg-muted) bg-transparent hover:bg-transparent"
@@ -961,7 +991,9 @@ export default function Navbar() {
       >
         <div className="flex items-center gap-3">
           <Icon size={16} className="stroke-[2.5px] shrink-0" />
-          <span>{link.label}</span>
+          <span className={`overflow-hidden whitespace-nowrap transition-all duration-200 ${sidebarPinned || sidebarLocalHover ? "max-w-40 opacity-100" : "max-w-0 opacity-0"}`}>
+            {link.label}
+          </span>
         </div>
         {isCloudDisabled && (
           <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-(--pg-error-faint) text-(--pg-error) border border-(--pg-error-line)">
@@ -974,15 +1006,16 @@ export default function Navbar() {
 
   // Sidebar contents (desktop only)
   const SidebarContent = () => (
-    <div className="flex flex-col h-full justify-between py-6 px-4 select-none">
+    <div className={`flex flex-col h-full justify-between py-5 select-none ${sidebarPinned || sidebarLocalHover ? "px-4" : "px-2"}`}>
       {/* Top: Branding & Navigation */}
       <div className="flex flex-col gap-4">
-        <div className="flex items-center px-2">
+        <div className={`flex items-center ${sidebarPinned || sidebarLocalHover ? "justify-between px-2" : "justify-center"}`}>
           <Link
             href="/"
             className="flex items-center gap-2.5 hover:opacity-90 transition-opacity"
+            aria-label="VikaTech home"
           >
-            <span className="flex h-13 w-26 items-center justify-center overflow-hidden rounded-xl  shadow-sm">
+            <span className={`flex h-10 items-center justify-center overflow-hidden rounded-xl shadow-sm transition-all duration-200 ${sidebarPinned || sidebarLocalHover ? "w-24" : "w-10"}`}>
               <img
                 src="/vikatech-logo.png"
                 alt="VikaTech"
@@ -990,50 +1023,71 @@ export default function Navbar() {
               />
             </span>
           </Link>
+          {(sidebarPinned || sidebarLocalHover) && (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={toggleSidebarPinned}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-(--pg-muted) transition-colors hover:bg-black/[0.06] hover:text-(--pg-deep)"
+                title={sidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
+                aria-label={sidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
+                aria-pressed={sidebarPinned}
+              >
+                {sidebarPinned ? <PinOff size={15} /> : <Pin size={15} />}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSidebarLocalHover(false);
+                  setSidebarPinned(false);
+                  localStorage.setItem("vikatech_sidebar_pinned", "false");
+                }}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-(--pg-muted) transition-colors hover:bg-black/[0.06] hover:text-(--pg-deep)"
+                title="Collapse sidebar"
+                aria-label="Collapse sidebar"
+              >
+                <PanelLeftClose size={15} />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Links */}
         <nav className="flex flex-col gap-1.5" aria-label="Primary">
-          <span className="text-[9px] font-extrabold uppercase tracking-widest text-(--pg-muted) px-2 mb-1">
-            MAIN MENU
-          </span>
+          {(sidebarPinned || sidebarLocalHover) && <span className="text-[9px] font-extrabold uppercase tracking-widest text-(--pg-muted) px-2 mb-1">MAIN MENU</span>}
           {links.map((link) => renderSidebarLink(link))}
         </nav>
 
         {/* Secondary device-management routes */}
         <nav className="flex flex-col gap-1.5" aria-label="Device management">
-          <span className="text-[9px] font-extrabold uppercase tracking-widest text-(--pg-muted) px-2 mb-1">
-            MANAGE
-          </span>
+          {(sidebarPinned || sidebarLocalHover) && <span className="text-[9px] font-extrabold uppercase tracking-widest text-(--pg-muted) px-2 mb-1">MANAGE</span>}
           {manageLinks.map((link) => renderSidebarLink(link))}
         </nav>
 
         {/* Support & Legal Section */}
         <div className="flex flex-col gap-1.5 mt-2">
-          <span className="text-[9px] font-extrabold uppercase tracking-widest text-(--pg-muted) px-2 mb-1">
-            SUPPORT & LEGAL
-          </span>
+          {(sidebarPinned || sidebarLocalHover) && <span className="text-[9px] font-extrabold uppercase tracking-widest text-(--pg-muted) px-2 mb-1">SUPPORT & LEGAL</span>}
           <Link
             href="/faq"
             className="rounded-xl px-3 py-2.5 text-sm font-bold transition-all duration-200 text-(--pg-navtext) hover:bg-black/[0.04] hover:text-(--pg-deep) flex items-center gap-3"
           >
             <HelpCircle size={16} className="stroke-[2.5px]" />
-            <span>FAQ&apos;s</span>
+            <span className={`overflow-hidden whitespace-nowrap transition-all duration-200 ${sidebarPinned || sidebarLocalHover ? "max-w-40 opacity-100" : "max-w-0 opacity-0"}`}>FAQ&apos;s</span>
           </Link>
           <Link
             href="/terms"
             className="rounded-xl px-3 py-2.5 text-sm font-bold transition-all duration-200 text-(--pg-navtext) hover:bg-black/[0.04] hover:text-(--pg-deep) flex items-center gap-3"
           >
             <FileText size={16} className="stroke-[2.5px]" />
-            <span>Terms & Conditions</span>
+            <span className={`overflow-hidden whitespace-nowrap transition-all duration-200 ${sidebarPinned || sidebarLocalHover ? "max-w-40 opacity-100" : "max-w-0 opacity-0"}`}>Terms & Conditions</span>
           </Link>
         </div>
       </div>
 
       {/* Bottom: User & Info */}
-      <div className="flex flex-col gap-4 border-t border-(--pg-line) pt-4">
+        <div className={`flex flex-col gap-4 border-t border-(--pg-line) pt-4 ${sidebarPinned || sidebarLocalHover ? "" : "items-center"}`}>
         {/* Install Web App */}
-        {showInstallBtn && (
+        {showInstallBtn && (sidebarPinned || sidebarLocalHover) && (
           <button
             onClick={handleInstallClick}
             className="mx-2 px-3 py-2.5 rounded-xl text-xs font-extrabold bg-(--pg-brand) text-(--pg-onbrand) hover:bg-(--pg-brand-hover) cursor-pointer flex items-center justify-center gap-2 transition-colors"
@@ -1044,7 +1098,7 @@ export default function Navbar() {
         )}
 
         {/* Timezone */}
-        <div className="flex flex-col gap-0.5 px-2">
+        <div className={`flex flex-col gap-0.5 px-2 ${sidebarPinned || sidebarLocalHover ? "" : "hidden"}`}>
           <span className="text-[9px] font-extrabold uppercase tracking-wider text-(--pg-muted) block">
             Timezone
           </span>
@@ -1073,7 +1127,7 @@ export default function Navbar() {
               <span>{initial}</span>
             )}
           </div>
-          <div className="flex flex-col min-w-0 flex-1">
+          <div className={`flex flex-col min-w-0 flex-1 ${sidebarPinned || sidebarLocalHover ? "" : "hidden"}`}>
             <span className="text-xs font-black text-(--pg-ink) truncate leading-none mb-1">
               {fullName}
             </span>
@@ -1089,12 +1143,19 @@ export default function Navbar() {
   return (
     <>
       {/* Desktop Fixed Sidebar */}
-      <aside className="w-64 fixed left-0 top-0 bottom-0 h-screen border-r border-(--pg-line) bg-(--pg-side) z-50 max-md:hidden">
+      <aside
+        className={`fixed left-0 top-0 bottom-0 h-screen border-r border-(--pg-line) bg-(--pg-side) z-50 max-md:hidden transition-[width] duration-200 ease-out ${sidebarPinned || sidebarLocalHover ? "w-64 shadow-xl" : "w-16"}`}
+        onMouseEnter={() => setSidebarLocalHover(true)}
+        onMouseLeave={() => {
+          if (!sidebarPinned) setSidebarLocalHover(false);
+        }}
+        aria-label="Desktop navigation sidebar"
+      >
         <SidebarContent />
       </aside>
 
       {/* Desktop Content Header */}
-      <header className="fixed top-0 right-0 left-0 md:left-64 h-16 border-b border-border bg-header/90 backdrop-blur-md flex items-center justify-between px-6 z-40 max-md:hidden select-none">
+      <header className="desktop-shell-header fixed top-0 right-0 left-0 h-16 border-b border-border bg-header/90 backdrop-blur-md flex items-center justify-between px-6 z-40 max-md:hidden select-none">
         {/* Left: Page Title */}
         <div className="flex items-center gap-2">
           <span className="text-sm font-black text-text tracking-tight">

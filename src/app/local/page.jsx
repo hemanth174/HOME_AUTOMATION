@@ -815,7 +815,7 @@ export default function LocalControlPage() {
                       disabled={busy[key] || !connected}
                       className={`relative h-7 w-[52px] shrink-0 rounded-full border transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#A86F3D] disabled:cursor-not-allowed disabled:opacity-60 ${
                         on
-                          ? "border-(--pg-brand) bg-(--pg-brand)"
+                          ? "border-(--pg-control-on) bg-(--pg-control-on) hover:bg-(--pg-control-on-hover)"
                           : "border-(--pg-track) bg-(--pg-track) hover:bg-(--pg-track-hover)"
                       }`}
                     >

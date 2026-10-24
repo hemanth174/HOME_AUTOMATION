@@ -25,9 +25,22 @@ export default function MainLayoutWrapper({ children, className = "" }) {
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(true);
   const [isClientOnline, setIsClientOnline] = useState(true); // Always true initially to match SSR
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const { isLocalConnected, localUrl } = useLocalConnection();
 
   const fullWidthPage = isLoginPage || isPendingPage || isDeniedPage || cleanPath === '/admin' || is404Page || isPublicPage || (!user && cleanPath === '/');
+
+  useEffect(() => {
+    const syncSidebar = (event) => {
+      setSidebarExpanded(Boolean(event.detail?.expanded));
+    };
+
+    setSidebarExpanded(
+      localStorage.getItem('vikatech_sidebar_pinned') === 'true',
+    );
+    window.addEventListener('vikatech-sidebar-change', syncSidebar);
+    return () => window.removeEventListener('vikatech-sidebar-change', syncSidebar);
+  }, []);
 
   // Real connectivity monitor.
   //
@@ -174,7 +187,10 @@ export default function MainLayoutWrapper({ children, className = "" }) {
   }
 
   return (
-    <div className={`${fullWidthPage ? "w-full min-h-screen" : "w-full min-h-screen md:pl-64 pb-20 md:pb-8 transition-all duration-300"} ${className}`}>
+    <div
+      className={`${fullWidthPage ? "w-full min-h-screen" : "desktop-shell-content w-full min-h-screen pb-20 md:pb-8"} ${className}`}
+      style={fullWidthPage ? undefined : { '--desktop-sidebar-width': sidebarExpanded ? '16rem' : '4rem' }}
+    >
       {!fullWidthPage && cleanPath !== '/local' && (
           <LocalModeBanner
             isClientOnline={isClientOnline}

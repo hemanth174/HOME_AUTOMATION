@@ -146,6 +146,7 @@
    under data-theme="dark". The full app-shell palette stays scoped to
    body.pg-shell (desktop >=1024px) below. */
 :root {
+    --desktop-sidebar-width: 4rem;
     --pg-card: #FFFFFF;
     --pg-ink: #202522;
     --pg-muted: #69736D;
@@ -154,6 +155,8 @@
     --pg-deep: #063B20;
     --pg-brand: #087443;
     --pg-brand-hover: #063B20;
+    --pg-control-on: #087443;
+    --pg-control-on-hover: #063B20;
     --pg-onbrand: #FFFFFF;
     --pg-side: #EFF3EF;
     --pg-navtext: #43503F;
@@ -180,6 +183,8 @@ html[data-theme="dark"] {
     --pg-deep: #EAF3EA;
     --pg-brand: #43A865;
     --pg-brand-hover: #5CC578;
+    --pg-control-on: #43A865;
+    --pg-control-on-hover: #5CC578;
     --pg-onbrand: #062012;
     --pg-side: #0D150F;
     --pg-navtext: #A9BCA9;
@@ -852,6 +857,24 @@ body,
 }
 
 /* -------- Premium Dashboard Spacious Container -------- */
+.desktop-shell-content {
+    transition: padding-left 200ms ease-out;
+}
+
+.desktop-shell-header {
+    transition: left 200ms ease-out;
+}
+
+@media (min-width: 768px) {
+    .desktop-shell-content {
+        padding-left: var(--desktop-sidebar-width);
+    }
+
+    .desktop-shell-header {
+        left: var(--desktop-sidebar-width);
+    }
+}
+
 .dashboard-container {
     margin-left: auto;
     margin-right: auto;

@@ -78,7 +78,7 @@ export default function DeviceCard({
           onClick={onToggle}
           className={`relative h-7 w-[52px] shrink-0 rounded-full border transition-colors duration-200 cursor-pointer disabled:cursor-wait ${
             isRelayOn
-              ? 'bg-(--pg-brand) border-(--pg-brand)'
+              ? 'bg-(--pg-control-on) border-(--pg-control-on) hover:bg-(--pg-control-on-hover)'
               : 'bg-(--pg-track) border-(--pg-track) hover:bg-(--pg-track-hover)'
           }`}
         >
