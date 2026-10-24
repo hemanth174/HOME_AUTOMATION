@@ -109,14 +109,14 @@ function getExplicitStateIntent(transcript) {
 
   const on = /\bactivate\b/.test(normalized) ||
     /\b(?:turn|switch|power)\s+(?:the\s+)?on\b/.test(normalized) ||
-    /\b(?:turn|switch|power)\b(?:\s+\w+){0,6}?\s+on\b/.test(normalized) ||
+    /\b(?:turn|switch|power)\s+(?:the\s+)?(?:(?!(?:on|off)\b)[a-z0-9]+\s+){1,5}on\b/.test(normalized) ||
     /\b(?:all|everything|every device|whole house|whole home|entire home)\s+on\b/.test(normalized) ||
     /\bon\s+(?:all|everything|every device|sab|sare|saare)\b/.test(normalized) ||
     /\b(?:sab|sare|saare)\s+on\b/.test(normalized) ||
     ['चालू', 'जलाओ', 'जला', 'ஆன்', 'ఆన్', 'వెలిగించు'].some((term) => raw.includes(term));
   const off = /\bdeactivate\b/.test(normalized) ||
     /\b(?:turn|switch|power)\s+(?:the\s+)?off\b/.test(normalized) ||
-    /\b(?:turn|switch|power)\b(?:\s+\w+){0,6}?\s+off\b/.test(normalized) ||
+    /\b(?:turn|switch|power)\s+(?:the\s+)?(?:(?!(?:on|off)\b)[a-z0-9]+\s+){1,5}off\b/.test(normalized) ||
     /\b(?:all|everything|every device|whole house|whole home|entire home)\s+off\b/.test(normalized) ||
     /\boff\s+(?:all|everything|every device|sab|sare|saare)\b/.test(normalized) ||
     /\b(?:sab|sare|saare)\s+(?:off|bandh)\b/.test(normalized) ||
