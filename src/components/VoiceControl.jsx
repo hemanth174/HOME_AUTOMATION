@@ -394,8 +394,14 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           break;
         }
         if (applyPreset) {
-          await applyPreset(preset, result.deactivate || false);
-          provideFeedback(`${result.deactivate ? 'Deactivated' : 'Activated'} preset: ${presetName || preset.name}`);
+          const outcome = await applyPreset(preset, result.deactivate || false);
+          if (outcome?.success === false) {
+            provideFeedback(outcome.succeeded > 0
+              ? `Preset ${presetName || preset.name} was only partly applied. Please check device states.`
+              : `Could not apply preset ${presetName || preset.name}. Please try again.`);
+          } else {
+            provideFeedback(`${result.deactivate ? 'Deactivated' : 'Activated'} preset: ${presetName || preset.name}`);
+          }
           break;
         }
 
