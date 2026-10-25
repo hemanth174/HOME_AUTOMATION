@@ -53,20 +53,32 @@ export default function DeviceCard({
           {device.name}
         </h3>
         <p className="truncate text-[11px] font-semibold text-(--pg-muted) mt-0.5">
-          {roomName} · {kind.label}
+          {roomName} / {kind.label}
         </p>
-        <p
-          className={`text-[11px] font-extrabold uppercase tracking-[0.06em] mt-1 ${
+        <div
+          className={`mt-1 flex flex-wrap items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.09em] max-sm:gap-1 ${
             isLightOn ? "text-(--pg-success)" : "text-(--pg-muted)"
           }`}
           aria-live="polite"
         >
-          {hasFeedback
-            ? `Relay ${isRelayOn ? "ON" : "OFF"} · Switch input ${device.feedback_on ? "ON" : "OFF"}`
-            : isRelayOn
-              ? "Relay ON · switch input unavailable"
-              : "Relay OFF · switch input unavailable"}
-        </p>
+          <span>Relay {isRelayOn ? "ON" : "OFF"}</span>
+          <span
+            className={`inline-flex items-center whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[9px] leading-none tracking-wide max-sm:px-2 max-sm:py-1 max-sm:text-[10px] ${
+              hasFeedback
+                ? "border-(--pg-status-ok-line) bg-(--pg-status-ok-bg) text-(--pg-status-ok)"
+                : "border-(--pg-status-bad-line) bg-(--pg-status-bad-bg) text-(--pg-status-bad)"
+            }`}
+            title={
+              hasFeedback
+                ? "Physical switch input state reported by the controller."
+                : "This controller has not reported its GPIO switch-input state yet."
+            }
+          >
+            {hasFeedback
+              ? `Switch input ${device.feedback_on ? "ON" : "OFF"}`
+              : "Switch input unavailable"}
+          </span>
+        </div>
       </div>
 
       <div className="flex items-center justify-between gap-2 mt-0.5">

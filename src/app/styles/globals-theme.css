@@ -170,6 +170,12 @@
     --pg-error: #DC4545;
     --pg-error-faint: rgba(220, 69, 69, 0.1);
     --pg-error-line: rgba(220, 69, 69, 0.2);
+    --pg-status-ok: var(--pg-success);
+    --pg-status-ok-bg: var(--pg-brand-faint);
+    --pg-status-ok-line: var(--pg-brand-line);
+    --pg-status-bad: var(--pg-error);
+    --pg-status-bad-bg: var(--pg-error-faint);
+    --pg-status-bad-line: var(--pg-error-line);
     --pg-tile-ico: #CFFF79;
     --pg-on-deep: #CFFF79;
 }
@@ -346,6 +352,12 @@ body.m-shell {
     --pg-error: #52525B;
     --pg-error-faint: rgba(82, 82, 91, 0.1);
     --pg-error-line: rgba(82, 82, 91, 0.22);
+    --pg-status-ok: #15803D;
+    --pg-status-ok-bg: #F0FDF4;
+    --pg-status-ok-line: #BBF7D0;
+    --pg-status-bad: #DC2626;
+    --pg-status-bad-bg: #FEF2F2;
+    --pg-status-bad-line: #FECACA;
     --pg-tile-ico: #FFFFFF;
     --pg-on-deep: #FFFFFF;
     /* Sans-serif product type on mobile; mono kept for data values. */
@@ -402,6 +414,12 @@ html[data-theme="dark"] body.m-shell {
     --pg-error: #A1A1AA;
     --pg-error-faint: rgba(161, 161, 170, 0.1);
     --pg-error-line: rgba(161, 161, 170, 0.22);
+    --pg-status-ok: #4ADE80;
+    --pg-status-ok-bg: rgba(74, 222, 128, 0.12);
+    --pg-status-ok-line: rgba(74, 222, 128, 0.3);
+    --pg-status-bad: #F87171;
+    --pg-status-bad-bg: rgba(248, 113, 113, 0.12);
+    --pg-status-bad-line: rgba(248, 113, 113, 0.3);
     --pg-tile-ico: #FFFFFF;
     --pg-on-deep: #09090B;
 }

@@ -139,6 +139,32 @@ export default function FeatureNotificationBell({
             }
           },
         )
+        .on(
+          "postgres_changes",
+          {
+            event: "DELETE",
+            schema: "public",
+            table: "user_notifications",
+          },
+          ({ old: notification }) => {
+            if (!active) return;
+            if (notification?.id) {
+              setNotifications((current) =>
+                current.filter((item) => item.id !== notification.id),
+              );
+              return;
+            }
+            void supabase
+              .from("user_notifications")
+              .select("id, type, title, body, url, dedupe_key, data, created_at, read_at")
+              .eq("user_id", session.user.id)
+              .order("created_at", { ascending: false })
+              .limit(40)
+              .then(({ data }) => {
+                if (active && data) setNotifications(data);
+              });
+          },
+        )
         .subscribe();
     };
 

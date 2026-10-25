@@ -13,6 +13,7 @@ export default function ScheduleFormModal({ state }) {
     scheduleAction,
     timeError,
     timeConfirmed,
+    isSaving,
     devices,
     toggleDeviceSelection,
     handleTimeChange,
@@ -139,10 +140,10 @@ export default function ScheduleFormModal({ state }) {
             </button>
             <button
               type="submit"
-              disabled={Boolean(timeError) || !timeConfirmed || !scheduleDays.length}
-              className="inline-flex min-h-[36px] items-center rounded-lg bg-accent px-5 text-xs font-extrabold text-(--btn-text) cursor-pointer disabled:opacity-40"
+              disabled={Boolean(timeError) || !timeConfirmed || !scheduleDays.length || isSaving}
+              className="inline-flex min-h-[36px] items-center rounded-lg bg-accent px-5 text-xs font-extrabold text-(--btn-text) cursor-pointer disabled:opacity-40 disabled:cursor-wait"
             >
-              {editingSchedule ? "Save Changes" : "Create Schedule"}
+              {isSaving ? "Saving..." : editingSchedule ? "Save Changes" : "Create Schedule"}
             </button>
           </div>
         </form>

@@ -85,7 +85,7 @@ export default function DashboardView({ c }) {
             </p>
             <button
               onClick={() => c.setShowAddBoardModal(true)}
-              className="rounded-xl bg-(--pg-brand) px-5 py-3 text-xs font-extrabold cursor-pointer"
+              className="rounded-xl bg-(--pg-brand) px-5 py-3 text-xs font-extrabold text-(--pg-onbrand) cursor-pointer transition-colors hover:bg-(--pg-brand-hover)"
             >
               Add Your First Room
             </button>
@@ -93,24 +93,8 @@ export default function DashboardView({ c }) {
         ) : (
           <>
             <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)] items-start">
-              <div className="lg:order-1 rounded-2xl border border-(--pg-line) bg-(--pg-card) p-3">
-                <RoomList
-                  boards={c.boards}
-                  devices={c.devices}
-                  selectedId={selectedBoard?.id}
-                  onSelect={c.selectBoard}
-                />
-                <button
-                  onClick={() => c.setShowAddBoardModal(true)}
-                  className="mt-2 w-full inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-dashed text-xs font-extrabold cursor-pointer"
-                >
-                  <Plus size={14} />
-                  Add Room
-                </button>
-              </div>
-
-              <section className="boards-section-selector min-w-0 rounded-2xl border border-(--pg-line) bg-(--pg-card) p-3 sm:p-5 lg:order-2">
-                <div className="flex flex-wrap items-center justify-between gap-3 pb-3">
+                 <section className="boards-section-selector min-w-0 rounded-2xl border border-(--pg-line) bg-(--pg-card) p-3 sm:p-5 lg:order-2">
+                <div className="flex flex-wrap items-center justify-between gap-3 pb-1">
                   <div className="min-w-0 flex-1">
                     <h2
                       className="text-lg font-extrabold truncate"
@@ -125,37 +109,39 @@ export default function DashboardView({ c }) {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <div
-                      className="flex items-center rounded-xl border border-(--pg-line) bg-(--pg-card) p-0.5"
-                      aria-label="Device view options"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => c.changeDeviceView("list")}
-                        aria-label="List view"
-                        aria-pressed={c.deviceView === "list"}
-                        className={`inline-flex h-8 w-8 items-center justify-center rounded-lg transition-all cursor-pointer ${
-                          c.deviceView === "list"
-                            ? "bg-(--pg-deep) text-(--pg-on-deep)"
-                            : "text-(--pg-muted) hover:text-(--pg-ink)"
-                        }`}
+                    {roomExpanded ? (
+                      <div
+                        className="flex items-center rounded-xl border border-(--pg-line) bg-(--pg-card) p-0.5"
+                        aria-label="Device view options"
                       >
-                        <List size={14} aria-hidden="true" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => c.changeDeviceView("carousel")}
-                        aria-label="Carousel view"
-                        aria-pressed={c.deviceView === "carousel"}
-                        className={`inline-flex h-8 w-8 items-center justify-center rounded-lg transition-all cursor-pointer ${
-                          c.deviceView === "carousel"
-                            ? "bg-(--pg-deep) text-(--pg-on-deep)"
-                            : "text-(--pg-muted) hover:text-(--pg-ink)"
-                        }`}
-                      >
-                        <LayoutGrid size={14} aria-hidden="true" />
-                      </button>
-                    </div>
+                        <button
+                          type="button"
+                          onClick={() => c.changeDeviceView("list")}
+                          aria-label="List view"
+                          aria-pressed={c.deviceView === "list"}
+                          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg transition-all cursor-pointer ${
+                            c.deviceView === "list"
+                              ? "bg-(--pg-deep) text-(--pg-on-deep)"
+                              : "text-(--pg-muted) hover:text-(--pg-ink)"
+                          }`}
+                        >
+                          <List size={14} aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => c.changeDeviceView("carousel")}
+                          aria-label="Carousel view"
+                          aria-pressed={c.deviceView === "carousel"}
+                          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg transition-all cursor-pointer ${
+                            c.deviceView === "carousel"
+                              ? "bg-(--pg-deep) text-(--pg-on-deep)"
+                              : "text-(--pg-muted) hover:text-(--pg-ink)"
+                          }`}
+                        >
+                          <LayoutGrid size={14} aria-hidden="true" />
+                        </button>
+                      </div>
+                    ) : null}
 
                     {button("Room On", Power, () =>
                       c.boardControl(
@@ -215,6 +201,7 @@ export default function DashboardView({ c }) {
                             : "grid sm:grid-cols-2 gap-2.5"
                         }
                         aria-label="Local devices carousel"
+                        onScroll={c.saveDeviceIndex}
                       >
                         {selectedDevices.map((device) => (
                           <DeviceCard
@@ -262,6 +249,22 @@ export default function DashboardView({ c }) {
                   </>
                 )}
               </section>
+              <div className="lg:order-1 rounded-2xl border border-(--pg-line) bg-(--pg-card) p-3">
+                <RoomList
+                  boards={c.boards}
+                  devices={c.devices}
+                  selectedId={selectedBoard?.id}
+                  onSelect={c.selectBoard}
+                />
+                <button
+                  onClick={() => c.setShowAddBoardModal(true)}
+                  className="mt-2 w-full inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-dashed text-xs font-extrabold cursor-pointer"
+                >
+                  <Plus size={14} />
+                  Add Room
+                </button>
+              </div>
+
             </div>
 
             {(c.hasPresets || c.hasEnergyHistory) && (

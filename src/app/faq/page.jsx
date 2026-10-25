@@ -38,13 +38,13 @@ export default function FAQPage() {
         Back to Dashboard
       </Link>
 
-      <div className="flex items-center gap-2.5 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-accent-bg flex items-center justify-center text-accent border border-accent/20 shadow-gold-glow">
+      <div className="flex items-start gap-3 sm:gap-2.5 mb-6 min-w-0">
+        <div className="w-10 h-10 shrink-0 rounded-xl bg-accent-bg flex items-center justify-center text-accent border border-accent/20 shadow-gold-glow">
           <HelpCircle size={20} className="stroke-[2.5px]" />
         </div>
-        <div className="flex flex-col gap-0.5">
-          <h1 className="text-xl font-black uppercase tracking-wider text-text">Frequently Asked Questions</h1>
-          <span className="text-xs font-bold text-text-muted">Answers to common questions about your Smart Home setup.</span>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <h1 className="text-lg sm:text-xl font-black uppercase tracking-wide sm:tracking-wider text-text break-words">Frequently Asked Questions</h1>
+          <span className="text-[11px] sm:text-xs font-bold text-text-muted break-words">Answers to common questions about your Smart Home setup.</span>
         </div>
       </div>
 
@@ -52,13 +52,13 @@ export default function FAQPage() {
         {faqs.map((faq, index) => {
           const Icon = faq.icon;
           return (
-            <article key={index} className="border border-border bg-card p-5 rounded-2xl shadow-lg backdrop-blur-md flex gap-4">
+            <article key={index} className="border border-border bg-card p-4 sm:p-5 rounded-2xl shadow-lg backdrop-blur-md flex items-start gap-3 sm:gap-4">
               <div className="w-8 h-8 rounded-lg bg-accent-bg flex items-center justify-center text-accent border border-accent/15 shrink-0 mt-0.5">
                 <Icon size={16} />
               </div>
-              <div className="flex flex-col gap-1.5">
-                <h3 className="text-sm font-extrabold text-accent leading-snug">{faq.q}</h3>
-                <p className="text-xs text-text-muted font-semibold leading-relaxed">{faq.a}</p>
+              <div className="flex min-w-0 flex-col gap-1.5">
+                <h3 className="text-[13px] sm:text-sm font-extrabold text-accent leading-snug break-words">{faq.q}</h3>
+                <p className="text-[11px] sm:text-xs text-text-muted font-semibold leading-relaxed break-words">{faq.a}</p>
               </div>
             </article>
           );

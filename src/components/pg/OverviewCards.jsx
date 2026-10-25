@@ -23,6 +23,9 @@ export default function OverviewCards({
   const [currentTime, setCurrentTime] = useState(null);
   const firstName = String(userName || "there").split(" ")[0];
   const greeting = currentTime ? getGreeting(currentTime) : "Hello";
+  const statusParts = Array.isArray(statusMessage)
+    ? statusMessage
+    : [{ text: statusMessage }];
 
   useEffect(() => {
     const updateTime = () => setCurrentTime(new Date());
@@ -67,15 +70,28 @@ export default function OverviewCards({
   ];
 
   return (
-    <section aria-label="Overview" className="mb-5">
+    <section aria-label="Overview" className="mb-7">
       <h1
-        className="text-xl sm:text-2xl font-extrabold tracking-tight text-text truncate"
+        className="text-xl sm:text-2xl font-extrabold tracking-tight text-text truncate pl-2"
         title={`${greeting}, ${firstName}`}
       >
         {greeting}, {firstName}
       </h1>
-      <p className="text-[13px] font-medium text-text-muted mt-1 mb-4">
-        {statusMessage}
+      <p className="text-[13px] font-medium text-text-muted mt-1 mb-4 pl-2">
+        {statusParts.map((part, index) => (
+          <span
+            key={`${part.text}-${index}`}
+            className={
+              part.tone === "accent"
+                ? "rounded-md bg-(--pg-brand-faint) px-1 font-extrabold text-(--pg-brand)"
+                : part.tone === "error"
+                  ? "rounded-md bg-(--pg-error-faint) px-1 font-extrabold text-(--pg-error)"
+                  : undefined
+            }
+          >
+            {part.text}
+          </span>
+        ))}
       </p>
       <div className="hidden sm:grid grid-cols-2 gap-2.5 lg:grid-cols-4 lg:gap-3">
         {cards.map(({ label, value, sub, Icon, accent, ok }) => (
