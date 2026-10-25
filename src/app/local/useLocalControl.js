@@ -3,7 +3,7 @@ import { discoverLocalNode, fetchLocalDevices, setLocalDeviceState, triggerLocal
 import useLocalConnection, { setLocalProbingEnabled } from "@/hooks/useLocalConnection";
 
 const LOCAL = "home_auto_cached_local_devices", DEVICES = "home_auto_cached_devices", BOARDS = "home_auto_cached_boards";
-export const REFRESH_INTERVAL = 15000;
+export const REFRESH_INTERVAL = 30000;
 
 export default function useLocalControl() {
   const { isLocalConnected, localUrl, checkConnection, isProbing } = useLocalConnection();

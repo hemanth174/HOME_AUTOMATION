@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { setLocalDeviceState, triggerLocalAll, fetchLocalDevices, fetchMeshNodes } from '@/lib/localApi';
 import { checkInternet } from '@/lib/netCheck';
@@ -9,6 +9,7 @@ import useLocalConnection from './useLocalConnection';
 const LOCAL_STORAGE_BOARDS = 'home_auto_cached_boards';
 const LOCAL_STORAGE_DEVICES = 'home_auto_cached_devices';
 const LOCAL_STORAGE_PRESETS = 'home_auto_cached_presets';
+const INTERNET_CHECK_INTERVAL = 30000;
 
 export default function useDashboardData() {
   const [user, setUser] = useState(null);
@@ -18,6 +19,7 @@ export default function useDashboardData() {
   const [expandedBoards, setExpandedBoards] = useState({});
   const [loading, setLoading] = useState(true);
   const [isClientOnline, setIsClientOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const boardsRef = useRef([]);
 
   const { isLocalConnected, leaderNode, localUrl, checkConnection } = useLocalConnection();
 
@@ -36,7 +38,7 @@ export default function useDashboardData() {
     evaluate();
     window.addEventListener('online', evaluate);
     window.addEventListener('offline', evaluate);
-    const interval = setInterval(evaluate, 10000);
+    const interval = setInterval(evaluate, INTERNET_CHECK_INTERVAL);
 
     return () => {
       active = false;
@@ -45,6 +47,10 @@ export default function useDashboardData() {
       clearInterval(interval);
     };
   }, []);
+
+  useEffect(() => {
+    boardsRef.current = boards;
+  }, [boards]);
 
   // Load offline cache on boot
   useEffect(() => {
@@ -264,6 +270,7 @@ export default function useDashboardData() {
         ]);
         if (!active || (!localDevices.length && !localNodes.length)) return;
 
+        const currentBoards = boardsRef.current;
         const localBoardIds = new Set(localNodes.map((node) => node.nodeId).filter(Boolean));
         localDevices.forEach((device) => {
           if (device.node_id) localBoardIds.add(device.node_id);
@@ -283,12 +290,12 @@ export default function useDashboardData() {
 
         setDevices((current) => {
           const updated = current.map((device) => {
-            const board = boards.find((item) => item.id === device.board_id);
+            const board = currentBoards.find((item) => item.id === device.board_id);
             const local = localDevices.find(
               (item) =>
                 item.relay_index === device.relay_index &&
                 (!board?.board_identifier || item.node_id === board.board_identifier ||
-                  (!item.node_id && boards.length === 1)),
+                  (!item.node_id && currentBoards.length === 1)),
             );
             return local ? { ...device, is_on: local.is_on, feedback_on: local.feedback_on } : device;
           });
@@ -296,7 +303,7 @@ export default function useDashboardData() {
           // Add locally reported devices that are not present in stale cloud
           // data, allowing a newly provisioned member to appear offline.
           for (const local of localDevices) {
-            const board = boards.find((item) => item.board_identifier === local.node_id);
+            const board = currentBoards.find((item) => item.board_identifier === local.node_id);
             const exists = updated.some((device) =>
               device.relay_index === local.relay_index &&
               (!board || device.board_id === board.id),
@@ -335,7 +342,7 @@ export default function useDashboardData() {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [isLocalConnected, boards]);
+  }, [isLocalConnected]);
 
   /**
    * Dual-Plane Device Controller:

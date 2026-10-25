@@ -43,17 +43,20 @@ SemaphoreHandle_t relayMutex = nullptr;
 TaskHandle_t cloudSyncTaskHandle = nullptr;
 TaskHandle_t cloudPollTaskHandle = nullptr;
 volatile bool cloudDevicesReady = false;
-const unsigned long POLL_INTERVAL = 1000;
-const unsigned long HEARTBEAT_INTERVAL = 20000;
+// Cloud polling is a fallback for commands issued while the browser is not
+// connected to the local controller. Local REST commands remain immediate;
+// keeping this at one second creates tens of thousands of Supabase requests.
+const unsigned long POLL_INTERVAL = 30000;
+const unsigned long HEARTBEAT_INTERVAL = 60000;
 struct Alarm { String id; String triggerAt; bool action; bool active; int deviceIndex; };
 #define MAX_ALARMS 20
 Alarm alarms[MAX_ALARMS];
-const unsigned long ALARM_POLL_INTERVAL = 30000;
+const unsigned long ALARM_POLL_INTERVAL = 60000;
 struct Schedule { String id, deviceId, time, days, lastRunDate; bool action, enabled; int deviceIndex; };
 #define MAX_SCHEDULES 32
 Schedule schedules[MAX_SCHEDULES];
 int scheduleCount = 0;
-const unsigned long SCHEDULE_POLL_INTERVAL = 30000;
+const unsigned long SCHEDULE_POLL_INTERVAL = 60000;
 unsigned long lastSchedulePoll = 0;
 bool scheduleCacheLoaded = false;
 struct PendingUpdate {

@@ -135,7 +135,10 @@ export default function NotificationEngine({ user }) {
     };
 
     const startTimer = setTimeout(run, 10000);
-    const interval = setInterval(run, 5 * 60 * 1000);
+    // The server cron is authoritative for closed-app notifications. This
+    // client pass only covers an open/offline app, so a slower refresh avoids
+    // repeatedly reading settings, devices, and the full activity log.
+    const interval = setInterval(run, 10 * 60 * 1000);
     const handleOnline = () => void run();
     const handleVisible = () => {
       if (document.visibilityState === 'visible') void run();

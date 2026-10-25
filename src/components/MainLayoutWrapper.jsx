@@ -87,7 +87,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Slow background beat catches silent ISP drops/restore.
-    pollTimer = setInterval(evaluate, 10000);
+    pollTimer = setInterval(evaluate, 30000);
 
     return () => {
       cancelled = true;

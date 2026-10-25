@@ -9,7 +9,9 @@
 
 let lastResult = null; // { up: boolean, at: timestamp }
 let inFlight = null;
-const CACHE_MS = 8000;
+// Both the layout and dashboard use this helper. Keep one shared result long
+// enough that their background timers do not issue duplicate probes.
+const CACHE_MS = 30000;
 const TIMEOUT_MS = 4000;
 
 async function probe() {
