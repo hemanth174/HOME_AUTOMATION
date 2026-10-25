@@ -36,7 +36,7 @@ export default function RoomList({
           >
               <span
               className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                selected ? 'bg-(--pg-deep) text-(--pg-tile-ico)' : 'bg-(--pg-faint) text-(--pg-brand)'
+                selected ? 'bg-(--pg-deep) text-(--pg-on-deep)' : 'bg-(--pg-faint) text-(--pg-brand)'
               }`}
             >
               <Cpu size={16} strokeWidth={2.5} />

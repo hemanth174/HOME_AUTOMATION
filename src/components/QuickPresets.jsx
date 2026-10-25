@@ -1,16 +1,29 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { LucidePower, LucidePowerOff, Trash2 } from 'lucide-react';
+import ConfirmModal from '@/components/ConfirmModal';
 export default function QuickPresets({
   presets,
   isPresetActive,
   applyPreset,
   deletePreset
 }) {
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
   if (!presets || presets.length === 0) return null;
 
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    await deletePreset(pendingDelete.id);
+    setDeleting(false);
+    setPendingDelete(null);
+  };
+
   return (
+    <>
     <section className="mb-[18px] quick-presets-section">
       <div className="ml-1 mb-[9px] text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">Quick Presets</div>
       <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pt-0.5 pb-3">
@@ -45,7 +58,7 @@ export default function QuickPresets({
                 </button>
                 <button
                   className="inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-red-500/40 bg-red-500/10 text-red-500 transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 hover:bg-red-500 hover:text-white hover:shadow-[0_0_12px_rgba(239,68,68,0.5)]"
-                  onClick={() => deletePreset(preset.id)}
+                  onClick={() => setPendingDelete(preset)}
                   title="Delete Preset"
                 >
                   <Trash2 size={16} strokeWidth={2.5} />
@@ -56,5 +69,15 @@ export default function QuickPresets({
         })}
       </div>
     </section>
+    <ConfirmModal
+      open={Boolean(pendingDelete)}
+      title="Delete this preset?"
+      description={`“${pendingDelete?.name || 'This preset'}” will be permanently deleted. This action cannot be undone.`}
+      confirmLabel="Delete Preset"
+      busy={deleting}
+      onCancel={() => setPendingDelete(null)}
+      onConfirm={confirmDelete}
+    />
+    </>
   );
 }

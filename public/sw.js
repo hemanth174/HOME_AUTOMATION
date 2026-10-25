@@ -1,6 +1,5 @@
-// v6 removes entries created when an RSC response was incorrectly cached as a
-// page shell. Keep this versioned so deployed clients delete the bad cache.
-const CACHE_NAME = 'smart-home-offline-v6';
+// Versioned so deployed clients delete stale page shells and app assets.
+const CACHE_NAME = 'smart-home-offline-v8';
 
 // These are app routes, not ESP32 endpoints. Cache their app shells while the
 // device has internet so the installed VikaTech PWA can boot without it later.
@@ -108,6 +107,41 @@ self.addEventListener('activate', (event) => {
       .map((cacheName) => caches.delete(cacheName)));
     await self.clients.claim();
   })());
+});
+
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = { body: event.data ? event.data.text() : '' };
+  }
+
+  const title = payload.title || 'VikaTech';
+  const options = {
+    body: payload.body || '',
+    icon: '/icon-192.png',
+    badge: '/favicon.png',
+    tag: payload.tag || `vikatech-${Date.now()}`,
+    renotify: Boolean(payload.tag),
+    data: {
+      url: payload.url || '/',
+      type: payload.type || 'system',
+      ...(payload.data || {}),
+    },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+      for (const client of windows) {
+        client.postMessage({ type: 'vikatech-push-resubscribe' });
+      }
+    }),
+  );
 });
 
 self.addEventListener('notificationclick', (event) => {

@@ -1,0 +1,407 @@
+/* -------- Theme Configuration for Tailwind v4 -------- */
+@theme {
+  --color-bg: var(--bg);
+  --color-card: var(--bg-card);
+  --color-card-alt: var(--bg-card-alt);
+  --color-input: var(--bg-input);
+  --color-header: var(--bg-header);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-bg: var(--accent-bg);
+  --color-accent-glow: var(--accent-glow);
+  --color-border: var(--border);
+  --color-toggle-track: var(--toggle-track);
+  --color-toggle-on: var(--toggle-on);
+  --color-divider: var(--divider);
+  --color-auth-bg: var(--auth-bg);
+  --color-auth-card: var(--auth-card);
+  
+  --shadow-gold-glow: var(--gold-glow);
+  
+  --animate-fade-up: fade-up 0.35s ease forwards;
+  --animate-fade-in: fade-in 0.5s ease forwards;
+  --animate-scale-in: scale-in 0.4s ease forwards;
+  --animate-slide-down: slide-down 0.3s ease forwards;
+  --animate-slide-up: slide-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-glow-pulse: glow-pulse 3s ease infinite;
+  --animate-pulse-ring: pulse-ring 1.4s ease infinite;
+  --animate-pulse-dot-red: pulse-dot-red 1.5s ease infinite;
+
+  /* Scoped Landing Page Themes mapping to CSS Variables */
+  --color-lp-bg: var(--lp-bg);
+  --color-lp-surface: var(--lp-surface);
+  --color-lp-surface-low: var(--lp-surface-low);
+  --color-lp-surface-lowest: var(--lp-surface-lowest);
+  --color-lp-primary: var(--lp-primary);
+  --color-lp-primary-container: var(--lp-primary-container);
+  --color-lp-on-primary-container: var(--lp-on-primary-container);
+  --color-lp-secondary: var(--lp-secondary);
+  --color-lp-on-surface: var(--lp-on-surface);
+  --color-lp-on-surface-variant: var(--lp-on-surface-variant);
+  --color-lp-outline: var(--lp-outline);
+  --color-lp-outline-variant: var(--lp-outline-variant);
+  --color-lp-slate-gray: var(--lp-surface-low);
+
+  /* Font Families */
+  --font-display-lg: var(--font-sora), 'Sora', sans-serif;
+  --font-label-caps: var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
+  --font-headline-sm: var(--font-sora), 'Sora', sans-serif;
+  --font-body-lg: var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
+  --font-headline-md: var(--font-sora), 'Sora', sans-serif;
+  --font-body-md: var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
+  --font-data-point: var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
+}
+
+/* -------- CSS Variables (Theme Tokens) matching esp.css -------- */
+:root,
+[data-theme="dark"] {
+    --bg: #09090b;
+    --bg-card: #18181b;
+    --bg-card-alt: #27272a;
+    --bg-input: #18181b;
+    --bg-header: rgba(9, 9, 11, 0.88);
+    --text: #f4f4f5;
+    --text-muted: #a1a1aa;
+    --accent: #ffffff;
+    --accent-hover: #e4e4e7;
+    --accent-bg: rgba(255, 255, 255, 0.08);
+    --accent-glow: rgba(255, 255, 255, 0.25);
+    --border: #27272a;
+    --toggle-track: #27272a;
+    --toggle-on: #ffffff;
+    --shadow: rgba(0, 0, 0, 0.60);
+    --on-bg: rgba(255, 255, 255, 0.06);
+    --on-border: rgba(255, 255, 255, 0.30);
+    --divider: #27272a;
+    --auth-bg: #09090b;
+    --auth-card: #18181b;
+    --card-shadow: 0 2px 16px rgba(255, 255, 255, 0.02);
+    --header-blur: blur(18px);
+    --gold-glow: 0 0 12px rgba(255, 255, 255, 0.15);
+    --btn-text: #09090b;
+
+    /* Landing Page variables matching Dark Mode */
+    --lp-bg: #18181b;
+    --lp-surface: #18181b;
+    --lp-surface-low: #27272a;
+    --lp-surface-lowest: #09090b;
+    --lp-primary: #ffffff;
+    --lp-primary-container: #ffffff;
+    --lp-on-primary-container: #09090b;
+    --lp-secondary: #e4e4e7;
+    --lp-on-surface: #f4f4f5;
+    --lp-on-surface-variant: #a1a1aa;
+    --lp-outline: #71717a;
+    --lp-outline-variant: #3f3f46;
+}
+
+[data-theme="light"] {
+    --bg: #fafafa;
+    --bg-card: #ffffff;
+    --bg-card-alt: #f4f4f5;
+    --bg-input: #ffffff;
+    --bg-header: rgba(250, 250, 250, 0.85);
+    --text: #09090b;
+    --text-muted: #71717a;
+    --accent: #09090b;
+    --accent-hover: #27272a;
+    --accent-bg: rgba(0, 0, 0, 0.05);
+    --accent-glow: rgba(0, 0, 0, 0.12);
+    --border: #e4e4e7;
+    --toggle-track: #e4e4e7;
+    --toggle-on: #09090b;
+    --shadow: rgba(0, 0, 0, 0.06);
+    --on-bg: rgba(0, 0, 0, 0.04);
+    --on-border: rgba(0, 0, 0, 0.20);
+    --divider: #e4e4e7;
+    --auth-bg: #fafafa;
+    --auth-card: #ffffff;
+    --card-shadow: 0 2px 14px rgba(0, 0, 0, 0.05);
+    --header-blur: blur(18px);
+    --gold-glow: none;
+    --btn-text: #ffffff;
+
+    /* Landing Page variables matching Light Mode */
+    --lp-bg: #fafafa;
+    --lp-surface: #ffffff;
+    --lp-surface-low: #f4f4f5;
+    --lp-surface-lowest: #e4e4e7;
+    --lp-primary: #09090b;
+    --lp-primary-container: #09090b;
+    --lp-on-primary-container: #ffffff;
+    --lp-secondary: #27272a;
+    --lp-on-surface: #09090b;
+    --lp-on-surface-variant: #71717a;
+    --lp-outline: #a1a1aa;
+    --lp-outline-variant: #e4e4e7;
+}
+
+/* -------- VikaTech PG component tokens (global, both themes) --------
+   Reusable surface/ink/accent tokens for PG components, which render on
+   desktop AND mobile. Light values by default, deep-forest dark values
+   under data-theme="dark". The full app-shell palette stays scoped to
+   body.pg-shell (desktop >=1024px) below. */
+:root {
+    --desktop-sidebar-width: 4rem;
+    --pg-card: #FFFFFF;
+    --pg-ink: #202522;
+    --pg-muted: #69736D;
+    --pg-line: #E5E9E5;
+    --pg-faint: #EDF2ED;
+    --pg-deep: #063B20;
+    --pg-brand: #087443;
+    --pg-brand-hover: #063B20;
+    --pg-control-on: #087443;
+    --pg-control-on-hover: #063B20;
+    --pg-onbrand: #FFFFFF;
+    --pg-side: #EFF3EF;
+    --pg-navtext: #43503F;
+    --pg-nav-active-bg: rgba(207, 255, 121, 0.5);
+    --pg-nav-active-text: #063B20;
+    --pg-success: #16834A;
+    --pg-track: #D8DED8;
+    --pg-track-hover: #C4CFC4;
+    --pg-brand-line: rgba(8, 116, 67, 0.4);
+    --pg-brand-soft: rgba(8, 116, 67, 0.2);
+    --pg-brand-faint: rgba(8, 116, 67, 0.08);
+    --pg-brand-ghost: rgba(8, 116, 67, 0.06);
+    --pg-error: #DC4545;
+    --pg-error-faint: rgba(220, 69, 69, 0.1);
+    --pg-error-line: rgba(220, 69, 69, 0.2);
+    --pg-tile-ico: #CFFF79;
+    --pg-on-deep: #CFFF79;
+}
+html[data-theme="dark"] {
+    --pg-card: #101A13;
+    --pg-ink: #EAF3EA;
+    --pg-muted: #93A393;
+    --pg-line: #223026;
+    --pg-faint: #16241A;
+    --pg-deep: #EAF3EA;
+    --pg-brand: #43A865;
+    --pg-brand-hover: #5CC578;
+    --pg-control-on: #43A865;
+    --pg-control-on-hover: #5CC578;
+    --pg-onbrand: #062012;
+    --pg-side: #0D150F;
+    --pg-navtext: #A9BCA9;
+    --pg-nav-active-bg: rgba(207, 255, 121, 0.16);
+    --pg-nav-active-text: #CFFF79;
+    --pg-success: #4ADE80;
+    --pg-track: #2A3A2E;
+    --pg-track-hover: #35473A;
+    --pg-brand-line: rgba(67, 168, 101, 0.45);
+    --pg-brand-soft: rgba(67, 168, 101, 0.25);
+    --pg-brand-faint: rgba(67, 168, 101, 0.12);
+    --pg-brand-ghost: rgba(67, 168, 101, 0.08);
+    --pg-error: #F06666;
+    --pg-error-faint: rgba(240, 102, 102, 0.12);
+    --pg-error-line: rgba(240, 102, 102, 0.25);
+    --pg-tile-ico: #CFFF79;
+    --pg-on-deep: #062012;
+}
+
+/* -------- VikaTech Smart PG desktop shell palette --------
+   App-wide tokens scoped to body.pg-shell (viewports >=1024px). Toggles
+   with ThemeToggle between the light and deep-forest dark variants. */
+html[data-theme="light"] body.pg-shell {
+    --bg: #F5F7F5;
+    --bg-card: #FFFFFF;
+    --bg-card-alt: #EDF2ED;
+    --bg-input: #FFFFFF;
+    --bg-header: rgba(245, 247, 245, 0.9);
+    --text: #202522;
+    --text-muted: #69736D;
+    --accent: #087443;
+    --accent-hover: #063B20;
+    --accent-bg: rgba(8, 116, 67, 0.08);
+    --accent-glow: rgba(8, 116, 67, 0.16);
+    --border: #E5E9E5;
+    --toggle-track: #D8DED8;
+    --toggle-on: #087443;
+    --shadow: rgba(32, 37, 34, 0.06);
+    --on-bg: rgba(8, 116, 67, 0.08);
+    --on-border: rgba(8, 116, 67, 0.3);
+    --divider: #E5E9E5;
+    --auth-bg: #F5F7F5;
+    --auth-card: #FFFFFF;
+    --card-shadow: 0 1px 3px rgba(32, 37, 34, 0.07);
+    --gold-glow: 0 1px 2px rgba(6, 59, 32, 0.1);
+    --btn-text: #FFFFFF;
+    --pg-lime: #CFFF79;
+    --pg-forest: #063B20;
+    --pg-error: #DC4545;
+}
+
+/* -------- VikaTech Smart PG dark theme (deep forest) --------
+   Same component tokens, dark values — ThemeToggle switches between
+   the two designed themes instead of breaking the layout. */
+html[data-theme="dark"] body.pg-shell {
+    --bg: #09090B;
+    --bg-card: #18181B;
+    --bg-card-alt: #27272A;
+    --bg-input: #18181B;
+    --bg-header: rgba(9, 9, 11, 0.92);
+    --text: #F4F4F5;
+    --text-muted: #A1A1AA;
+    --accent: #43A865;
+    --accent-hover: #5CC578;
+    --accent-bg: rgba(67, 168, 101, 0.14);
+    --accent-glow: rgba(67, 168, 101, 0.22);
+    --border: #27272A;
+    --toggle-track: #27272A;
+    --toggle-on: #43A865;
+    --shadow: rgba(0, 0, 0, 0.65);
+    --on-bg: rgba(67, 168, 101, 0.12);
+    --on-border: rgba(67, 168, 101, 0.35);
+    --divider: #27272A;
+    --auth-bg: #09090B;
+    --auth-card: #18181B;
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    --gold-glow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --btn-text: #062012;
+    --pg-card: #18181B;
+    --pg-ink: #F4F4F5;
+    --pg-muted: #A1A1AA;
+    --pg-line: #27272A;
+    --pg-faint: #1F1F23;
+    --pg-deep: #F4F4F5;
+    --pg-brand: #43A865;
+    --pg-brand-hover: #5CC578;
+    --pg-control-on: #43A865;
+    --pg-control-on-hover: #5CC578;
+    --pg-onbrand: #062012;
+    --pg-side: #09090B;
+    --pg-navtext: #A1A1AA;
+    --pg-nav-active-bg: rgba(67, 168, 101, 0.16);
+    --pg-nav-active-text: #5CC578;
+    --pg-success: #4ADE80;
+    --pg-track: #27272A;
+    --pg-track-hover: #3F3F46;
+    --pg-brand-line: rgba(67, 168, 101, 0.45);
+    --pg-brand-soft: rgba(67, 168, 101, 0.25);
+    --pg-brand-faint: rgba(67, 168, 101, 0.12);
+    --pg-brand-ghost: rgba(67, 168, 101, 0.08);
+    --pg-error: #F06666;
+    --pg-error-faint: rgba(240, 102, 102, 0.12);
+    --pg-error-line: rgba(240, 102, 102, 0.25);
+    --pg-tile-ico: #CFFF79;
+    --pg-on-deep: #062012;
+    --pg-lime: #CFFF79;
+    --pg-forest: #F4F4F5;
+    /* Desktop dark topbar: true black, not green-tinted. */
+    --bg-header: rgba(0, 0, 0, 0.92);
+}
+
+/* -------- Mobile monochrome theme --------
+   body.m-shell is applied below 1024px. Neutral ink/surface tokens keep
+   mobile monochrome in both themes. Desktop (.pg-shell) untouched. */
+body.m-shell {
+    color-scheme: light;
+    --bg: #FAFAFA;
+    --bg-card: #FFFFFF;
+    --bg-card-alt: #F4F4F5;
+    --bg-input: #FFFFFF;
+    --bg-header: rgba(250, 250, 250, 0.92);
+    --text: #09090B;
+    --text-muted: #71717A;
+    --accent: #09090B;
+    --accent-hover: #27272A;
+    --accent-bg: rgba(0, 0, 0, 0.05);
+    --accent-glow: rgba(0, 0, 0, 0.12);
+    --border: #E4E4E7;
+    --toggle-track: #E4E4E7;
+    --toggle-on: #09090B;
+    --btn-text: #FFFFFF;
+    --gold-glow: 0 4px 14px rgba(0, 0, 0, 0.08);
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    --shadow: rgba(0, 0, 0, 0.08);
+    --on-bg: rgba(0, 0, 0, 0.05);
+    --on-border: rgba(0, 0, 0, 0.2);
+    --divider: #E4E4E7;
+    --auth-bg: #FAFAFA;
+    --auth-card: #FFFFFF;
+    --pg-card: #FFFFFF;
+    --pg-ink: #09090B;
+    --pg-muted: #71717A;
+    --pg-line: #E4E4E7;
+    --pg-faint: #F4F4F5;
+    --pg-deep: #09090B;
+    --pg-brand: #09090B;
+    --pg-brand-hover: #27272A;
+    --pg-onbrand: #FFFFFF;
+    --pg-side: #FAFAFA;
+    --pg-navtext: #52525B;
+    --pg-nav-active-bg: rgba(0, 0, 0, 0.06);
+    --pg-nav-active-text: #09090B;
+    --pg-success: #09090B;
+    --pg-track: #E4E4E7;
+    --pg-track-hover: #D4D4D8;
+    --pg-brand-line: rgba(9, 9, 11, 0.24);
+    --pg-brand-soft: rgba(9, 9, 11, 0.14);
+    --pg-brand-faint: rgba(9, 9, 11, 0.06);
+    --pg-brand-ghost: rgba(9, 9, 11, 0.035);
+    --pg-error: #52525B;
+    --pg-error-faint: rgba(82, 82, 91, 0.1);
+    --pg-error-line: rgba(82, 82, 91, 0.22);
+    --pg-tile-ico: #FFFFFF;
+    --pg-on-deep: #FFFFFF;
+    /* Sans-serif product type on mobile; mono kept for data values. */
+    --font-body-md: var(--font-sora), 'Sora', sans-serif;
+    --font-body-lg: var(--font-sora), 'Sora', sans-serif;
+    --font-label-caps: var(--font-sora), 'Sora', sans-serif;
+}
+
+html[data-theme="dark"] body.m-shell {
+    color-scheme: dark;
+    --bg: #09090B;
+    --bg-card: #18181B;
+    --bg-card-alt: #27272A;
+    --bg-input: #18181B;
+    --bg-header: rgba(9, 9, 11, 0.92);
+    --text: #F4F4F5;
+    --text-muted: #A1A1AA;
+    --accent: #FFFFFF;
+    --accent-hover: #E4E4E7;
+    --accent-bg: rgba(255, 255, 255, 0.08);
+    --accent-glow: rgba(255, 255, 255, 0.2);
+    --border: #27272A;
+    --toggle-track: #27272A;
+    --toggle-on: #FFFFFF;
+    --btn-text: #09090B;
+    --gold-glow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow: rgba(0, 0, 0, 0.4);
+    --on-bg: rgba(255, 255, 255, 0.08);
+    --on-border: rgba(255, 255, 255, 0.3);
+    --divider: #27272A;
+    --auth-bg: #09090B;
+    --auth-card: #18181B;
+    --pg-card: #18181B;
+    --pg-ink: #F4F4F5;
+    --pg-muted: #A1A1AA;
+    --pg-line: #27272A;
+    --pg-faint: #27272A;
+    --pg-deep: #F4F4F5;
+    --pg-brand: #FFFFFF;
+    --pg-brand-hover: #E4E4E7;
+    --pg-onbrand: #09090B;
+    --pg-side: #09090B;
+    --pg-navtext: #A1A1AA;
+    --pg-nav-active-bg: rgba(255, 255, 255, 0.1);
+    --pg-nav-active-text: #FFFFFF;
+    --pg-success: #FFFFFF;
+    --pg-track: #27272A;
+    --pg-track-hover: #3F3F46;
+    --pg-brand-line: rgba(255, 255, 255, 0.28);
+    --pg-brand-soft: rgba(255, 255, 255, 0.16);
+    --pg-brand-faint: rgba(255, 255, 255, 0.08);
+    --pg-brand-ghost: rgba(255, 255, 255, 0.04);
+    --pg-error: #A1A1AA;
+    --pg-error-faint: rgba(161, 161, 170, 0.1);
+    --pg-error-line: rgba(161, 161, 170, 0.22);
+    --pg-tile-ico: #FFFFFF;
+    --pg-on-deep: #09090B;
+}

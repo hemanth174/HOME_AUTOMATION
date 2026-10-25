@@ -1,0 +1,335 @@
+html, body {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+    display: none;
+}
+*::-webkit-scrollbar {
+    display: none !important;
+}
+* {
+    scrollbar-width: none;
+}
+
+/* Keyframe definitions */
+@keyframes fade-up {
+    from {
+        opacity: 0;
+        transform: translateY(14px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.admin-loading-bar {
+  width: 38%;
+  animation: admin-loading 1.35s ease-in-out infinite;
+}
+
+/* Keep long Admin Console queues inside their panel instead of growing the
+   whole document. The first data section is either Orders or User approvals. */
+main.animate-fade-in > div > section:first-of-type > div:last-child {
+  max-height: 560px;
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+main.animate-fade-in > div > section:first-of-type thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--card, #ffffff);
+}
+
+@keyframes admin-loading {
+  0% { transform: translateX(-110%); }
+  50% { transform: translateX(165%); }
+  100% { transform: translateX(290%); }
+}
+
+@keyframes fade-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes scale-in {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes slide-down {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slide-up {
+    from {
+        transform: translateY(100%);
+    }
+    to {
+        transform: translateY(0);
+    }
+}
+
+@keyframes glow-pulse {
+    0%,
+    100% {
+        box-shadow: 0 0 8px var(--accent-glow);
+    }
+    50% {
+        box-shadow: 0 0 20px var(--accent-glow);
+    }
+}
+
+@keyframes pulse-ring {
+    0% {
+        box-shadow: 0 0 0 0 var(--accent-glow);
+    }
+    70% {
+        box-shadow: 0 0 0 18px rgba(255, 255, 255, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+    }
+}
+
+@keyframes pulse-dot-red {
+    0%,
+    100% {
+        box-shadow: 0 0 8px rgba(255, 42, 42, 0.5);
+    }
+    50% {
+        box-shadow: 0 0 20px rgba(255, 42, 42, 1);
+    }
+}
+
+/* Base resets & standard classes from esp.css */
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-sora), 'Sora', sans-serif;
+}
+
+/* Shared popover pointer for nav dropdowns. */
+.popover-caret::before {
+    content: "";
+    position: absolute;
+    top: -6px;
+    right: 16px;
+    width: 10px;
+    height: 10px;
+    background: var(--bg-card);
+    border-left: 1px solid var(--border);
+    border-top: 1px solid var(--border);
+    border-top-left-radius: 2px;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+/* Shared mobile sheet drag affordance. */
+@media (max-width: 767px) {
+    div[data-mobile-sheet="1"] {
+        position: relative;
+        overscroll-behavior: contain;
+    }
+    div[data-mobile-sheet="1"] [data-sheet-handle="1"] {
+        cursor: grab;
+        touch-action: none;
+    }
+    div[data-mobile-sheet="1"][data-mobile-sheet-dragging="1"],
+    div[data-mobile-sheet="1"][data-mobile-sheet-dragging="1"] [data-sheet-handle="1"] {
+        cursor: grabbing !important;
+        user-select: none;
+    }
+}
+
+/* Smooth transitions */
+body,
+.board-card,
+.device-card,
+.preset-card,
+#app-header,
+.tab-btn {
+    transition: background-color 0.35s ease, color 0.35s ease, border-color 0.35s ease;
+}
+
+/* Scrollbars are hidden globally (see the no-scrollbar block above);
+   these selectors are intentionally left empty so no white thumb can
+   reappear on Windows. */
+::-webkit-scrollbar {
+    display: none;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: transparent;
+    border: none;
+}
+
+/* Scoped Landing Page Utilities */
+.lp-grid-pattern {
+    background-image: linear-gradient(var(--divider) 1px, transparent 1px),
+                      linear-gradient(90deg, var(--divider) 1px, transparent 1px);
+    background-size: 32px 32px;
+    opacity: 0.65;
+}
+.lp-glass-blur {
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+.lp-active-glow {
+    box-shadow: 0 0 15px var(--accent-glow);
+}
+
+/* -------- Light Theme Overrides for Landing Page Aesthetics -------- */
+[data-theme="light"] {
+    /* Override hardcoded text-white elements */
+    .text-white,
+    h1, h2, h3, h4, h5, h6,
+    .font-data-point,
+    nav button,
+    header div {
+        color: var(--text) !important;
+    }
+
+    .text-lp-primary-container {
+        color: var(--accent) !important;
+    }
+
+    /* Override hardcoded dark visualizer container backgrounds */
+    .aspect-square,
+    .aspect-\[4\/3\] {
+        background-color: var(--bg-card-alt) !important;
+        border-color: var(--border) !important;
+    }
+}
+
+/* -------- Login brand panel: fixed dark surface in every theme --------
+   Must sit AFTER the light-theme overrides above. The global
+   `[data-theme="light"] h1..h6, .text-white { color: ... !important }`
+   rule was forcing this dark panel's heading black-on-dark.
+   Higher specificity + later position wins it back. */
+.login-brand {
+    background-color: #0c1118;
+    color: #ffffff;
+}
+.login-brand .login-brand-title { color: #ffffff; }
+.login-brand .login-brand-kicker { color: #4ade80; }
+.login-brand .login-brand-sub { color: rgba(255, 255, 255, 0.7); }
+.login-brand .login-brand-list { color: rgba(255, 255, 255, 0.85); }
+.login-brand .login-brand-back { color: rgba(255, 255, 255, 0.8); }
+.login-brand .login-brand-foot { color: rgba(255, 255, 255, 0.4); }
+.login-brand .login-brand-icon-1 { color: #fbbf24; background-color: rgba(251, 191, 36, 0.1); border-color: rgba(251, 191, 36, 0.25); }
+.login-brand .login-brand-icon-2 { color: #38bdf8; background-color: rgba(56, 189, 248, 0.1); border-color: rgba(56, 189, 248, 0.25); }
+.login-brand .login-brand-icon-3 { color: #a78bfa; background-color: rgba(167, 139, 250, 0.1); border-color: rgba(167, 139, 250, 0.25); }
+[data-theme="light"] .login-brand,
+[data-theme="light"] .login-brand h2,
+[data-theme="light"] .login-brand p,
+[data-theme="light"] .login-brand li,
+[data-theme="light"] .login-brand a,
+[data-theme="light"] .login-brand span {
+    color: #ffffff !important;
+}
+[data-theme="light"] .login-brand .login-brand-kicker {
+    color: #4ade80 !important;
+}
+[data-theme="light"] .login-brand .login-brand-icon-1 {
+    color: #fbbf24 !important;
+    background-color: rgba(251, 191, 36, 0.1) !important;
+    border-color: rgba(251, 191, 36, 0.25) !important;
+}
+[data-theme="light"] .login-brand .login-brand-icon-2 {
+    color: #38bdf8 !important;
+    background-color: rgba(56, 189, 248, 0.1) !important;
+    border-color: rgba(56, 189, 248, 0.25) !important;
+}
+[data-theme="light"] .login-brand .login-brand-icon-3 {
+    color: #a78bfa !important;
+    background-color: rgba(167, 139, 250, 0.1) !important;
+    border-color: rgba(167, 139, 250, 0.25) !important;
+}
+[data-theme="light"] .login-brand .login-brand-sub {
+    color: rgba(255, 255, 255, 0.7) !important;
+}
+[data-theme="light"] .login-brand .login-brand-list {
+    color: rgba(255, 255, 255, 0.85) !important;
+}
+[data-theme="light"] .login-brand .login-brand-back {
+    color: rgba(255, 255, 255, 0.8) !important;
+}
+[data-theme="light"] .login-brand .login-brand-foot {
+    color: rgba(255, 255, 255, 0.4) !important;
+}
+
+/* -------- Premium Dashboard Spacious Container -------- */
+.desktop-shell-content {
+    transition: padding-left 200ms ease-out;
+}
+
+.desktop-shell-header {
+    transition: left 200ms ease-out;
+}
+
+@media (min-width: 768px) {
+    .desktop-shell-content {
+        padding-left: var(--desktop-sidebar-width);
+    }
+
+    .desktop-shell-header {
+        left: var(--desktop-sidebar-width);
+    }
+}
+
+.dashboard-container {
+    margin-left: auto;
+    margin-right: auto;
+    width: min(100% - 48px, 1280px);
+    padding-top: 88px;
+    padding-bottom: 32px;
+}
+
+/* Desktop density: use the available width on wide screens instead of
+   centering a narrow column in a void (responsive-craft structural layer). */
+@media (min-width: 1280px) {
+    .dashboard-container {
+        width: min(100% - 64px, 1440px);
+        padding-top: 84px;
+    }
+}
+
+@media (max-width: 768px) {
+    .dashboard-container {
+        width: min(100% - 24px, 620px);
+        padding-top: 92px;
+        /* Keep content clear of the bottom nav + home indicator. */
+        padding-bottom: calc(48px + env(safe-area-inset-bottom));
+    }
+}

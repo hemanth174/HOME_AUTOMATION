@@ -28,10 +28,6 @@ export default function ProfilePage() {
   const [mfaLoading, setMfaLoading] = useState(false);
   const [verifyingCurrentEmail, setVerifyingCurrentEmail] = useState(false);
 
-  // Swipe dismiss states
-  const [translateY, setTranslateY] = useState(0);
-  const [touchStart, setTouchStart] = useState(0);
-
   useEffect(() => {
     let active = true;
     const fetchUser = async () => {
@@ -118,7 +114,6 @@ export default function ProfilePage() {
     setShowMfaModal(true);
     setMfaError('');
     setMfaInput('');
-    setTranslateY(0);
 
     const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
     setMfaCode(generatedCode);
@@ -168,7 +163,6 @@ export default function ProfilePage() {
     setShowMfaModal(true);
     setMfaError('');
     setMfaInput('');
-    setTranslateY(0);
 
     const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
     setMfaCode(generatedCode);
@@ -249,19 +243,6 @@ export default function ProfilePage() {
     }
   }, [showMfaModal]);
 
-  const handleTouchStart = (e) => setTouchStart(e.touches[0].clientY);
-  const handleTouchMove = (e) => {
-    const diff = e.touches[0].clientY - touchStart;
-    if (diff > 0) setTranslateY(diff);
-  };
-  const handleTouchEnd = () => {
-    if (translateY > 100) {
-      setShowMfaModal(false);
-      setMfaInput('');
-      setMfaError('');
-    }
-    setTranslateY(0);
-  };
 
   if (loading) return <Loader message="Loading profile..." />;
 
@@ -439,15 +420,9 @@ export default function ProfilePage() {
             />
             
             <div 
-              onTouchStart={handleTouchStart}
-              onTouchMove={handleTouchMove}
-              onTouchEnd={handleTouchEnd}
-              style={{ transform: translateY > 0 ? `translateY(${translateY}px)` : undefined }}
-              className={`relative bg-card w-full border border-border max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:rounded-t-[24px] max-md:p-6 max-md:pb-10 max-md:border-t max-md:border-x-0 md:w-[420px] md:rounded-[20px] md:p-8 md:shadow-2xl flex flex-col items-center ${
-                translateY === 0 ? 'transition-all duration-200 ease-out' : ''
-              }`}
+              className="relative bg-card w-full border border-border max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:rounded-t-[24px] max-md:p-6 max-md:pb-10 max-md:border-t max-md:border-x-0 md:w-[420px] md:rounded-[20px] md:p-8 md:shadow-2xl flex flex-col items-center"
             >
-              <div className="w-12 h-1.5 bg-border rounded-full mb-6 cursor-grab active:cursor-grabbing md:hidden shrink-0" />
+              <div data-sheet-handle="1" className="w-12 h-1.5 bg-border rounded-full mb-6 cursor-grab active:cursor-grabbing touch-none md:hidden shrink-0" />
               
               <button
                 type="button"

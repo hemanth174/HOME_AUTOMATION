@@ -1,123 +1,12 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import Toast from '@/components/Toast';
 import Loader from '@/components/Loader';
-import { Cpu, Edit, LucideEdit2, LucidePower, LucidePowerOff, PowerOffIcon, Trash, SlidersHorizontal } from 'lucide-react';
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function groupByBoard(devices) {
-  const map = {};
-  for (const d of devices) {
-    const bn = d.boards?.name || 'Unknown Board';
-    if (!map[bn]) map[bn] = [];
-    map[bn].push(d);
-  }
-  return map;
-}
-
-// ─── Grouped, searchable device list for presets modal ────────────────────────
-
-function PresetDeviceList({ devices, presetActions, onToggleDevice, onToggleAction }) {
-  const [search, setSearch] = useState('');
-
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase().trim();
-    if (!q) return devices;
-    return devices.filter(
-      d => d.name.toLowerCase().includes(q) || (d.boards?.name || '').toLowerCase().includes(q)
-    );
-  }, [devices, search]);
-
-  const groups = useMemo(() => groupByBoard(filtered), [filtered]);
-  const allSelected = filtered.length > 0 && filtered.every(
-    (device) => presetActions[device.id]?.included,
-  );
-
-  const toggleAll = () => {
-    filtered.forEach((device) => {
-      if (Boolean(presetActions[device.id]?.included) !== !allSelected) {
-        onToggleDevice(device.id);
-      }
-    });
-  };
-
-  return (
-    <div className="flex flex-col gap-2">
-      {/* Search bar */}
-      <input
-        type="text"
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        placeholder="Search device or board…"
-        className="w-full px-3 py-2 rounded-lg border-[1.5px] border-border bg-input text-text text-xs outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-      />
-      {/* Board-grouped scrollable device list */}
-      <div className="overflow-hidden rounded-lg border border-border bg-input">
-       
-        <div className="max-h-[32vh] overflow-y-auto">
-        {Object.keys(groups).length === 0 ? (
-          <p className="px-4 py-3 text-xs text-text-muted font-semibold">No devices found.</p>
-        ) : (
-          Object.entries(groups).map(([boardName, devs]) => (
-            <div key={boardName}>
-              {/* Board header */}
-              <div className="sticky top-0 z-10 flex items-center gap-1.5 border-b border-border dark:bg-[#09090b] px-3 py-1.5 text-[10px] font-black uppercase tracking-widest">
-                <Cpu size={12} strokeWidth={2.5} aria-hidden="true" className="text-white dark:text-black" />
-                <p className="text-white dark:text-black">{boardName}</p>
-              </div>
-              {/* Devices under this board */}
-               <label className="flex cursor-pointer items-center gap-2 border-b border-border px-3 py-2 text-[11px] font-bold text-text-muted">
-          <input
-            type="checkbox"
-            checked={allSelected}
-            onChange={toggleAll}
-            disabled={!filtered.length}
-            className="accent-accent cursor-pointer"
-          />
-          Select all
-        </label>
-              {devs.map(d => (
-                <div
-                  key={d.id}
-                  className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-b-0 gap-3"
-                >
-                  <label className="flex items-center gap-2.5 min-w-0 cursor-pointer flex-1">
-                    <input
-                      type="checkbox"
-                      className="accent-accent cursor-pointer shrink-0"
-                      checked={presetActions[d.id]?.included || false}
-                      onChange={() => onToggleDevice(d.id)}
-                    />
-                    <span className="text-xs font-bold text-text truncate">{d.name}</span>
-                  </label>
-                  {presetActions[d.id]?.included && (
-                    <button
-                      type="button"
-                      className={`shrink-0 min-h-[26px] min-w-[46px] inline-flex items-center justify-center rounded px-2.5 py-1 text-[10px] font-black cursor-pointer transition-all duration-200 ${
-                        presetActions[d.id]?.is_on
-                          ? 'bg-accent text-[var(--btn-text)] shadow-gold-glow'
-                          : 'border border-border bg-card text-text'
-                      }`}
-                      onClick={() => onToggleAction(d.id)}
-                    >
-                      {presetActions[d.id]?.is_on ? 'ON' : 'OFF'}
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          ))
-        )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Component ────────────────────────────────────────────────────────────────
+import ConfirmModal from '@/components/ConfirmModal';
+import { Edit, LucidePower, LucidePowerOff, Trash, SlidersHorizontal } from 'lucide-react';
+import PresetModal from './PresetModal';
 
 export default function PresetsPage() {
   const [user, setUser] = useState(null);
@@ -126,27 +15,11 @@ export default function PresetsPage() {
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState('');
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Edit state — null means "create new", otherwise holds preset being edited
   const [editingPreset, setEditingPreset] = useState(null);
-
-  // Modal drag-to-close
-  const [modalDragY, setModalDragY] = useState(0);
-  const [modalDragging, setModalDragging] = useState(false);
-  const [modalStartY, setModalStartY] = useState(0);
-
-  const handleModalTouchStart = (e) => { setModalStartY(e.touches[0].clientY); setModalDragging(true); };
-  const handleModalTouchMove = (e) => {
-    if (!modalDragging) return;
-    if (e.currentTarget.scrollTop > 0) return;
-    const deltaY = e.touches[0].clientY - modalStartY;
-    if (deltaY > 0) setModalDragY(deltaY);
-  };
-  const handleModalTouchEnd = () => {
-    setModalDragging(false);
-    if (modalDragY > 80) closeModal();
-    setModalDragY(0);
-  };
 
   // Form
   const [presetName, setPresetName] = useState('');
@@ -348,9 +221,17 @@ export default function PresetsPage() {
     setToast(`${deactivate ? 'Deactivated' : 'Activated'}: ${preset.name}`);
   };
 
-  const deletePreset = async (id) => {
-    await supabase.from('presets').delete().eq('id', id);
-    setPresets(prev => prev.filter(p => p.id !== id));
+  const deletePreset = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    const { error } = await supabase.from('presets').delete().eq('id', pendingDelete.id);
+    setDeleting(false);
+    if (error) {
+      setToast(`Could not delete preset: ${error.message}`);
+      return;
+    }
+    setPresets(prev => prev.filter(p => p.id !== pendingDelete.id));
+    setPendingDelete(null);
     setToast('Preset deleted');
   };
 
@@ -478,7 +359,7 @@ export default function PresetsPage() {
                       </button>
                       <button
                         className="inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-red-500/40 bg-red-500/10 text-red-500 transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 hover:bg-red-500 hover:text-white hover:shadow-[0_0_12px_rgba(239,68,68,0.5)]"
-                        onClick={() => deletePreset(preset.id)}
+                        onClick={() => setPendingDelete(preset)}
                         title="Delete Preset"
                       >
                         <Trash size={16} strokeWidth={2.5} />
@@ -492,86 +373,19 @@ export default function PresetsPage() {
         )}
       </div>
 
-      {/* ── Create / Edit Preset Modal ─────────────────────────────────────────── */}
       {showModal && (
-        <div
-          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md animate-scale-in max-md:items-end max-md:p-0"
-          onClick={closeModal}
-        >
-          <div
-            onTouchStart={handleModalTouchStart}
-            onTouchMove={handleModalTouchMove}
-            onTouchEnd={handleModalTouchEnd}
-            style={{ transform: `translateY(${modalDragY}px)`, transition: modalDragging ? 'none' : 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)' }}
-            className="max-h-[88vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl animate-fade-up max-md:w-full max-md:max-h-[92vh] max-md:rounded-t-[24px] max-md:rounded-b-none max-md:border-t max-md:border-x-0 max-md:border-b-0 max-md:pb-10 max-md:animate-slide-up max-md:shadow-none flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="hidden max-md:block w-12 h-1 bg-border rounded-full mx-auto mb-5 shrink-0" />
-
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-extrabold text-text">
-                {editingPreset ? `Edit: ${editingPreset.name}` : 'New Preset'}
-              </h2>
-              <div className="flex shrink-0 items-center gap-2">
-                <span className="rounded-md bg-accent-bg px-2 py-1 text-[10px] font-extrabold text-accent">
-                  {Object.values(presetActions).filter((action) => action.included).length} selected
-                </span>
-                {editingPreset && (
-                  <span className="rounded-md bg-accent-bg px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest text-accent">
-                    Editing
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <form onSubmit={savePreset} className="flex flex-col gap-4">
-
-              {/* Preset Name */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-extrabold tracking-wide text-text-muted">Preset Name</label>
-                <input
-                  className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
-                  type="text"
-                  value={presetName}
-                  onChange={e => setPresetName(e.target.value)}
-                  placeholder="e.g., Party Mode"
-                  required
-                />
-              </div>
-
-              {/* Device selection — grouped by board, searchable */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-extrabold tracking-wide text-text-muted">
-                  Select Devices
-                  <span className="ml-1 text-[10px] font-bold text-text-muted/60">(grouped by board)</span>
-                </label>
-                <PresetDeviceList
-                  devices={devices}
-                  presetActions={presetActions}
-                  onToggleDevice={togglePresetDevice}
-                  onToggleAction={togglePresetAction}
-                />
-              </div>
-
-              <div className="mt-4 flex justify-end gap-2.5">
-                <button
-                  type="button"
-                  className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-xs font-semibold text-text transition-all hover:bg-card-alt cursor-pointer"
-                  onClick={closeModal}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow"
-                >
-                  {editingPreset ? 'Save Changes' : 'Create'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <PresetModal editingPreset={editingPreset} presetActions={presetActions} presetName={presetName} setPresetName={setPresetName} devices={devices} savePreset={savePreset} closeModal={closeModal} togglePresetDevice={togglePresetDevice} togglePresetAction={togglePresetAction} />
       )}
+
+      <ConfirmModal
+        open={Boolean(pendingDelete)}
+        title="Delete this preset?"
+        description={`“${pendingDelete?.name || 'This preset'}” will be permanently deleted. This action cannot be undone.`}
+        confirmLabel="Delete Preset"
+        busy={deleting}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={deletePreset}
+      />
 
       <Toast message={toast} onClose={() => setToast('')} />
     </>

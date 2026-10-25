@@ -15,6 +15,7 @@ import {
 } from 'recharts';
 import { TrendingUp, Zap, Ghost, AlertTriangle, Cpu, Settings } from 'lucide-react';
 import { getDeviceWattage, getDeviceRunHoursToday, getDeviceRunMsInWindow } from './helpers';
+import { useAnalyticsChartData } from './useAnalyticsChartData';
 
 // ── Shared chart style constants ───────────────────────────────────────────
 const CHART_AXIS_STROKE   = '#6b7280';          // gray-500 — visible on dark bg
@@ -30,122 +31,7 @@ const CHART_LEGEND_STYLE = { wrapperStyle: { fontSize: '11px', fontWeight: '600'
 const COLORS = ['#c9a84c', '#e6c875', '#ffd700', '#f4e0a5', '#bfa054', '#8c7030', '#e5c158', '#ffd670'];
 
 export default function AnalyticsCharts({ devices, boards, logs, dailyAnalytics, weeklyAnalytics, deviceStats, totalKwhToday }) {
-  const thisWeek = weeklyAnalytics[0];
-  const lastWeek = weeklyAnalytics[1];
-
-  // Generate hourly consumption data binned exactly from log timestamps
-  const hourlyData = Array.from({ length: 24 }).map((_, i) => {
-    const targetHourDate = new Date();
-    targetHourDate.setHours(new Date().getHours() - (23 - i), 0, 0, 0);
-    const nextHourDate = new Date(targetHourDate.getTime() + 60 * 60 * 1000);
-
-    let totalUsageInHour = 0;
-    devices.forEach(device => {
-      const runMsInHour = getDeviceRunMsInWindow(device, logs, targetHourDate.getTime(), nextHourDate.getTime());
-      const wattage = getDeviceWattage(device.name);
-      totalUsageInHour += (wattage * (runMsInHour / (1000 * 60 * 60))) / 1000;
-    });
-
-    return {
-      time: `${targetHourDate.getHours().toString().padStart(2, '0')}:00`,
-      Usage: parseFloat(totalUsageInHour.toFixed(4))
-    };
-  });
-
-  // Calculate board usage based on actual runtime
-  const boardData = boards.map(board => {
-    const boardDevices = deviceStats.filter(d => d.board_id === board.id);
-    const usage = boardDevices.reduce((sum, d) => sum + d.kwh, 0);
-    return {
-      name: board.name,
-      Usage: parseFloat(usage.toFixed(4))
-    };
-  });
-
-  // Filter device shares to only display running loads
-  const pieData = deviceStats.map(d => {
-    return {
-      id: d.id,
-      name: d.name,
-      value: parseFloat(d.kwh.toFixed(4))
-    };
-  }).filter(item => item.value > 0);
-
-  const uptimeData = deviceStats
-    .map(d => ({ name: d.name, Hours: parseFloat(d.runHours.toFixed(2)) }))
-    .sort((a, b) => b.Hours - a.Hours);
-
-  const heatmapData = Array.from({ length: 24 }, (_, h) => {
-    const label = `${String(h).padStart(2, '0')}:00`;
-    const count = logs.filter(l => new Date(l.created_at).getHours() === h).length;
-    return { hour: label, Events: count };
-  });
-
-  const activeDevices2 = deviceStats.filter(d => d.runHours > 0 || d.kwh > 0);
-  const ghostDevices = deviceStats.filter(d => d.runHours === 0 && d.kwh === 0);
-  const ghostPie = [
-    { name: 'Active', value: activeDevices2.length, fill: '#c9a84c' },
-    { name: 'Idle / Ghost', value: ghostDevices.length, fill: '#444' }
-  ].filter(d => d.value > 0);
-
-  // Build a 7-day comparison using dailyAnalytics for this week and weekly snapshot for last
-  const thisWeekDays = dailyAnalytics.slice(-7).map(d => ({
-    date: d.date,
-    'This Week': parseFloat((d.total_kwh || 0).toFixed(4)),
-    'Last Week': 0
-  }));
-  // Spread last week total evenly across 7 days for comparison line
-  const lastWeekDailyAvg = lastWeek ? parseFloat((lastWeek.total_kwh / 7).toFixed(4)) : 0;
-  const wowData = thisWeekDays.map(d => ({ ...d, 'Last Week': lastWeekDailyAvg }));
-
-  const radarData = boards.map(board => {
-    const boardDevices = deviceStats.filter(d => d.board_id === board.id);
-    const totalHours = boardDevices.reduce((s, d) => s + d.runHours, 0);
-    return { board: board.name, 'Active Hours': parseFloat(totalHours.toFixed(2)) };
-  });
-
-  const scatterData = devices.map(dev => {
-    const toggles = thisWeek ? parseInt(thisWeek.toggle_counts?.[dev.id] || 0) : logs.filter(l => l.device_id === dev.id).length;
-    const minutes = thisWeek ? parseFloat(thisWeek.usage_duration?.[dev.id] || 0) : parseFloat((getDeviceRunHoursToday(dev, logs) * 60).toFixed(1));
-    const avgPerToggle = toggles > 0 ? parseFloat((minutes / toggles).toFixed(1)) : 0;
-    return { name: dev.name, toggles, avgMinutes: avgPerToggle };
-  }).filter(d => d.toggles > 0 || d.avgMinutes > 0);
-
-  const errorDevices = devices.filter(d => d.feedback_on !== null && d.is_on !== d.feedback_on);
-  const reliabilityPct = devices.length > 0 ? Math.round(((devices.length - errorDevices.length) / devices.length) * 100) : 100;
-  const gaugeColor = reliabilityPct >= 90 ? '#22c55e' : reliabilityPct >= 70 ? '#f59e0b' : '#ef4444';
-  const gaugeData = [{ name: 'Reliability', value: reliabilityPct, fill: gaugeColor }];
-
-  const peakMap = thisWeek?.peak_hours || {};
-  const sortedPeaks = Object.entries(peakMap)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([hour, count]) => ({ hour, count: parseInt(count) }));
-  // Build 24 hour chart with reference lines for peak suggestions
-  const automationData = Array.from({ length: 24 }, (_, h) => {
-    const label = `${String(h).padStart(2, '0')}:00`;
-    return { hour: label, Events: parseInt(peakMap[label] || 0) };
-  });
-
-  const alwaysOnThresholdMin = 60 * 20; // 20+ hours = suspicious always-on
-  const alwaysOnData = devices.map(dev => {
-    const minutes = thisWeek
-      ? parseFloat(thisWeek.usage_duration?.[dev.id] || 0)
-      : parseFloat((getDeviceRunHoursToday(dev, logs) * 60).toFixed(1));
-    return { name: dev.name, Minutes: minutes, alwaysOn: minutes >= alwaysOnThresholdMin };
-  }).sort((a, b) => b.Minutes - a.Minutes);
-  const hasAlwaysOn = alwaysOnData.some(d => d.alwaysOn);
-
-  const relayColors = ['#c9a84c', '#e6c875', '#8c7030', '#ffd670'];
-  const relayData = boards.map(board => {
-    const entry = { board: board.name };
-    for (let r = 0; r <= 3; r++) {
-      const dev = deviceStats.find(d => d.board_id === board.id && d.relay_index === r);
-      entry[`Relay ${r}`] = dev ? parseFloat(dev.runHours.toFixed(2)) : 0;
-    }
-    return entry;
-  });
-  const relayHasData = relayData.some(b => [0,1,2,3].some(r => b[`Relay ${r}`] > 0));
+  const { thisWeek, lastWeek, hourlyData, boardData, pieData, uptimeData, heatmapData, activeDevices2, ghostDevices, ghostPie, wowData, radarData, scatterData, errorDevices, reliabilityPct, gaugeColor, gaugeData, sortedPeaks, automationData, alwaysOnData, hasAlwaysOn, relayColors, relayData, relayHasData } = useAnalyticsChartData({ devices, boards, logs, dailyAnalytics, weeklyAnalytics, deviceStats });
 
   return (
     <>

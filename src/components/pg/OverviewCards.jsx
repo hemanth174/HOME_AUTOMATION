@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { Cpu, Zap, Activity, HeartPulse } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { getGreeting } from './deviceKind';
+import { Cpu, Zap, Activity, HeartPulse } from "lucide-react";
+import { useEffect, useState } from "react";
+import { getGreeting } from "./deviceKind";
 
 /**
  * Personalized greeting + four summary cards. Every value comes from live
@@ -21,8 +21,8 @@ export default function OverviewCards({
   systemMessage,
 }) {
   const [currentTime, setCurrentTime] = useState(null);
-  const firstName = String(userName || 'there').split(' ')[0];
-  const greeting = currentTime ? getGreeting(currentTime) : 'Hello';
+  const firstName = String(userName || "there").split(" ")[0];
+  const greeting = currentTime ? getGreeting(currentTime) : "Hello";
 
   useEffect(() => {
     const updateTime = () => setCurrentTime(new Date());
@@ -33,29 +33,33 @@ export default function OverviewCards({
 
   const cards = [
     {
-      label: 'Total Devices',
+      label: "Total Devices",
       value: String(totalDevices),
-      sub: 'Across all rooms',
+      sub: "Across all rooms",
       Icon: Cpu,
       accent: false,
     },
     {
-      label: 'Active Devices',
+      label: "Active Devices",
       value: String(activeDevices),
-      sub: activeDevices === 1 ? 'Device is on' : 'Devices are on',
+      sub: activeDevices === 1 ? "Device is on" : "Devices are on",
       Icon: Zap,
       accent: activeDevices > 0,
     },
     {
-      label: 'Energy Usage',
-      value: energyAvailable ? `${energyKwhToday.toFixed(2)} kWh` : 'Unavailable',
-      sub: energyAvailable ? `Today (est.) · ${liveWatts} W live` : 'No meter or usage data yet',
+      label: "Energy Usage",
+      value: energyAvailable
+        ? `${energyKwhToday.toFixed(2)} kWh`
+        : "Unavailable",
+      sub: energyAvailable
+        ? `Today (est.) · ${liveWatts} W live`
+        : "No meter or usage data yet",
       Icon: Activity,
       accent: false,
     },
     {
-      label: 'System Status',
-      value: systemOk ? 'Normal' : 'Attention',
+      label: "System Status",
+      value: systemOk ? "Normal" : "Attention",
       sub: systemMessage,
       Icon: HeartPulse,
       ok: systemOk,
@@ -64,18 +68,23 @@ export default function OverviewCards({
 
   return (
     <section aria-label="Overview" className="mb-5">
-      <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-text truncate" title={`${greeting}, ${firstName}`}>
+      <h1
+        className="text-xl sm:text-2xl font-extrabold tracking-tight text-text truncate"
+        title={`${greeting}, ${firstName}`}
+      >
         {greeting}, {firstName}
       </h1>
-      <p className="text-[13px] font-medium text-text-muted mt-1 mb-4">{statusMessage}</p>
+      <p className="text-[13px] font-medium text-text-muted mt-1 mb-4">
+        {statusMessage}
+      </p>
       <div className="hidden sm:grid grid-cols-2 gap-2.5 lg:grid-cols-4 lg:gap-3">
         {cards.map(({ label, value, sub, Icon, accent, ok }) => (
           <div
             key={label}
             className={`rounded-2xl border bg-(--pg-card) p-4 transition-colors min-w-0 ${
-              label === 'System Status' && ok === false
-                ? 'border-(--pg-error-line)'
-                : 'border-(--pg-line)'
+              label === "System Status" && ok === false
+                ? "border-(--pg-error-line)"
+                : "border-(--pg-line)"
             }`}
           >
             <div className="flex items-center justify-between gap-2">
@@ -85,10 +94,10 @@ export default function OverviewCards({
               <span
                 className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
                   accent
-                    ? 'bg-(--pg-brand) text-(--pg-onbrand)'
-                    : label === 'System Status' && ok === false
-                      ? 'bg-(--pg-error-faint) text-(--pg-error)'
-                      : 'bg-(--pg-faint) text-(--pg-brand)'
+                    ? "bg-(--pg-brand) text-(--pg-onbrand)"
+                    : label === "System Status" && ok === false
+                      ? "bg-(--pg-error-faint) text-(--pg-error)"
+                      : "bg-(--pg-faint) text-(--pg-brand)"
                 }`}
               >
                 <Icon size={15} strokeWidth={2.5} aria-hidden="true" />
@@ -96,16 +105,19 @@ export default function OverviewCards({
             </div>
             <p
               className={`text-xl sm:text-2xl font-extrabold tabular-nums tracking-tight mt-2 ${
-                label === 'System Status'
+                label === "System Status"
                   ? ok === false
-                    ? 'text-(--pg-error)'
-                    : 'text-(--pg-success)'
-                  : 'text-(--pg-ink)'
+                    ? "text-(--pg-error)"
+                    : "text-(--pg-success)"
+                  : "text-(--pg-ink)"
               }`}
             >
               {value}
             </p>
-            <p className="ov-sub text-[11px] font-semibold mt-1 truncate" title={sub}>
+            <p
+              className="ov-sub text-[11px] font-semibold mt-1 truncate"
+              title={sub}
+            >
               {sub}
             </p>
           </div>

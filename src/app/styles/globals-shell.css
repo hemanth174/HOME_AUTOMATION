@@ -1,0 +1,273 @@
+
+/* Mobile dark-warm theme: ThemeToggle works on mobile too, switching
+   between the bright warm design above and this cozy dark variant. */
+html[data-theme="dark"] body.m-shell {
+    --bg: #171310;
+    --bg-card: #221D16;
+    --bg-card-alt: #2A231B;
+    --bg-input: #221D16;
+    --bg-header: rgba(23, 19, 16, 0.92);
+    --text: #F2EDE3;
+    --text-muted: #A39E93;
+    --accent: #D99A5B;
+    --accent-hover: #E8B07A;
+    --accent-bg: rgba(217, 154, 91, 0.12);
+    --accent-glow: rgba(217, 154, 91, 0.2);
+    --border: #38322A;
+    --toggle-track: #3A342C;
+    --toggle-on: #D99A5B;
+    --btn-text: #241708;
+    --gold-glow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow: rgba(0, 0, 0, 0.4);
+    --on-bg: rgba(217, 154, 91, 0.12);
+    --on-border: rgba(217, 154, 91, 0.35);
+    --divider: #38322A;
+    --auth-bg: #171310;
+    --auth-card: #221D16;
+    --pg-card: #221D16;
+    --pg-ink: #F2EDE3;
+    --pg-muted: #A39E93;
+    --pg-line: #38322A;
+    --pg-faint: #2C2620;
+    --pg-deep: #F2EDE3;
+    --pg-brand: #D99A5B;
+    --pg-brand-hover: #E8B07A;
+    --pg-onbrand: #241708;
+    --pg-side: #1D1813;
+    --pg-navtext: #B7AFA2;
+    --pg-nav-active-bg: rgba(217, 154, 91, 0.16);
+    --pg-nav-active-text: #E8B07A;
+    --pg-success: #62A875;
+    --pg-track: #38322A;
+    --pg-track-hover: #453D32;
+    --pg-brand-line: rgba(217, 154, 91, 0.45);
+    --pg-brand-soft: rgba(217, 154, 91, 0.25);
+    --pg-brand-faint: rgba(217, 154, 91, 0.12);
+    --pg-brand-ghost: rgba(217, 154, 91, 0.08);
+    --pg-error: #E06A6A;
+    --pg-error-faint: rgba(224, 106, 106, 0.12);
+    --pg-error-line: rgba(224, 106, 106, 0.25);
+    --pg-tile-ico: #E8B07A;
+}
+
+/* Neutral app shell palette: keep the dashboard monochrome across themes. */
+body.pg-shell,
+body.m-shell {
+    --bg: #fafafa;
+    --bg-card: #ffffff;
+    --bg-card-alt: #f4f4f5;
+    --bg-input: #ffffff;
+    --bg-header: rgba(250, 250, 250, 0.92);
+    --text: #09090b;
+    --text-muted: #71717a;
+    --accent: #09090b;
+    --accent-hover: #27272a;
+    --accent-bg: rgba(0, 0, 0, 0.05);
+    --accent-glow: rgba(0, 0, 0, 0.12);
+    --border: #e4e4e7;
+    --toggle-track: #e4e4e7;
+    --toggle-on: #09090b;
+    --btn-text: #ffffff;
+    --pg-card: #ffffff;
+    --pg-ink: #09090b;
+    --pg-muted: #71717a;
+    --pg-line: #e4e4e7;
+    --pg-faint: #f4f4f5;
+    --pg-deep: #09090b;
+    --pg-brand: #09090b;
+    --pg-brand-hover: #27272a;
+    --pg-onbrand: #ffffff;
+    --pg-side: #fafafa;
+    --pg-navtext: #52525b;
+    --pg-nav-active-bg: rgba(0, 0, 0, 0.06);
+    --pg-nav-active-text: #09090b;
+    --pg-success: #09090b;
+    --pg-track: #e4e4e7;
+    --pg-track-hover: #d4d4d8;
+    --pg-brand-line: rgba(9, 9, 11, 0.24);
+    --pg-brand-soft: rgba(9, 9, 11, 0.14);
+    --pg-brand-faint: rgba(9, 9, 11, 0.06);
+    --pg-brand-ghost: rgba(9, 9, 11, 0.035);
+    --pg-tile-ico: #ffffff;
+}
+
+html[data-theme="dark"] body.pg-shell,
+html[data-theme="dark"] body.m-shell {
+    --bg: #09090b;
+    --bg-card: #18181b;
+    --bg-card-alt: #27272a;
+    --bg-input: #18181b;
+    --bg-header: rgba(9, 9, 11, 0.92);
+    --text: #f4f4f5;
+    --text-muted: #a1a1aa;
+    --accent: #ffffff;
+    --accent-hover: #e4e4e7;
+    --accent-bg: rgba(255, 255, 255, 0.08);
+    --accent-glow: rgba(255, 255, 255, 0.2);
+    --border: #27272a;
+    --toggle-track: #27272a;
+    --toggle-on: #ffffff;
+    --btn-text: #09090b;
+    --pg-card: #18181b;
+    --pg-ink: #f4f4f5;
+    --pg-muted: #a1a1aa;
+    --pg-line: #27272a;
+    --pg-faint: #27272a;
+    --pg-deep: #f4f4f5;
+    --pg-brand: #ffffff;
+    --pg-brand-hover: #e4e4e7;
+    --pg-onbrand: #09090b;
+    --pg-side: #09090b;
+    --pg-navtext: #a1a1aa;
+    --pg-nav-active-bg: rgba(255, 255, 255, 0.08);
+    --pg-nav-active-text: #ffffff;
+    --pg-success: #f4f4f5;
+    --pg-track: #27272a;
+    --pg-track-hover: #3f3f46;
+    --pg-brand-line: rgba(255, 255, 255, 0.28);
+    --pg-brand-soft: rgba(255, 255, 255, 0.16);
+    --pg-brand-faint: rgba(255, 255, 255, 0.08);
+    --pg-brand-ghost: rgba(255, 255, 255, 0.04);
+    --pg-tile-ico: #09090b;
+}
+
+/* Mobile top header: clear the notch. */
+body.m-shell header.fixed.top-0 {
+    padding-top: env(safe-area-inset-top);
+    height: auto;
+    min-height: 3.5rem;
+}
+
+/* Mobile bottom nav: light bar, terracotta active dot, safe-area aware. */
+body.m-shell nav.fixed.bottom-0 {
+    background: rgba(255, 255, 255, 0.94);
+    border-top: 1px solid var(--border);
+    height: auto;
+    min-height: 4rem;
+    padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 -4px 16px rgba(38, 56, 44, 0.06);
+}
+html[data-theme="dark"] body.m-shell nav.fixed.bottom-0 {
+    background: rgba(24, 24, 27, 0.94);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.4);
+}
+body.m-shell nav.fixed.bottom-0 .text-accent {
+    position: relative;
+}
+body.m-shell nav.fixed.bottom-0 .text-accent::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -1px;
+    width: 4px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--accent);
+    transform: translateX(-50%);
+}
+html[data-theme="dark"] body.m-shell nav.fixed.bottom-0 .text-accent::after {
+    background: var(--accent);
+}
+
+/* Voice mic on mobile: flat terracotta disc, no neon glow. */
+body.m-shell #voice-control-mic-btn {
+    background: var(--accent);
+    box-shadow: 0 6px 18px var(--accent-glow);
+}
+html[data-theme="dark"] body.m-shell #voice-control-mic-btn {
+    background: var(--accent);
+    box-shadow: 0 6px 18px var(--accent-glow);
+}
+
+/* -------- Overview summary cards --------
+   Only the status VALUE carries state color (green Normal / red
+   Attention). Labels and supporting lines stay neutral in every theme. */
+.ov-label,
+.ov-sub {
+    color: #69736D;
+}
+html[data-theme="dark"] .ov-label,
+html[data-theme="dark"] .ov-sub {
+    color: #93A393;
+}
+
+/* PG shell polish: readable focus, calm scrollbars, restrained motion */
+body.pg-shell :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+body.pg-shell ::-webkit-scrollbar-thumb {
+    background: #C4CFC4;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+body.pg-shell * {
+    scrollbar-color: #C4CFC4 transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+    body.pg-shell *, body.pg-shell *::before, body.pg-shell *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* -------- Desktop right-drawer for site modals --------
+   Every dialog backdrop in the app uses a translucent black fixed layer
+   (bg-black/xx); the Loader uses a solid bg and is excluded. On desktop
+   (>=1024px) dialogs dock to the right as a sidebar panel instead of a
+   centered card. Mobile bottom-sheets (max-md:*) are untouched. */
+@keyframes pg-drawer-in {
+    from { transform: translateX(48px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+/* Drag-to-close grabber pill (pure CSS, always visible like the
+   reference sheet). The drag gesture itself is wired by
+   PGDrawerEnhancer from the panel's top strip. */
+@media (min-width: 1024px) {
+    div.fixed[class*="bg-black/"] > div:first-child::before,
+    div.fixed[class*="z-[10000]"] > div:first-child::before {
+        content: "";
+        display: block;
+        width: 48px;
+        height: 5px;
+        border-radius: 999px;
+        background: var(--border);
+        margin: 2px auto 10px;
+        cursor: grab;
+        flex-shrink: 0;
+    }
+    div.fixed[class*="bg-black/"],
+    div.fixed[class*="z-[10000]"] {
+        justify-content: flex-end;
+        align-items: stretch;
+        padding: 0;
+    }
+    div.fixed[class*="bg-black/"] > div:first-child,
+    div.fixed[class*="z-[10000]"] > div:first-child {
+        height: 100%;
+        max-height: none;
+        width: min(420px, 94vw);
+        margin: 0;
+        border-radius: 18px 0 0 18px;
+        border-top: 0;
+        border-bottom: 0;
+        border-right: 0;
+        overflow-y: auto;
+        animation: pg-drawer-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+}
+
+/* Hide scrollbars while keeping scrollability (used via className). */
+.scrollbar-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+    display: none;
+}
+
+/* No visible scrollbars anywhere on Windows: page, drawers, dropdowns,
+   lists, sheets. Wheel / touch / keyboard scrolling keeps working —
+   only the thumb visuals are removed. Placed last so it wins over the
+   themed scrollbar rules above. */

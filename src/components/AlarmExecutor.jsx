@@ -3,6 +3,11 @@
 import { useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { setLocalDeviceState } from '@/lib/localApi';
+import { publishClientNotification } from '@/lib/clientNotifications';
+import {
+  formatTime,
+  getNextScheduleOccurrenceLocal,
+} from '@/app/schedules/scheduleUtils';
 import useLocalConnection from '@/hooks/useLocalConnection';
 
 
@@ -41,6 +46,37 @@ function releaseScheduleOccurrence(key, occurrence) {
   }
 }
 
+async function claimScheduleRunInDb(userId, scheduleId, occurrenceDate) {
+  try {
+    const { data, error } = await supabase
+      .from('schedule_runs')
+      .upsert(
+        {
+          user_id: userId,
+          schedule_id: scheduleId,
+          occurrence_at: occurrenceDate.toISOString(),
+          source: 'client',
+        },
+        { onConflict: 'schedule_id,occurrence_at', ignoreDuplicates: true },
+      )
+      .select('id');
+    if (error) return { status: 'error' };
+    if (!data?.length) return { status: 'duplicate' };
+    return { status: 'claimed', id: data[0].id };
+  } catch {
+    return { status: 'error' };
+  }
+}
+
+async function releaseScheduleRunInDb(claimId) {
+  if (!claimId) return;
+  try {
+    await supabase.from('schedule_runs').delete().eq('id', claimId);
+  } catch {
+    // The server-side cleanup can retry on the next pass.
+  }
+}
+
 function scheduleOccurrenceKey(now, time) {
   const pad = (number) => String(number).padStart(2, '0');
   const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
@@ -51,9 +87,16 @@ export default function AlarmExecutor({ user: propUser = null }) {
   const { isLocalConnected } = useLocalConnection();
   // We use refs to hold the latest data so the interval doesn't need to be recreated,
   // which prevents missing ticks or stale closures.
-  const dataRef = useRef({ user: null, devices: [], alarms: [], schedules: [] });
+  const dataRef = useRef({
+    user: null,
+    devices: [],
+    alarms: [],
+    schedules: [],
+    settings: null,
+  });
   // Keep track of recently run schedules to avoid triggering the same schedule multiple times in a minute
   const recentSchedulesRef = useRef(new Map()); // scheduleId -> timestamp
+  const recentScheduleNotificationsRef = useRef(new Map()); // dedupe key -> timestamp
 
   useEffect(() => {
     let active = true;
@@ -63,10 +106,11 @@ export default function AlarmExecutor({ user: propUser = null }) {
       if (!user || refreshInFlight) return false;
       refreshInFlight = true;
       try {
-        const [devRes, alarmRes, schedRes] = await Promise.all([
-          supabase.from('devices').select('id, name, relay_index, board_id, is_on, boards(board_identifier)').eq('user_id', user.id),
+        const [devRes, alarmRes, schedRes, settingsRes] = await Promise.all([
+          supabase.from('devices').select('id, name, relay_index, board_id, is_on, last_changed, boards(board_identifier)').eq('user_id', user.id),
           supabase.from('alarms').select('id, trigger_at, action, fired, device_id').eq('user_id', user.id).eq('fired', false),
           supabase.from('schedules').select('id, time, days, action, device_id, enabled').eq('user_id', user.id).eq('enabled', true),
+          supabase.from('user_settings').select('notifications_enabled, notify_alarm, notify_schedule, schedule_lead_minutes').eq('user_id', user.id).maybeSingle(),
         ]);
 
         if (!active) return false;
@@ -92,6 +136,7 @@ export default function AlarmExecutor({ user: propUser = null }) {
           })),
           alarms: alarmRes.data || [],
           schedules: schedRes.data || [],
+          settings: settingsRes.data || null,
         };
         return true;
       } catch (error) {
@@ -111,11 +156,23 @@ export default function AlarmExecutor({ user: propUser = null }) {
       }
       if (!active) return undefined;
       if (!user) {
-        dataRef.current = { user: null, devices: [], alarms: [], schedules: [] };
+        dataRef.current = {
+          user: null,
+          devices: [],
+          alarms: [],
+          schedules: [],
+          settings: null,
+        };
         return undefined;
       }
       if (dataRef.current.user?.id !== user.id) {
-        dataRef.current = { user, devices: [], alarms: [], schedules: [] };
+        dataRef.current = {
+          user,
+          devices: [],
+          alarms: [],
+          schedules: [],
+          settings: null,
+        };
       }
 
       await refreshData(user);
@@ -181,7 +238,7 @@ export default function AlarmExecutor({ user: propUser = null }) {
       if (tickInFlight) return;
       tickInFlight = true;
       try {
-        const { user, devices, alarms, schedules } = dataRef.current;
+        const { user, devices, alarms, schedules, settings } = dataRef.current;
         if (!user) return;
 
         const now = new Date();
@@ -190,6 +247,57 @@ export default function AlarmExecutor({ user: propUser = null }) {
         const currentMinute = now.getMinutes();
         const pad = (number) => String(number).padStart(2, '0');
         const timeString24h = `${pad(currentHour)}:${pad(currentMinute)}`;
+
+        // 0. Schedule reminders. The server cron owns this when the app is
+        // closed; this client pass keeps reminders working offline/local.
+        if (
+          settings?.notifications_enabled !== false &&
+          settings?.notify_schedule !== false
+        ) {
+          const leadMinutes = Math.max(
+            0,
+            Math.min(60, Number(settings?.schedule_lead_minutes ?? 5)),
+          );
+          const leadMs = leadMinutes * 60 * 1000;
+          for (const schedule of schedules) {
+            if (
+              !schedule.enabled ||
+              !Array.isArray(schedule.days) ||
+              !schedule.time
+            ) {
+              continue;
+            }
+
+            const occurrence = getNextScheduleOccurrenceLocal(
+              schedule,
+              new Date(now.getTime() - 30000),
+            );
+            if (!occurrence) continue;
+            const delta = occurrence.getTime() - now.getTime();
+            if (delta < -30000 || delta > leadMs) continue;
+
+            const dedupeKey = `schedule-before:${schedule.id}:${occurrence.toISOString()}`;
+            if (recentScheduleNotificationsRef.current.has(dedupeKey)) continue;
+            recentScheduleNotificationsRef.current.set(dedupeKey, now.getTime());
+
+            const device = devices.find((item) => item.id === schedule.device_id);
+            const deviceName = device?.name || 'Device';
+            const action = schedule.action ? 'ON' : 'OFF';
+            void publishClientNotification({
+              userId: user.id,
+              type: 'schedule',
+              title: 'Upcoming schedule',
+              body: `${deviceName} will turn ${action} at ${formatTime(String(schedule.time).slice(0, 5))}.`,
+              url: '/schedules',
+              dedupeKey,
+              data: {
+                schedule_id: schedule.id,
+                device_id: schedule.device_id,
+                occurrence_at: occurrence.toISOString(),
+              },
+            });
+          }
+        }
 
         // 1. Check recurring schedules. Store a per-day slot claim so opening
         // the same dashboard in another tab does not run that occurrence twice.
@@ -205,7 +313,25 @@ export default function AlarmExecutor({ user: propUser = null }) {
 
           const occurrence = scheduleOccurrenceKey(now, schedTime);
           const claimKey = `vika:schedule:${user.id}:${schedule.id}`;
-          const claimed = await claimScheduleOccurrence(claimKey, occurrence);
+          const occurrenceDate = new Date(now);
+          occurrenceDate.setHours(
+            Number(schedTime.slice(0, 2)),
+            Number(schedTime.slice(3, 5)),
+            0,
+            0,
+          );
+
+          const dbClaim = await claimScheduleRunInDb(
+            user.id,
+            schedule.id,
+            occurrenceDate,
+          );
+          if (dbClaim.status === 'duplicate') continue;
+
+          const claimed =
+            dbClaim.status === 'claimed'
+              ? true
+              : await claimScheduleOccurrence(claimKey, occurrence);
           if (!claimed) continue;
 
           recentSchedulesRef.current.set(schedule.id, now.getTime());
@@ -215,6 +341,9 @@ export default function AlarmExecutor({ user: propUser = null }) {
           if (!executed) {
             recentSchedulesRef.current.delete(schedule.id);
             releaseScheduleOccurrence(claimKey, occurrence);
+            if (dbClaim.status === 'claimed') {
+              await releaseScheduleRunInDb(dbClaim.id);
+            }
           }
         }
 
@@ -241,6 +370,25 @@ export default function AlarmExecutor({ user: propUser = null }) {
 
           dataRef.current.alarms = dataRef.current.alarms.filter((item) => item.id !== alarm.id);
           const executed = await executeAction(user, devices, alarm.device_id, alarm.action, 'Alarm');
+          if (executed) {
+            const alarmSettings = dataRef.current.settings;
+            if (
+              alarmSettings?.notifications_enabled !== false &&
+              alarmSettings?.notify_alarm !== false
+            ) {
+              const device = devices.find((item) => item.id === alarm.device_id);
+              void publishClientNotification({
+                userId: user.id,
+                type: 'alarm',
+                title: 'Alarm fired',
+                body: `${device?.name || 'Device'} turned ${alarm.action ? 'ON' : 'OFF'}.`,
+                url: '/alarms',
+                dedupeKey: `alarm:${alarm.id}`,
+                data: { alarm_id: alarm.id, device_id: alarm.device_id },
+                silentToast: true,
+              });
+            }
+          }
           if (!executed) {
             // Permit retry if neither local dispatch nor cloud persistence worked.
             const { error: resetError } = await supabase
@@ -263,6 +411,11 @@ export default function AlarmExecutor({ user: propUser = null }) {
         // Avoid retaining obsolete in-memory guards.
         for (const [id, timestamp] of recentSchedulesRef.current.entries()) {
           if (now.getTime() - timestamp > 120000) recentSchedulesRef.current.delete(id);
+        }
+        for (const [key, timestamp] of recentScheduleNotificationsRef.current.entries()) {
+          if (now.getTime() - timestamp > 30 * 60 * 1000) {
+            recentScheduleNotificationsRef.current.delete(key);
+          }
         }
       } catch (error) {
         console.warn('Alarm/schedule executor pass failed:', error);
