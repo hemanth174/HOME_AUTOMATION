@@ -98,9 +98,19 @@ export function ConnectionSection({
             {state === "checking"
               ? "Searching for your local device network and available devices."
               : state === "connected"
-                ? `Local control is ready${localUrl ? ` at ${localUrl}` : ""}.`
+                ? "Local control is ready."
                 : "Connect to the HOME-AUTO-LEADER Wi-Fi network to control devices locally."}
           </p>
+          {state === "connected" && localUrl && (
+            <a
+              href={localUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-block break-all text-sm font-bold text-(--accent) underline underline-offset-4"
+            >
+              Open ESP32 at {localUrl}
+            </a>
+          )}
           <div className="mt-3">
             <StatusBadge state={state}>
               {state === "checking"

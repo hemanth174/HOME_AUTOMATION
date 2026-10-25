@@ -109,7 +109,7 @@ export default function DashboardView({ c }) {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {roomExpanded ? (
+                    {c.viewSwitcherEnabled && roomExpanded ? (
                       <div
                         className="flex items-center rounded-xl border border-(--pg-line) bg-(--pg-card) p-0.5"
                         aria-label="Device view options"

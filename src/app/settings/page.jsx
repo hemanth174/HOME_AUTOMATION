@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bell, Mic, SlidersHorizontal, Zap } from "lucide-react";
+import { Bell, LayoutGrid, Mic, SlidersHorizontal, Zap } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import {
   ensurePushSubscription,
@@ -57,13 +57,14 @@ export default function SettingsPage() {
   const [energyThreshold, setEnergyThreshold] = useState("3");
   const [notifyGhost, setNotifyGhost] = useState(true);
   const [ghostSummaryHour, setGhostSummaryHour] = useState("20");
+  const [dashboardViewSwitcherEnabled, setDashboardViewSwitcherEnabled] = useState(false);
   const [activeTab, setActiveTab] = useState("energy");
   const [notificationPermission, setNotificationPermission] = useState("default");
   const [agentAvailable, setAgentAvailable] = useState(false);
   const [agentVisible, setAgentVisible] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingNotifications, setSavingNotifications] = useState(false);
-  const [testingPush, setTestingPush] = useState(false);
+  const [savingDashboard, setSavingDashboard] = useState(false);
   const [toast, setToast] = useState("");
 
   useEffect(() => {
@@ -102,6 +103,7 @@ export default function SettingsPage() {
         setEnergyThreshold(String(data.energy_device_kwh_threshold ?? 3));
         setNotifyGhost(data.notify_ghost !== false);
         setGhostSummaryHour(String(data.ghost_summary_hour ?? 20));
+        setDashboardViewSwitcherEnabled(data.dashboard_view_switcher_enabled === true);
       }
        setAgentAvailable(isVoiceAgentAvailable());
        setAgentVisible(isVoiceAgentVisible());
@@ -197,6 +199,25 @@ export default function SettingsPage() {
     );
   };
 
+  const saveDashboardSettings = async (event) => {
+    event.preventDefault();
+    setSavingDashboard(true);
+    const { error } = await supabase.from("user_settings").upsert(
+      {
+        user_id: user.id,
+        dashboard_view_switcher_enabled: dashboardViewSwitcherEnabled,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" },
+    );
+    setSavingDashboard(false);
+    setToast(
+      error
+        ? `Failed to save dashboard settings: ${error.message}`
+        : "Dashboard settings saved successfully!",
+    );
+  };
+
   const enableBrowserNotifications = async () => {
     const permission = await requestBrowserNotificationPermission();
     setNotificationPermission(permission);
@@ -215,39 +236,6 @@ export default function SettingsPage() {
         ? "Browser notifications and background push are enabled."
         : `Browser notifications enabled, but background push failed: ${result.reason}.`,
     );
-  };
-
-  const sendTestNotification = async () => {
-    setTestingPush(true);
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session) {
-        setToast("Please sign in again to send a test notification.");
-        return;
-      }
-      const response = await fetch("/api/notifications/test", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        setToast(payload.error || "Could not send the test notification.");
-        return;
-      }
-      if (payload.push?.sent > 0) {
-        setToast(`Test notification sent to ${payload.push.sent} device(s).`);
-      } else {
-        setToast(
-          "Test notification created. Enable browser notifications on this device to receive background alerts.",
-        );
-      }
-    } catch {
-      setToast("Could not reach the notification service.");
-    } finally {
-      setTestingPush(false);
-    }
   };
 
   if (loading) return <Loader message="Loading settings..." />;
@@ -275,6 +263,7 @@ export default function SettingsPage() {
           className="flex gap-1 overflow-x-auto rounded-2xl border border-border bg-card p-1.5 shadow-sm"
         >
           {[
+            { id: "dashboard", label: "Dashboard", icon: LayoutGrid },
             { id: "energy", label: "Energy", icon: Zap },
             { id: "notifications", label: "Notifications", icon: Bell },
             { id: "voice", label: "Voice", icon: Mic },
@@ -296,6 +285,39 @@ export default function SettingsPage() {
             </button>
           ))}
         </div>
+
+        {activeTab === "dashboard" && (
+          <section className="rounded-2xl border border-border bg-card p-4 sm:p-8 shadow-lg">
+            <div className="flex items-center gap-3 mb-4 sm:mb-6">
+              <div className="w-10 h-10 rounded-xl bg-accent-bg flex items-center justify-center text-accent border border-accent/20 shrink-0">
+                <LayoutGrid size={18} strokeWidth={2.5} />
+              </div>
+              <div>
+                <h2 className="text-sm sm:text-base font-extrabold tracking-tight">
+                  Dashboard View
+                </h2>
+                <p className="text-[11px] sm:text-xs font-semibold text-text-muted">
+                  Choose whether the dashboard shows List and Carousel view controls.
+                </p>
+              </div>
+            </div>
+            <form onSubmit={saveDashboardSettings} className="flex max-w-xl flex-col gap-3.5">
+              <SettingSwitch
+                label="Enable device view switcher"
+                description="Show the List and Carousel buttons in each room. Off by default, so the dashboard keeps its normal view."
+                checked={dashboardViewSwitcherEnabled}
+                onChange={setDashboardViewSwitcherEnabled}
+              />
+              <button
+                type="submit"
+                disabled={savingDashboard}
+                className="w-full sm:w-auto min-h-[44px] rounded-xl bg-accent px-6 py-2.5 text-xs font-extrabold text-[var(--btn-text)] hover:bg-accent-hover transition-colors disabled:opacity-50"
+              >
+                {savingDashboard ? "Saving..." : "Save Dashboard Settings"}
+              </button>
+            </form>
+          </section>
+        )}
 
         {activeTab === "energy" && (
         <section className="rounded-2xl border border-border bg-card p-4 sm:p-8 shadow-lg">
@@ -494,14 +516,6 @@ export default function SettingsPage() {
                     className="min-h-[38px] rounded-xl border border-accent/30 bg-accent-bg px-3.5 py-2 text-[11px] font-extrabold text-accent transition hover:border-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {notificationPermission === "granted" ? "Enabled" : "Enable"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={sendTestNotification}
-                    disabled={testingPush}
-                    className="min-h-[38px] rounded-xl border border-border bg-card px-3.5 py-2 text-[11px] font-extrabold text-text transition hover:bg-card-alt disabled:opacity-50"
-                  >
-                    {testingPush ? "Sending..." : "Send test"}
                   </button>
                 </div>
               </div>

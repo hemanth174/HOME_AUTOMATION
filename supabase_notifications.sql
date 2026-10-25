@@ -17,7 +17,8 @@ alter table public.user_settings
     check (energy_device_kwh_threshold > 0),
   add column if not exists notify_ghost boolean not null default true,
   add column if not exists ghost_summary_hour integer not null default 20
-    check (ghost_summary_hour between 0 and 23);
+    check (ghost_summary_hour between 0 and 23),
+  add column if not exists dashboard_view_switcher_enabled boolean not null default false;
 
 -- ---------------------------------------------------------------------------
 -- 2. Persisted notification history
