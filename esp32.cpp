@@ -2261,9 +2261,22 @@ void applyScheduleSnapshot(JsonDocument& response) {
 void deviceAgentTask(void* parameter) {
   (void)parameter;
   unsigned long lastAttempt = 0;
+  bool deviceAgentNtpRequested = false;
   for (;;) {
     if (WiFi.status() != WL_CONNECTED || String(BOARD_IDENTIFIER) == "esp32-unconfigured" ||
         strlen(DEVICE_AGENT_URL) == 0 || strlen(DEVICE_TOKEN) < 32) {
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+    // CA-validated HTTPS needs a sensible clock to check certificate dates.
+    // Start NTP here rather than waiting for the legacy cloud worker's 30s cadence.
+    if (time(nullptr) < 100000) {
+      if (!deviceAgentNtpRequested) {
+        setenv("TZ", "IST-5:30", 1);
+        tzset();
+        configTime(0, 0, "pool.ntp.org", "time.google.com");
+        deviceAgentNtpRequested = true;
+      }
       vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
     }
