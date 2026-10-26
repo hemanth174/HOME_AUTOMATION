@@ -85,6 +85,26 @@ async function getDevice(request: Request, boardIdentifier: unknown) {
   return { token: bearer, config, board };
 }
 
+async function writeConfigEvent(
+  config: Record<string, unknown>,
+  status: string,
+  message: string,
+  createdBy = "device",
+) {
+  await rest("device_config_events", {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      board_id: config.board_id,
+      user_id: config.user_id,
+      config_version: Number(config.config_version || 0),
+      status,
+      message: message.slice(0, 500),
+      created_by: createdBy,
+    }),
+  });
+}
+
 async function poll(request: Request, device: { config: Record<string, unknown>; board: Record<string, unknown> }, body: Record<string, unknown>) {
   const { config, board } = device;
   const now = new Date().toISOString();
@@ -128,10 +148,13 @@ async function poll(request: Request, device: { config: Record<string, unknown>;
       wifi_security: config.wifi_security,
       wifi_password: password,
     };
-    await rest(
-      `device_runtime_configs?board_id=eq.${encodeURIComponent(String(config.board_id))}`,
-      { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ config_update_status: "sending" }) },
-    );
+    if (config.config_update_status !== "sending") {
+      await rest(
+        `device_runtime_configs?board_id=eq.${encodeURIComponent(String(config.board_id))}`,
+        { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ config_update_status: "sending" }) },
+      );
+      await writeConfigEvent(config, "sending", "ESP32 checked in and received the pending configuration.", "device");
+    }
   }
 
   return json({
@@ -166,6 +189,13 @@ async function updateConfigStatus(device: { config: Record<string, unknown> }, b
     `device_runtime_configs?board_id=eq.${encodeURIComponent(String(device.config.board_id))}`,
     { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(patch) },
   );
+  const messages: Record<string, string> = {
+    checking_wifi: "ESP32 is checking whether the configured Wi-Fi network is visible.",
+    applying: "ESP32 is attempting the new network and staging the settings.",
+    applied: "ESP32 connected with the new configuration and saved it to NVS.",
+    failed: String(body.error || "ESP32 rejected the configuration."),
+  };
+  await writeConfigEvent(device.config, status, messages[status] || status, "device");
   return json({ ok: true, version, status });
 }
 
