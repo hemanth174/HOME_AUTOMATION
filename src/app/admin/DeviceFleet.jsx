@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import {
   Activity, AlertCircle, CheckCircle2, CircleHelp, Clock3, Cpu, Download,
-  LoaderCircle, Power, RefreshCw, Settings2, ShieldCheck, Wifi, WifiOff,
+  LoaderCircle, Power, RefreshCw, Settings2, Wifi, WifiOff,
 } from "lucide-react";
 
 function ago(value) {
@@ -16,14 +16,6 @@ function ago(value) {
   if (seconds < 60) return seconds + "s ago";
   if (seconds < 3600) return Math.floor(seconds / 60) + "m ago";
   return Math.floor(seconds / 3600) + "h ago";
-}
-
-function statusStyle(status, online) {
-  if (!online) return "border-slate-500/30 bg-slate-500/10 text-text-muted";
-  if (status === "failed") return "border-red-400/40 bg-red-400/10 text-red-500";
-  if (status === "applied") return "border-emerald-400/40 bg-emerald-400/10 text-emerald-500";
-  if (["pending", "checking_wifi", "sending", "applying"].includes(status)) return "border-amber-400/40 bg-amber-400/10 text-amber-500";
-  return "border-border bg-background text-text-muted";
 }
 
 export default function DeviceFleet() {
@@ -97,7 +89,7 @@ export default function DeviceFleet() {
           if (!response.ok || !active) return;
           const command = (data.commands || []).find((item) =>
             item.id === restartByBoard[boardId]?.commandId
-          ) || (data.commands || [])[0];
+          );
           if (!command || !active) return;
           const terminal = ["completed", "failed", "cancelled"].includes(command.status);
           const startedAt = restartByBoard[boardId]?.startedAt || Date.now();
