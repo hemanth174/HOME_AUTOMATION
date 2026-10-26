@@ -151,7 +151,7 @@ async function poll(request: Request, body: Record<string, unknown>) {
     };
     if (deliveryStatus !== "sending") {
       await rest(
-        \`device_runtime_configs?board_id=eq.\${encodeURIComponent(String(config.board_id))}\`,
+        `device_runtime_configs?board_id=eq.${encodeURIComponent(String(config.board_id))}`,
         { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ config_update_status: "sending" }) },
       );
       await writeConfigEvent(config, "sending", "ESP32 checked in and received the pending configuration.", "device");
@@ -174,13 +174,13 @@ async function poll(request: Request, body: Record<string, unknown>) {
 
 async function linkedDevices(device: { config: Record<string, unknown> }) {
   return await rest(
-    \`devices?board_id=eq.\${encodeURIComponent(String(device.config.board_id))}&user_id=eq.\${encodeURIComponent(String(device.config.user_id))}&select=id,name,relay_index,is_on,last_changed\`,
+    `devices?board_id=eq.${encodeURIComponent(String(device.config.board_id))}&user_id=eq.${encodeURIComponent(String(device.config.user_id))}&select=id,name,relay_index,is_on,last_changed`,
   );
 }
 
 function deviceIdFilter(devices: Array<Record<string, unknown>>) {
   const ids = devices.map((item) => String(item.id || "")).filter((id) => /^[0-9a-f-]{36}$/i.test(id));
-  return ids.length ? \`in.(\${ids.join(",")})\` : "";
+  return ids.length ? `in.(${ids.join(",")})` : "";
 }
 
 async function handleDeviceDataAction(device: { config: Record<string, unknown>; board: Record<string, unknown> }, body: Record<string, unknown>) {
@@ -190,7 +190,7 @@ async function handleDeviceDataAction(device: { config: Record<string, unknown>;
 
   if (action === "heartbeat") {
     const now = new Date().toISOString();
-    await rest(\`boards?id=eq.\${encodeURIComponent(boardId)}&user_id=eq.\${encodeURIComponent(userId)}\`, {
+    await rest(`boards?id=eq.${encodeURIComponent(boardId)}&user_id=eq.${encodeURIComponent(userId)}`, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
       body: JSON.stringify({ last_seen: now }),
@@ -204,7 +204,7 @@ async function handleDeviceDataAction(device: { config: Record<string, unknown>;
       return json({ error: "Invalid relay index" }, 400);
     }
     const rows = await rest(
-      \`devices?board_id=eq.\${encodeURIComponent(boardId)}&user_id=eq.\${encodeURIComponent(userId)}&relay_index=eq.\${relayIndex}&select=id,name,relay_index,is_on,last_changed,feedback_on\`,
+      `devices?board_id=eq.${encodeURIComponent(boardId)}&user_id=eq.${encodeURIComponent(userId)}&relay_index=eq.${relayIndex}&select=id,name,relay_index,is_on,last_changed,feedback_on`,
     );
     const target = Array.isArray(rows) ? rows[0] : null;
     if (!target) return json({ error: "Relay is not registered on this board" }, 404);
@@ -217,7 +217,7 @@ async function handleDeviceDataAction(device: { config: Record<string, unknown>;
       if (typeof body.state !== "boolean") return json({ error: "state must be boolean" }, 400);
       const lastChanged = new Date().toISOString();
       const updated = await rest(
-        \`devices?id=eq.\${encodeURIComponent(String(target.id))}&board_id=eq.\${encodeURIComponent(boardId)}&user_id=eq.\${encodeURIComponent(userId)}\`,
+        `devices?id=eq.${encodeURIComponent(String(target.id))}&board_id=eq.${encodeURIComponent(boardId)}&user_id=eq.${encodeURIComponent(userId)}`,
         {
           method: "PATCH",
           headers: { Prefer: "return=representation" },
@@ -230,7 +230,7 @@ async function handleDeviceDataAction(device: { config: Record<string, unknown>;
 
     if (typeof body.state !== "boolean") return json({ error: "state must be boolean" }, 400);
     const updated = await rest(
-      \`devices?id=eq.\${encodeURIComponent(String(target.id))}&board_id=eq.\${encodeURIComponent(boardId)}&user_id=eq.\${encodeURIComponent(userId)}\`,
+      `devices?id=eq.${encodeURIComponent(String(target.id))}&board_id=eq.${encodeURIComponent(boardId)}&user_id=eq.${encodeURIComponent(userId)}`,
       {
         method: "PATCH",
         headers: { Prefer: "return=representation" },
@@ -252,14 +252,14 @@ async function handleDeviceDataAction(device: { config: Record<string, unknown>;
 
     if (action === "poll_alarms") {
       const alarms = await rest(
-        \`alarms?user_id=eq.\${encodeURIComponent(userId)}&device_id=\${filter}&fired=eq.false&select=id,device_id,trigger_at,action,fired&order=trigger_at.asc&limit=20\`,
+        `alarms?user_id=eq.${encodeURIComponent(userId)}&device_id=${filter}&fired=eq.false&select=id,device_id,trigger_at,action,fired&order=trigger_at.asc&limit=20`,
       );
       return json({ ok: true, alarms: Array.isArray(alarms) ? alarms : [] });
     }
 
     if (action === "poll_schedules") {
       const schedules = await rest(
-        \`schedules?user_id=eq.\${encodeURIComponent(userId)}&device_id=\${filter}&enabled=eq.true&select=id,device_id,time,days,action,enabled&order=time.asc&limit=32\`,
+        `schedules?user_id=eq.${encodeURIComponent(userId)}&device_id=${filter}&enabled=eq.true&select=id,device_id,time,days,action,enabled&order=time.asc&limit=32`,
       );
       return json({ ok: true, schedules: Array.isArray(schedules) ? schedules : [] });
     }
@@ -267,7 +267,7 @@ async function handleDeviceDataAction(device: { config: Record<string, unknown>;
     const alarmId = String(body.alarm_id || "");
     if (!/^[0-9a-f-]{36}$/i.test(alarmId)) return json({ error: "Invalid alarm ID" }, 400);
     const claimed = await rest(
-      \`alarms?id=eq.\${encodeURIComponent(alarmId)}&user_id=eq.\${encodeURIComponent(userId)}&device_id=\${filter}&fired=eq.false&select=id\`,
+      `alarms?id=eq.${encodeURIComponent(alarmId)}&user_id=eq.${encodeURIComponent(userId)}&device_id=${filter}&fired=eq.false&select=id`,
       {
         method: "PATCH",
         headers: { Prefer: "return=representation" },
