@@ -128,7 +128,6 @@ async function poll(request: Request, body: Record<string, unknown>) {
   const userId = String(board.user_id || "");
   const boardId = String(board.id || "");
   let configuration: Record<string, unknown> | null = null;
-  let meshConfigurations: Record<string, unknown>[] = [];
   let commands: Record<string, unknown>[] = Array.isArray(snapshot.commands)
     ? snapshot.commands.filter((item: Record<string, unknown>) =>
         String(item.board_id || "") === boardId &&
@@ -140,7 +139,7 @@ async function poll(request: Request, body: Record<string, unknown>) {
   const deliveryStatus = String(config.config_update_status || "");
 
   if (currentVersion > reportedVersion && ssid.length > 0 &&
-      ["pending", "sending"].includes(deliveryStatus)) {
+      ["pending", "sending", "checking_wifi", "applying"].includes(deliveryStatus)) {
     let password = "";
     if (config.wifi_security === "wpa2_psk") {
       if (!config.encrypted_wifi_password) {
@@ -249,10 +248,13 @@ async function updateConfigStatus(device: { config: Record<string, unknown> }, b
     return json({ ok: true, ignored: true, reason: "stale_status_transition" });
   }
 
+  const acknowledgedAt = new Date().toISOString();
   const patch: Record<string, unknown> = {
     config_update_status: status,
     last_error: status === "failed" ? String(body.error || "Device rejected the configuration").slice(0, 500) : null,
-    updated_at: new Date().toISOString(),
+    last_seen_at: acknowledgedAt,
+    last_direct_seen_at: acknowledgedAt,
+    updated_at: acknowledgedAt,
   };
   if (status === "applied") {
     patch.applied_config_version = version;
