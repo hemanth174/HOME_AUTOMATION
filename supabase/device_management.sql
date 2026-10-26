@@ -48,6 +48,7 @@ create table if not exists public.device_commands (
     check (status in ('pending','accepted','completed','failed','cancelled')),
   requested_by uuid references auth.users(id) on delete set null,
   requested_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '5 minutes'),
   accepted_at timestamptz,
   completed_at timestamptz,
   last_error text,
@@ -88,8 +89,13 @@ create index if not exists device_runtime_configs_last_seen_idx
   on public.device_runtime_configs(last_seen_at desc);
 create index if not exists device_runtime_configs_direct_seen_idx
   on public.device_runtime_configs(last_direct_seen_at desc);
+alter table public.device_commands
+  add column if not exists expires_at timestamptz not null default (now() + interval '5 minutes');
+
 create index if not exists device_commands_board_status_idx
   on public.device_commands(board_id, status, requested_at);
+create index if not exists device_commands_expiry_idx
+  on public.device_commands(expires_at) where status in ('pending','accepted');
 
 alter table public.device_runtime_configs enable row level security;
 alter table public.device_commands enable row level security;
@@ -217,7 +223,8 @@ begin
     'board_id', command_row.board_id,
     'board_identifier', b.board_identifier,
     'command_type', command_row.command_type,
-    'requested_at', command_row.requested_at
+    'requested_at', command_row.requested_at,
+    'expires_at', command_row.expires_at
   ) order by command_row.requested_at), '[]'::jsonb)
   into v_commands
   from (
@@ -226,6 +233,7 @@ begin
     where board_id = v_config.board_id
       and user_id = v_config.user_id
       and status = 'pending'
+      and expires_at > v_now
     order by requested_at
     limit 5
   ) command_row
