@@ -15,7 +15,7 @@ export async function GET(request) {
 
   const { data: boards, error } = await auth.admin
     .from('boards')
-    .select('id, name, board_identifier, user_id, created_at, last_seen, hardware_model, devices(id, name, relay_index, is_on), device_runtime_configs(board_id, config_version, applied_config_version, device_token_hash, config_update_status, last_seen_at, last_error, wifi_ssid, wifi_security, config_requested_at, config_applied_at)')
+    .select('id, name, board_identifier, user_id, created_at, last_seen, hardware_model, devices(id, name, relay_index, is_on), device_runtime_configs(board_id, config_version, applied_config_version, device_token_hash, first_seen_at, config_update_status, last_seen_at, last_error, wifi_ssid, wifi_security, config_requested_at, config_applied_at)')
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -43,7 +43,7 @@ export async function GET(request) {
       createdAt: board.created_at,
       hardwareModel: board.hardware_model || 'ESP32-4CH',
       devices: (board.devices || []).slice().sort((a, b) => a.relay_index - b.relay_index),
-      provisioned: Boolean(config?.device_token_hash),
+      provisioned: Boolean(config?.first_seen_at),
       config: config ? {
         version: config.config_version,
         appliedVersion: config.applied_config_version,
