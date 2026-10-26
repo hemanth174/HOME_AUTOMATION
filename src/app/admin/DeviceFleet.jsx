@@ -142,14 +142,16 @@ export default function DeviceFleet() {
       setNotice("Prepare and flash the device-agent firmware once before requesting a remote restart.");
       return;
     }
-    if (!device.config.directOnline) {
-      setNotice(device.config.meshOnline
-        ? "This board is visible through the local mesh but has no recent direct device-agent check-in. Remote restart is disabled so another ESP32 cannot be restarted by mistake."
-        : "This ESP32 is offline or has no recent direct device-agent check-in. Reconnect it before sending a restart request.");
+    const meshOnly = !device.config.directOnline && Boolean(device.config.meshOnline);
+    if (!device.config.directOnline && !meshOnly) {
+      setNotice("This ESP32 has no recent direct check-in or live mesh-gateway observation. Reconnect it before sending a restart request.");
       return;
     }
+    const deliveryNote = meshOnly
+      ? "\n\nThis board is reachable through its mesh leader. The signed restart request will target this board identifier only, and success requires the member to rejoin the mesh."
+      : "";
     const approved = window.confirm(
-      "Restart " + device.name + "?\n\nThis will briefly disconnect the ESP32 and its attached relay channels. Use this only when a software restart is safe for the connected equipment."
+      "Restart " + device.name + "?\n\nThis will briefly disconnect the ESP32 and its attached relay channels. Use this only when a software restart is safe for the connected equipment." + deliveryNote
     );
     if (!approved) return;
 
@@ -167,7 +169,9 @@ export default function DeviceFleet() {
         ...previous,
         [device.id]: { commandId: data.command.id, status: data.command.status, polling: true, startedAt: Date.now(), timedOut: false, error: "" },
       }));
-      setNotice("Restart queued. Waiting for the ESP32 to acknowledge and reconnect.");
+      setNotice(data.deliveryMode === "mesh_gateway"
+        ? "Restart queued through the mesh leader. Waiting for the selected member to reboot and rejoin."
+        : "Restart queued. Waiting for the ESP32 to acknowledge and reconnect.");
     } catch (error) {
       setNotice(error.message || "Could not queue restart");
     } finally {
@@ -347,6 +351,7 @@ export default function DeviceFleet() {
             const needsEnrollment = !device.provisioned;
             const canManageDirectly = Boolean(device.config.directOnline);
             const meshOnly = Boolean(device.config.online && !device.config.directOnline && device.config.meshOnline);
+            const canRestart = canManageDirectly || Boolean(device.config.meshOnline);
             const setupInfo = provisioningInfoByBoard[device.id];
             const versionText = device.config.version == null
               ? "Not enrolled"
@@ -433,7 +438,8 @@ export default function DeviceFleet() {
                         <Settings2 size={14} /> Update configuration
                       </button>
                       <button type="button" onClick={() => restartDevice(device)}
-                        disabled={!canManageDirectly || Boolean(busyAction) || restart?.polling || (restart && ["pending", "accepted"].includes(restart.status))}
+                        disabled={!canRestart || Boolean(busyAction) || restart?.polling || (restart && ["pending", "accepted"].includes(restart.status))}
+                        title={!canManageDirectly && canRestart ? "Restart will be forwarded through the current mesh leader" : !canRestart ? "A recent direct check-in or live mesh gateway is required" : "Restart this exact ESP32"}
                         className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border px-3 py-2.5 text-xs font-black hover:border-red-400/60 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40">
                         {busyAction === "restart" || restart?.polling ? <LoaderCircle size={14} className="animate-spin" /> : <Power size={14} />}
                         {busyAction === "restart" ? "Queueing…" : restart?.polling ? "Restart pending…" : "Restart this ESP32"}
