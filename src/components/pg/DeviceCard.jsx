@@ -18,7 +18,7 @@ export default function DeviceCard({
 
   return (
     <article
-      className={`relative flex min-h-[104px] min-w-0 flex-col justify-between gap-1.5 rounded-2xl border bg-(--pg-card) p-3.5 transition-all duration-200 ${carousel ? "w-[320px] shrink-0 snap-start snap-always" : "w-full"} max-sm:w-full max-sm:basis-full max-sm:shrink-0 max-sm:snap-start max-sm:snap-always max-sm:min-h-[132px] ${
+      className={`relative flex min-h-[104px] min-w-0 flex-col justify-between gap-1.5 overflow-hidden rounded-2xl border bg-(--pg-card) p-3.5 transition-all duration-200 ${carousel ? "w-[320px] shrink-0 snap-start snap-always" : "w-full"} max-sm:w-full max-sm:basis-full max-sm:flex-none max-sm:min-h-[132px] max-sm:snap-none ${
         isLightOn ? "border-(--pg-brand-line)" : "border-(--pg-line)"
       } ${pending ? "opacity-70" : ""}`}
     >

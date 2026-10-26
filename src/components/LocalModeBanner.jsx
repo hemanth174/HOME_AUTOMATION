@@ -10,7 +10,7 @@ export default function LocalModeBanner({ isClientOnline, isLocalConnected }) {
   // Prevent hydration mismatch — don't render until client is ready
   if (!mounted) return null;
 
-  // Scenario 1: No Internet, but connected to ESP32 SoftAP (HOME-AUTO-LEADER)
+  // Scenario 1: No Internet, but connected to the ESP32 setup network.
   if (!isClientOnline && isLocalConnected) {
     return (
       <div className="pt-14 sm:pt-16 w-full">
@@ -57,7 +57,7 @@ export default function LocalModeBanner({ isClientOnline, isLocalConnected }) {
           <div className="flex items-center gap-2">
             <WifiOff className="w-4 h-4 text-red-400 shrink-0" />
             <span>
-              You are offline. Connect Wi-Fi to <strong>HOME-AUTO-LEADER</strong> for local hardware control.
+               You are offline. Connect to the ESP32 setup network or the same home Wi-Fi as the board for local hardware control.
             </span>
           </div>
         </div>

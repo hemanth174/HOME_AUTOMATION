@@ -31,6 +31,7 @@ export default function DashboardView({ c }) {
     <button
       type="button"
       onClick={onClick}
+      aria-label={label}
       className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-xl border border-(--pg-line) bg-(--pg-card) px-3.5 text-xs font-extrabold text-(--pg-ink) cursor-pointer"
     >
       <Icon size={14} />
@@ -92,9 +93,9 @@ export default function DashboardView({ c }) {
           </div>
         ) : (
           <>
-            <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)] items-start">
-                 <section className="boards-section-selector min-w-0 rounded-2xl border border-(--pg-line) bg-(--pg-card) p-3 sm:p-5 lg:order-2">
-                <div className="flex flex-wrap items-center justify-between gap-3 pb-1">
+            <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+              <section className="boards-section-selector min-w-0 w-full rounded-2xl border border-(--pg-line) bg-(--pg-card) p-3 sm:p-5 lg:order-2">
+                <div className="flex flex-col gap-3 pb-1 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                   <div className="min-w-0 flex-1">
                     <h2
                       className="text-lg font-extrabold truncate"
@@ -108,7 +109,7 @@ export default function DashboardView({ c }) {
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
                     {c.viewSwitcherEnabled && roomExpanded ? (
                       <div
                         className="flex items-center rounded-xl border border-(--pg-line) bg-(--pg-card) p-0.5"
@@ -197,7 +198,7 @@ export default function DashboardView({ c }) {
                         ref={c.carouselRef}
                         className={
                           c.deviceView === "carousel"
-                            ? "flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth overscroll-x-contain pb-1"
+                            ? "flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth overscroll-x-contain pb-1 max-sm:flex-col max-sm:overflow-visible max-sm:snap-none"
                             : "grid sm:grid-cols-2 gap-2.5"
                         }
                         aria-label="Local devices carousel"
@@ -224,7 +225,7 @@ export default function DashboardView({ c }) {
                       {button("All On", Power, c.turnAllDevicesOn)}
                       {button("All Off", PowerOff, c.turnAllDevicesOff)}
                       {c.deviceView === "carousel" && (
-                        <div className="ml-auto flex items-center gap-1.5 sm:hidden">
+                        <div className="hidden">
                           <button
                             type="button"
                             onClick={() => scrollDeviceCarousel(-1)}

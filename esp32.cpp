@@ -4,20 +4,37 @@
 #include <WiFiClientSecure.h>
 #include <esp_arduino_version.h>
 #include <ArduinoJson.h>
+#include <PubSubClient.h>
 #include <WebServer.h>
+#include <ESPmDNS.h>
 #include <Preferences.h>
 #include <time.h>
 #include <esp_system.h>
+#include <esp_task_wdt.h>
 #include <mbedtls/md.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
+#include <esp_crt_bundle.h>
+
+// Arduino-ESP32 3.3.x removed WiFiClientSecure::useBuiltinCACertBundle(),
+// but the underlying secure client still exposes the certificate-bundle hook.
+// Keep CA validation enabled without falling back to insecure TLS.
+class VikaTechSecureClient : public WiFiClientSecure {
+public:
+  void useBuiltinCACertBundle() {
+    _use_ca_bundle = true;
+    sslclient->bundle_attach_cb = &esp_crt_bundle_attach;
+  }
+};
+
 #define NUM_DEVICES 4
 const int RELAY_PINS[NUM_DEVICES] = {32, 33, 25, 26};
 const int INPUT_PINS[NUM_DEVICES] = {19, 18, 5, 17};
 String homeWifiSSID = "";
 String homeWifiPassword = "";
 String homeWifiSecurity = "wpa2_psk";
+bool mdnsActive = false;
 volatile bool wifiConfigPending = false;
 volatile bool remoteWifiUpdateInProgress = false;
 const char* BOARD_IDENTIFIER = "esp32-unconfigured";
@@ -39,8 +56,19 @@ String deviceAuthToken = "";
 String deviceBootId = "";
 String lastDeviceError = "";
 uint32_t deviceConfigVersion = 1;
-const char* MESH_SSID = "HOME-AUTO-LEADER";
-const char* MESH_PASS = "CHANGE_ME_123"; // Replace locally before flashing; min 8 chars for WPA2
+
+// MQTT is intentionally local-network only. The broker host must be a LAN
+// address reachable by the ESP32, never 127.0.0.1 from the board's point of
+// view. These values are injected into enrollment firmware or set manually in
+// a test sketch; never commit real broker credentials to this template.
+const char* MQTT_BROKER_HOST = "";
+const uint16_t MQTT_BROKER_PORT = 1883;
+const char* MQTT_BROKER_USERNAME = "";
+const char* MQTT_BROKER_PASSWORD = "";
+// Mesh credentials are injected during one-time enrollment. An unprovisioned
+// template must not start an open/default installation network.
+const char* MESH_SSID = "";
+const char* MESH_PASS = "";
 IPAddress AP_IP(192, 168, 4, 1);
 IPAddress AP_GATEWAY(192, 168, 4, 1);
 IPAddress AP_SUBNET(255, 255, 255, 0);
@@ -56,6 +84,8 @@ const unsigned long DEBOUNCE_DELAY = 50;
 unsigned long lastSerialDumpTime = 0;
 const unsigned long SERIAL_DUMP_INTERVAL = 60000;
 WiFiMulti wifiMulti;
+WiFiClient mqttNetworkClient;
+PubSubClient mqttClient(mqttNetworkClient);
 WebServer server(80);
 Preferences preferences;
 SemaphoreHandle_t preferencesMutex = nullptr;
@@ -64,6 +94,7 @@ SemaphoreHandle_t relayMutex = nullptr;
 TaskHandle_t cloudSyncTaskHandle = nullptr;
 TaskHandle_t cloudPollTaskHandle = nullptr;
 TaskHandle_t deviceAgentTaskHandle = nullptr;
+TaskHandle_t mqttTaskHandle = nullptr;
 volatile bool cloudDevicesReady = false;
 // Cloud polling is a fallback for commands issued while the browser is not
 // connected to the local controller. Local REST commands remain immediate;
@@ -125,6 +156,12 @@ unsigned long lastRoleEval      = 0;  const unsigned long ROLE_EVAL_INTERVAL    
 unsigned long lastMemberJoin    = 0;  const unsigned long MESH_JOIN_INTERVAL       = 25000;  // Member -> leader announce
 unsigned long lastHomeWifiProbe = 0;  const unsigned long HOME_WIFI_PROBE_INTERVAL = 60000;  // Member checks if home Wi-Fi returned
 unsigned long leaderUptimeMillis = 0;
+unsigned long lastMqttAttempt = 0;
+unsigned long lastMqttHeartbeat = 0;
+bool mqttWasWifiReady = false;
+// Other tasks never touch PubSubClient. They only mark a relay dirty; the
+// dedicated MQTT task owns the client and publishes the retained state.
+volatile bool mqttStateDirty[NUM_DEVICES] = {false, false, false, false};
 void setRelay(int index, bool on, bool saveToNVS = true);
 bool updateDeviceInDB(int index, bool state);
 bool updateFeedbackInDB(int index, bool feedback);
@@ -149,6 +186,7 @@ bool tryJoinMeshLeader();
 void becomeLeader();
 void becomeMember();
 bool isHomeWifiConnected();
+void maintainMdns();
 String getSelfIp();
 int findMeshNode(const String& nodeId);
 bool meshNodeActive(const String& nodeId);
@@ -162,6 +200,14 @@ void saveOfflineQueue();
 void cloudSyncTask(void* parameter);
 void cloudPollTask(void* parameter);
 void configureHttp(HTTPClient& http, uint16_t connectTimeout = 2500, uint16_t requestTimeout = 4000);
+bool isMqttConfigured();
+String mqttStatusTopic();
+String mqttDeviceTopic(int relayIndex, const char* suffix);
+void mqttPublishStatus(bool online);
+void mqttPublishRelayState(int relayIndex, const char* source, const String& commandId = "");
+void handleMqttMessage(char* topic, byte* payload, unsigned int length);
+void maintainMqtt();
+void mqttTask(void* parameter);
 bool isCloudConfigured();
 bool isDirectCloudConfigured();
 bool isDeviceAgentConfigured();
@@ -201,11 +247,26 @@ bool isHomeWifiConnected() {
   return homeWifiSSID.length() > 0 && WiFi.status() == WL_CONNECTED &&
          WiFi.SSID() == homeWifiSSID;
 }
+void maintainMdns() {
+  const bool shouldAdvertise = isHomeWifiConnected();
+  if (shouldAdvertise && !mdnsActive) {
+    if (MDNS.begin("home-automation")) {
+      MDNS.addService("http", "tcp", 80);
+      mdnsActive = true;
+      Serial.println("-> Local discovery active at http://home-automation.local");
+    } else {
+      Serial.println("WARNING: mDNS startup failed; use the ESP32 local IP from the serial log.");
+    }
+  } else if (!shouldAdvertise && mdnsActive) {
+    MDNS.end();
+    mdnsActive = false;
+  }
+}
 bool isDirectCloudConfigured() {
   return strlen(SUPABASE_BASE) > 0 && strlen(SUPABASE_SERVICE_KEY) > 0;
 }
 bool isDeviceAgentConfigured() {
-  return strlen(DEVICE_AGENT_URL) > 0 && strlen(DEVICE_TOKEN) >= 32 &&
+  return strlen(DEVICE_AGENT_URL) > 0 && deviceAuthToken.length() >= 32 &&
          String(BOARD_IDENTIFIER) != "esp32-unconfigured";
 }
 bool isCloudConfigured() {
@@ -220,13 +281,29 @@ void logResetReason() {
     Serial.println("!! Brownout reset detected. Check the external 5V supply, relay current, wiring, and decoupling.");
   }
 }
+void configureTaskWatchdogForTls() {
+  // CA-validated TLS can spend several seconds in mbedTLS elliptic-curve
+  // arithmetic without yielding. Keep the watchdog as a safety net, but give
+  // the cloud worker enough time to finish a bounded HTTPS handshake.
+  esp_task_wdt_config_t config = {};
+  config.timeout_ms = 120000;
+  config.idle_core_mask = 0x3;
+  config.trigger_panic = true;
+  esp_err_t result = esp_task_wdt_reconfigure(&config);
+  if (result == ESP_ERR_INVALID_STATE) result = esp_task_wdt_init(&config);
+  if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) {
+    Serial.printf("WARNING: Could not extend TLS watchdog window (error %d).\n", (int)result);
+  }
+}
 void loadHomeWifiCredentials() {
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   homeWifiSSID = preferences.getString("wifi_ssid", "");
   homeWifiPassword = preferences.getString("wifi_pass", "");
-  homeWifiSecurity = preferences.getString("wifi_sec", "");
+  // The security mode is explicit. Never treat an empty passphrase as proof
+  // that the network is open; older boards must be migrated deliberately.
+  homeWifiSecurity = preferences.getString("wifi_sec", "wpa2_psk");
   if (homeWifiSecurity != "open" && homeWifiSecurity != "wpa2_psk") {
-    homeWifiSecurity = homeWifiPassword.length() ? "wpa2_psk" : "open";
+    homeWifiSecurity = "wpa2_psk";
   }
   const uint32_t savedConfigVersion = preferences.getUInt("cfg_ver", 1);
   deviceConfigVersion = savedConfigVersion < 1 ? 1 : savedConfigVersion;
@@ -237,7 +314,16 @@ void loadHomeWifiCredentials() {
   preferences.remove("p_sec");
   preferences.remove("p_ver");
   deviceAuthToken = preferences.getString("device_token", "");
-  if (deviceAuthToken.length() == 0 && strlen(DEVICE_AUTH_TOKEN) > 0) {
+  if (strlen(DEVICE_TOKEN) > 0 && String(DEVICE_TOKEN) != deviceAuthToken) {
+    // A controlled credential rotation is delivered in replacement firmware.
+    // Reset only the registration marker; the active Wi-Fi cache remains usable.
+    deviceAuthToken = String(DEVICE_TOKEN);
+    preferences.putString("device_token", deviceAuthToken);
+    preferences.putBool("wifi_registered", false);
+    preferences.putBool("device_registered", false);
+    deviceConfigVersion = 1;
+    preferences.putUInt("cfg_ver", deviceConfigVersion);
+  } else if (deviceAuthToken.length() == 0 && strlen(DEVICE_AUTH_TOKEN) > 0) {
     deviceAuthToken = String(DEVICE_AUTH_TOKEN);
     preferences.putString("device_token", deviceAuthToken);
   }
@@ -285,6 +371,175 @@ unsigned long nodeIdHashDelay() {
   while (*p) { h ^= (unsigned char)(*p++); h *= 16777619u; }
   return 1000 + (h % 3000); // 1s - 4s
 }
+bool isMqttConfigured() {
+  return MQTT_BROKER_HOST && MQTT_BROKER_HOST[0] != '\0' &&
+         String(BOARD_IDENTIFIER) != "esp32-unconfigured";
+}
+String mqttStatusTopic() {
+  return String("home/") + BOARD_IDENTIFIER + "/status";
+}
+String mqttDeviceTopic(int relayIndex, const char* suffix) {
+  return String("home/") + BOARD_IDENTIFIER + "/device/" + String(relayIndex) + "/" + suffix;
+}
+void mqttPublishStatus(bool online) {
+  if (!mqttClient.connected()) return;
+  DynamicJsonDocument doc(512);
+  doc["v"] = 1;
+  doc["board_identifier"] = BOARD_IDENTIFIER;
+  doc["online"] = online;
+  doc["ip"] = WiFi.localIP().toString();
+  doc["uptime_ms"] = millis();
+  doc["free_heap"] = ESP.getFreeHeap();
+  String payload;
+  serializeJson(doc, payload);
+  mqttClient.publish(mqttStatusTopic().c_str(), payload.c_str(), true);
+}
+void mqttPublishRelayState(int relayIndex, const char* source, const String& commandId) {
+  if (!mqttClient.connected() || relayIndex < 0 || relayIndex >= NUM_DEVICES) return;
+  bool relayState;
+  bool feedbackState;
+  if (relayMutex) xSemaphoreTake(relayMutex, portMAX_DELAY);
+  relayState = isRelayOn[relayIndex];
+  feedbackState = confirmedInputState[relayIndex] == LOW;
+  if (relayMutex) xSemaphoreGive(relayMutex);
+
+  DynamicJsonDocument doc(768);
+  doc["v"] = 1;
+  doc["board_identifier"] = BOARD_IDENTIFIER;
+  doc["relay_index"] = relayIndex;
+  doc["state"] = relayState;
+  doc["feedback_on"] = feedbackState;
+  doc["source"] = source;
+  if (commandId.length()) doc["command_id"] = commandId;
+  doc["ts"] = getIsoTime();
+  String payload;
+  serializeJson(doc, payload);
+  const String topic = mqttDeviceTopic(relayIndex, "state");
+  mqttClient.publish(topic.c_str(), payload.c_str(), true);
+}
+void handleMqttMessage(char* topic, byte* payload, unsigned int length) {
+  const String prefix = String("home/") + BOARD_IDENTIFIER + "/device/";
+  const String suffix = "/set";
+  const String receivedTopic = String(topic);
+  if (!receivedTopic.startsWith(prefix) || !receivedTopic.endsWith(suffix)) return;
+
+  const String relayText = receivedTopic.substring(prefix.length(), receivedTopic.length() - suffix.length());
+  if (!relayText.length()) return;
+  for (size_t i = 0; i < relayText.length(); i++) {
+    if (!isDigit(relayText[i])) return;
+  }
+  const int relayIndex = relayText.toInt();
+  if (relayIndex < 0 || relayIndex >= NUM_DEVICES) {
+    Serial.printf("!! MQTT command rejected: invalid relay index %d\n", relayIndex);
+    return;
+  }
+
+  DynamicJsonDocument doc(768);
+  DeserializationError error = deserializeJson(doc, payload, length);
+  if (error || !doc["state"].is<bool>()) {
+    Serial.println("!! MQTT command rejected: invalid JSON/state payload");
+    return;
+  }
+  const bool targetState = doc["state"].as<bool>();
+  const String commandId = doc["command_id"].as<String>();
+  Serial.printf("<< MQTT command | relay=%d | state=%s | id=%s\n",
+                relayIndex, targetState ? "ON" : "OFF", commandId.c_str());
+  bool currentState;
+  if (relayMutex) xSemaphoreTake(relayMutex, portMAX_DELAY);
+  currentState = isRelayOn[relayIndex];
+  if (relayMutex) xSemaphoreGive(relayMutex);
+  if (currentState == targetState) {
+    Serial.printf("-> MQTT command already applied | relay=%d\n", relayIndex);
+    return;
+  }
+  // Mirror the local REST path: queue the state for the cloud worker so the
+  // relay converges even when MQTT was published outside the database trigger.
+  enqueueOfflineUpdate(relayIndex, targetState, false);
+  setRelay(relayIndex, targetState);
+  Serial.printf("-> MQTT command applied | relay=%d | state=%s\n",
+                relayIndex, targetState ? "ON" : "OFF");
+}
+void maintainMqtt() {
+  if (!isMqttConfigured()) return;
+  if (!isHomeWifiConnected()) {
+    if (mqttClient.connected()) {
+      mqttClient.disconnect();
+      Serial.println("-> MQTT disconnected while Home Wi-Fi is unavailable.");
+    }
+    mqttWasWifiReady = false;
+    return;
+  }
+
+  if (!mqttWasWifiReady) {
+    mqttWasWifiReady = true;
+    lastMqttAttempt = 0;
+  }
+  if (!mqttClient.connected()) {
+    if (millis() - lastMqttAttempt < 5000) return;
+    lastMqttAttempt = millis();
+    const String clientId = String("vikatech-") + BOARD_IDENTIFIER + "-" + String((uint32_t)(ESP.getEfuseMac() & 0xffffffffULL), HEX);
+    const String statusTopic = mqttStatusTopic();
+    Serial.printf("-> MQTT connecting to %s:%u...\n", MQTT_BROKER_HOST, MQTT_BROKER_PORT);
+    bool connected = false;
+    if (MQTT_BROKER_USERNAME && MQTT_BROKER_USERNAME[0] != '\0') {
+      connected = mqttClient.connect(
+        clientId.c_str(),
+        MQTT_BROKER_USERNAME,
+        MQTT_BROKER_PASSWORD,
+        statusTopic.c_str(),
+        0,
+        true,
+        "{\"online\":false}"
+      );
+    } else {
+      connected = mqttClient.connect(
+        clientId.c_str(),
+        statusTopic.c_str(),
+        0,
+        true,
+        "{\"online\":false}"
+      );
+    }
+    if (!connected) {
+      Serial.printf("!! MQTT connection failed, rc=%d\n", mqttClient.state());
+      return;
+    }
+
+    const String commandFilter = String("home/") + BOARD_IDENTIFIER + "/device/+/set";
+    if (!mqttClient.subscribe(commandFilter.c_str(), 1)) {
+      Serial.println("!! MQTT subscription failed.");
+      mqttClient.disconnect();
+      return;
+    }
+    Serial.printf("-> MQTT connected. Client ID: %s\n", clientId.c_str());
+    Serial.printf("-> MQTT subscribed: %s\n", commandFilter.c_str());
+    mqttPublishStatus(true);
+    for (int i = 0; i < NUM_DEVICES; i++) {
+      mqttStateDirty[i] = false;
+      mqttPublishRelayState(i, "connect");
+    }
+    lastMqttHeartbeat = millis();
+    return;
+  }
+
+  mqttClient.loop();
+  for (int i = 0; i < NUM_DEVICES; i++) {
+    if (!mqttStateDirty[i]) continue;
+    mqttStateDirty[i] = false;
+    mqttPublishRelayState(i, "firmware");
+  }
+  if (millis() - lastMqttHeartbeat >= HEARTBEAT_INTERVAL) {
+    lastMqttHeartbeat = millis();
+    mqttPublishStatus(true);
+  }
+}
+void mqttTask(void* parameter) {
+  (void)parameter;
+  for (;;) {
+    maintainMqtt();
+    vTaskDelay(pdMS_TO_TICKS(200));
+  }
+}
 void setRelay(int index, bool on, bool saveToNVS) {
   if (index < 0 || index >= NUM_DEVICES) return;
   if (relayMutex) xSemaphoreTake(relayMutex, portMAX_DELAY);
@@ -300,6 +555,9 @@ void setRelay(int index, bool on, bool saveToNVS) {
   }
   Serial.printf(">> RELAY [%d] -> %s\n", index, on ? "ON" : "OFF");
   if (relayMutex) xSemaphoreGive(relayMutex);
+  // PubSubClient is not thread-safe. Mark the state dirty and let the MQTT
+  // task publish it; setRelay may be called from any cloud or local task.
+  if (stateChanged) mqttStateDirty[index] = true;
 }
 String getIsoTime() {
   time_t now; time(&now); struct tm timeinfo; gmtime_r(&now, &timeinfo);
@@ -648,6 +906,11 @@ void setupWebServer() {
       server.send(404, "text/plain", "Not Found");
     }
   });
+  server.on("/", HTTP_GET, []() {
+    handleCORS();
+    server.sendHeader("Location", "/setup", true);
+    server.send(302, "text/plain", "Redirecting to /setup");
+  });
   server.on("/api/status", HTTP_GET, []() {
     handleCORS();
     DynamicJsonDocument doc(512);
@@ -889,11 +1152,19 @@ try{const response=await fetch('/api/wifi/config',{method:'POST',headers:{'Conte
     }
     String newSSID = req["ssid"].as<String>();
     String newPassword = req["password"] | "";
-    String newSecurity = req["security"] | (newPassword.length() ? "wpa2_psk" : "open");
+    String newSecurity = req["security"] | "";
     newSSID.trim();
-    if (newSSID.length() == 0 || newSSID.length() > 32 ||
+    bool printableSsid = newSSID.length() >= 1 && newSSID.length() <= 32;
+    for (size_t i = 0; i < newSSID.length(); ++i) {
+      if (newSSID[i] < 0x20 || newSSID[i] > 0x7e) printableSsid = false;
+    }
+    bool printablePassword = newPassword.length() >= 8 && newPassword.length() <= 63;
+    for (size_t i = 0; i < newPassword.length(); ++i) {
+      if (newPassword[i] < 0x20 || newPassword[i] > 0x7e) printablePassword = false;
+    }
+    if (!printableSsid ||
         (newSecurity != "open" && newSecurity != "wpa2_psk") ||
-        (newSecurity == "wpa2_psk" && (newPassword.length() < 8 || newPassword.length() > 63)) ||
+        (newSecurity == "wpa2_psk" && !printablePassword) ||
         (newSecurity == "open" && newPassword.length() != 0)) {
       server.send(400, "application/json",
         "{\"success\":false,\"error\":\"SSID, security mode, or password is invalid\"}");
@@ -993,6 +1264,7 @@ void pruneStaleMeshNodes() {
   }
 }
 bool tryJoinMeshLeader() {
+  if (strlen(MESH_SSID) == 0 || strlen(MESH_PASS) < 8) return false;
   Serial.println("-> Scanning for existing mesh leader...");
   int n = WiFi.scanNetworks();
   bool found = false;
@@ -1024,6 +1296,11 @@ bool tryJoinMeshLeader() {
   return true;
 }
 void becomeLeader() {
+  if (strlen(MESH_SSID) == 0 || strlen(MESH_PASS) < 8) {
+    localRole = ROLE_IDLE;
+    Serial.println("-> Mesh is not provisioned; refusing to start a default or open AP.");
+    return;
+  }
   if (localRole != ROLE_LEADER) {
     Serial.println("==> ROLE: LEADER (broadcasting " + String(MESH_SSID) + ")");
   }
@@ -1315,11 +1592,15 @@ bool flushOfflineQueue() {
 void setup() {
   Serial.begin(115200);
   delay(500);
+  configureTaskWatchdogForTls();
   logResetReason();
   Serial.println("\n===========================================");
   Serial.println("  ESP32 Dual-Plane Mesh Node (4 Devices)");
   Serial.println("===========================================");
-  setCpuFrequencyMhz(160);
+  // CA-validated HTTPS handshakes are CPU-heavy on the ESP32. Keep the
+  // standard 240 MHz clock so the device-agent task can finish TLS work
+  // without starving the task watchdog.
+  setCpuFrequencyMhz(240);
   preferencesMutex = xSemaphoreCreateMutex();
   offlineQueueMutex = xSemaphoreCreateMutex();
   relayMutex = xSemaphoreCreateMutex();
@@ -1352,6 +1633,16 @@ void setup() {
   WiFi.setAutoReconnect(true);     // let the stack handle clean drops silently
   WiFi.mode(WIFI_STA);
   WiFi.setTxPower(WIFI_POWER_15dBm);
+  mqttClient.setCallback(handleMqttMessage);
+  mqttClient.setBufferSize(768);
+  mqttClient.setKeepAlive(30);
+  mqttClient.setSocketTimeout(5);
+  if (isMqttConfigured()) {
+    mqttClient.setServer(MQTT_BROKER_HOST, MQTT_BROKER_PORT);
+    Serial.printf("-> MQTT enabled for broker %s:%u.\n", MQTT_BROKER_HOST, MQTT_BROKER_PORT);
+  } else {
+    Serial.println("-> MQTT not configured; set MQTT_BROKER_HOST in enrollment firmware.");
+  }
   if (homeWifiSSID.length() > 0) {
     Serial.print("-> Connecting to Home Wi-Fi: ");
     Serial.println(homeWifiSSID);
@@ -1373,6 +1664,7 @@ void setup() {
     Serial.println("-> No Home Wi-Fi credentials configured; skipping STA scans.");
   }
   setupWebServer();
+  maintainMdns();
   if (!isHomeWifiConnected()) {
     Serial.println("-> Home Wi-Fi unavailable at boot. Starting local mode...");
     lastRoleEval = millis() - ROLE_EVAL_INTERVAL;
@@ -1407,7 +1699,7 @@ void setup() {
     }
   }
 
-  if (strlen(DEVICE_AGENT_URL) > 0 && strlen(DEVICE_TOKEN) >= 32) {
+  if (isDeviceAgentConfigured()) {
     BaseType_t agentTaskCreated = xTaskCreatePinnedToCore(
       deviceAgentTask,
       "device_agent",
@@ -1424,6 +1716,23 @@ void setup() {
     }
   } else {
     Serial.println("-> Device agent not provisioned; remote config/restart unavailable until enrollment firmware is flashed.");
+  }
+
+  if (isMqttConfigured()) {
+    BaseType_t mqttTaskCreated = xTaskCreatePinnedToCore(
+      mqttTask,
+      "mqtt",
+      8192,
+      nullptr,
+      1,
+      &mqttTaskHandle,
+      0
+    );
+    if (mqttTaskCreated != pdPASS) {
+      Serial.println("ERROR: MQTT task failed to start; relay MQTT control is disabled.");
+    } else {
+      Serial.println("-> MQTT task started (local broker control).");
+    }
   }
   Serial.println("===========================================\n");
 }
@@ -1442,6 +1751,7 @@ void applyPendingWifiConfiguration() {
 }
 void loop() {
   server.handleClient();
+  maintainMdns();
   if (pendingMeshRestart && millis() - pendingMeshRestartAt >= 650) {
     Serial.println("-> Signed remote mesh restart executing now.");
     ESP.restart();
@@ -1468,9 +1778,10 @@ void loop() {
                         ",\"feedback_on\":" + String(isSwitchOn ? "true" : "false") + "}";
           http.POST(body);
           http.end();
-        }
-        enqueueOfflineUpdate(i, isSwitchOn, true);
-      }
+         }
+         enqueueOfflineUpdate(i, isSwitchOn, true);
+         mqttStateDirty[i] = true;
+       }
     }
     lastInputRead[i] = currentRead;
   }
@@ -1866,7 +2177,7 @@ bool markAlarmFiredInDB(String alarmId) {
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Prefer", "return=representation");
-  int code = http.PATCH("{\\"fired\\":true}");
+  int code = http.PATCH("{\"fired\":true}");
   String responseBody = code == 200 ? http.getString() : "";
   http.end();
   DynamicJsonDocument doc(256);
@@ -1941,7 +2252,8 @@ bool applyRemoteWifiConfiguration(const String& ssid, const String& security, co
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
 
   Serial.println("-> Testing staged Wi-Fi configuration before committing it.");
-  WiFi.begin(ssid.c_str(), password.c_str());
+    if (security == "open") WiFi.begin(ssid.c_str());
+    else WiFi.begin(ssid.c_str(), password.c_str());
   const unsigned long start = millis();
   while (millis() - start < 15000) {
     if (WiFi.status() == WL_CONNECTED && WiFi.SSID() == ssid) break;
@@ -1966,7 +2278,7 @@ bool applyRemoteWifiConfiguration(const String& ssid, const String& security, co
     preferences.remove("p_sec");
     preferences.remove("p_ver");
     if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-    wifiMulti.cleanAPlist();
+    wifiMulti.APlistClean();
     wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
     wifiConfigPending = false;
     lastDeviceError = "";
@@ -1990,7 +2302,7 @@ bool applyRemoteWifiConfiguration(const String& ssid, const String& security, co
   preferences.remove("p_sec");
   preferences.remove("p_ver");
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-  wifiMulti.cleanAPlist();
+  wifiMulti.APlistClean();
   if (homeWifiSSID.length()) wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
   lastDeviceError = "New Wi-Fi connection failed; previous configuration retained";
   return false;
@@ -2156,20 +2468,21 @@ void sendHeartbeat() {
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");
-  String payload = "{\\"last_seen\\":\\"" + nowIso + "\\"}";
+  String payload = "{\"last_seen\":\"" + nowIso + "\"}";
   int httpCode = http.PATCH(payload);
   if (httpCode == 200 || httpCode == 204) Serial.println("Heartbeat synced to Cloud.");
   http.end();
 }
 bool deviceAgentPost(const String& payload, DynamicJsonDocument& response) {
   if (WiFi.status() != WL_CONNECTED || strlen(DEVICE_AGENT_URL) == 0 ||
-      strlen(DEVICE_TOKEN) < 32 || String(BOARD_IDENTIFIER) == "esp32-unconfigured") return false;
+      deviceAuthToken.length() < 32 || String(BOARD_IDENTIFIER) == "esp32-unconfigured") return false;
 
   // Never use HTTPClient.begin(url) without a CA: Arduino-ESP32's convenience
   // overload can create an insecure TLS client. Require the core's trusted CA bundle.
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-  WiFiClientSecure secureClient;
+  VikaTechSecureClient secureClient;
   secureClient.useBuiltinCACertBundle();
+  secureClient.setHandshakeTimeout(8);
   HTTPClient http;
   if (!http.begin(secureClient, String(DEVICE_AGENT_URL))) {
     Serial.println("Device-agent HTTPS setup failed.");
@@ -2177,7 +2490,7 @@ bool deviceAgentPost(const String& payload, DynamicJsonDocument& response) {
   }
   configureHttp(http, 3500, 6500);
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("Authorization", "Bearer " + String(DEVICE_TOKEN));
+  http.addHeader("Authorization", "Bearer " + deviceAuthToken);
   int code = http.POST(payload);
   String body = (code >= 200 && code < 300) ? http.getString() : "";
   http.end();
@@ -2383,10 +2696,16 @@ void processDeviceAgentResponse(JsonDocument& response) {
   applyScheduleSnapshot(response);
   // A restart requested before the previous reboot is acknowledged only after boot.
   String pendingRestart = "";
+  String completedRestartId = "";
+  String lastRestartId = "";
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   pendingRestart = preferences.getString("pending_restart", "");
+  lastRestartId = preferences.getString("last_restart_cmd", "");
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   if (pendingRestart.length() && acknowledgeDeviceCommand(pendingRestart, "completed")) {
+    // The snapshot was read before the acknowledgement, so it may still carry
+    // this command. Do not execute the just-completed restart a second time.
+    completedRestartId = pendingRestart;
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     preferences.remove("pending_restart");
     if (preferencesMutex) xSemaphoreGive(preferencesMutex);
@@ -2394,8 +2713,11 @@ void processDeviceAgentResponse(JsonDocument& response) {
     pendingRestart = "";
   }
 
-  JsonObject config = response["config"].as<JsonObject>();
-  if (!config.isNull()) applyRemoteWifiConfiguration(config);
+  // The agent returns decrypted pending settings in `configuration`. The
+  // `config` object is intentionally metadata-only and never contains a Wi-Fi
+  // passphrase or device credential.
+  JsonObject configuration = response["configuration"].as<JsonObject>();
+  if (!configuration.isNull()) applyRemoteWifiConfiguration(configuration);
 
   int cachedConfigVersion = 0;
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
@@ -2428,7 +2750,7 @@ void processDeviceAgentResponse(JsonDocument& response) {
       }
       continue;
     }
-    if (commandId == pendingRestart) continue;
+    if (commandId == pendingRestart || commandId == completedRestartId || commandId == lastRestartId) continue;
 
     Serial.println("-> Remote restart command received; confirming before reboot.");
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
@@ -2442,6 +2764,9 @@ void processDeviceAgentResponse(JsonDocument& response) {
       Serial.println("Remote restart acknowledgement failed; command will be retried.");
       continue;
     }
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    preferences.putString("last_restart_cmd", commandId);
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
     delay(350);
     ESP.restart();
     return;
@@ -2462,9 +2787,9 @@ bool requestDeviceAgentSnapshot(DynamicJsonDocument& response) {
   requestDoc["action"] = "poll";
   requestDoc["board_identifier"] = BOARD_IDENTIFIER;
 
-  // One-time bootstrap: let the server cache the network already used by this
-  // ESP32. The device-agent encrypts the passphrase before storing it. Never
-  // include this field again after the server confirms registration.
+  // The first authenticated poll may include the current passphrase so the
+  // server can register an existing installation. Later polls include only
+  // non-secret network and boot metadata.
   bool wifiRegistered = false;
   int appliedVersion = 0;
   String currentWifiSSID;
@@ -2477,12 +2802,15 @@ bool requestDeviceAgentSnapshot(DynamicJsonDocument& response) {
   currentWifiPassword = homeWifiPassword;
   currentWifiSecurity = homeWifiSecurity;
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-  if (!wifiRegistered && currentWifiSSID.length()) {
+  if (currentWifiSSID.length()) {
     requestDoc["current_wifi_ssid"] = currentWifiSSID;
     requestDoc["current_wifi_security"] = currentWifiSecurity;
-    if (currentWifiSecurity == "wpa2_psk") requestDoc["current_wifi_password"] = currentWifiPassword;
+    if (!wifiRegistered && currentWifiSecurity == "wpa2_psk") requestDoc["current_wifi_password"] = currentWifiPassword;
   }
   requestDoc["applied_config_version"] = appliedVersion;
+  requestDoc["boot_id"] = deviceBootId;
+  requestDoc["uptime_ms"] = millis();
+  requestDoc["ip"] = WiFi.localIP().toString();
   requestDoc["mesh_gateway"] = localRole == ROLE_LEADER;
 
   if (localRole == ROLE_LEADER) {
@@ -2665,7 +2993,7 @@ void deviceAgentTask(void* parameter) {
   bool deviceAgentNtpRequested = false;
   for (;;) {
     if (WiFi.status() != WL_CONNECTED || String(BOARD_IDENTIFIER) == "esp32-unconfigured" ||
-        strlen(DEVICE_AGENT_URL) == 0 || strlen(DEVICE_TOKEN) < 32) {
+        !isDeviceAgentConfigured()) {
       vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
     }

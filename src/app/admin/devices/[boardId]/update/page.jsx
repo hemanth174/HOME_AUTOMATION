@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import {
@@ -16,6 +16,8 @@ const STEPS = [
   { key: "applying", label: "Apply", detail: "Connect and cache the settings" },
   { key: "applied", label: "Verify", detail: "Confirm the new version is active" },
 ];
+const WIFI_SSID_RE = /^[\x20-\x7e]{1,32}$/;
+const WIFI_PASSWORD_RE = /^[\x20-\x7e]{8,63}$/;
 
 function formatTime(value) {
   if (!value) return "—";
@@ -58,6 +60,8 @@ export default function DeviceUpdatePage() {
   const [submitting, setSubmitting] = useState(false);
   const [tracking, setTracking] = useState(false);
   const [lastFetchedAt, setLastFetchedAt] = useState(null);
+  const statusRequestInFlight = useRef(false);
+  const formInitialized = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -73,7 +77,8 @@ export default function DeviceUpdatePage() {
   }, []);
 
   const loadStatus = useCallback(async (silent = false) => {
-    if (!accessToken || !boardId) return;
+    if (!accessToken || !boardId || statusRequestInFlight.current) return;
+    statusRequestInFlight.current = true;
     if (!silent) setLoading(true);
     try {
       const response = await fetch("/api/admin/devices/" + boardId + "/configuration", {
@@ -85,10 +90,11 @@ export default function DeviceUpdatePage() {
       setBoard(data.board || null);
       setConfig(data.config || null);
       setEvents(data.events || []);
-      if (data.config && !wifiSsid) {
+      if (data.config && !formInitialized.current) {
         setWifiSsid(data.config.wifiSsid || "");
         setWifiSecurity(data.config.wifiSecurity === "open" ? "open" : "wpa2_psk");
         setKeepExistingPassword(Boolean(data.config.hasWifiPassword && data.config.wifiSecurity === "wpa2_psk"));
+        formInitialized.current = true;
       }
       setLastFetchedAt(new Date().toISOString());
       if (data.config?.status === "applied" && Number(data.config.appliedVersion) >= Number(data.config.version)) {
@@ -102,9 +108,10 @@ export default function DeviceUpdatePage() {
     } catch (err) {
       if (!silent) setError(err.message || "Could not load device configuration");
     } finally {
+      statusRequestInFlight.current = false;
       if (!silent) setLoading(false);
     }
-  }, [accessToken, boardId, wifiSsid]);
+  }, [accessToken, boardId]);
 
   useEffect(() => {
     if (!accessToken || !boardId) return;
@@ -133,12 +140,12 @@ export default function DeviceUpdatePage() {
     event.preventDefault();
     setError("");
     setNotice("");
-    if (!wifiSsid.trim() || wifiSsid.trim().length > 32) {
-      setError("Wi-Fi name is required and must be 1–32 characters.");
+    if (!WIFI_SSID_RE.test(wifiSsid.trim())) {
+      setError("Wi-Fi name is required and must be 1–32 supported printable characters.");
       return;
     }
     if (wifiSecurity === "wpa2_psk" && !keepExistingPassword &&
-        (wifiPassword.length < 8 || wifiPassword.length > 63)) {
+        !WIFI_PASSWORD_RE.test(wifiPassword)) {
       setError("Enter a WPA2-PSK password of 8–63 characters, or choose to keep the saved password.");
       return;
     }
@@ -146,13 +153,6 @@ export default function DeviceUpdatePage() {
       setError("This device needs enrollment firmware before a remote configuration can be sent.");
       return;
     }
-    if (!isDirectOnline) {
-      setError(isMeshOnly
-        ? "This ESP32 is visible through the local mesh but has no recent direct device-agent check-in. Reconnect this board directly before changing its Wi-Fi settings."
-        : "This ESP32 has no recent direct device-agent check-in. Reconnect it before starting a Wi-Fi update.");
-      return;
-    }
-
     setSubmitting(true);
     try {
       const response = await fetch("/api/admin/devices/" + boardId + "/configuration", {
@@ -200,13 +200,13 @@ export default function DeviceUpdatePage() {
     </main>;
   }
 
-  if (!config || !Boolean(config && config.version !== undefined) || !board) {
+  if (!config || config.credentialRevoked || !Boolean(config && config.version !== undefined) || !board) {
     return <main className="min-h-screen bg-background px-4 py-10 text-text sm:px-6">
       <div className="mx-auto max-w-xl rounded-2xl border border-border bg-card p-6 sm:p-8">
         <Cpu size={28} className="text-accent" />
         <h1 className="mt-3 text-xl font-black">Enrollment required</h1>
         <p className="mt-2 text-sm leading-6 text-text-muted">
-          This board does not have a device-agent configuration record yet. Open Hardware Fleet in the Admin Panel and prepare the one-time enrollment firmware. Remote updates and restart commands become available after that firmware is flashed and the board checks in.
+          This board needs secure enrollment or credential migration before remote updates can be sent. Open Hardware Fleet in the Admin Panel and prepare the one-time enrollment firmware. Remote updates and restart commands become available after that firmware is flashed and the board checks in.
         </p>
         <button type="button" onClick={() => router.push("/admin")} className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-accent px-4 text-xs font-black text-[var(--btn-text)]">
           <ArrowLeft size={14} /> Back to Hardware Fleet
@@ -249,9 +249,9 @@ export default function DeviceUpdatePage() {
         {notice && <div role="status" className="rounded-xl border border-accent/30 bg-accent/5 p-3 text-sm font-semibold">{notice}</div>}
         {!isDirectOnline && (
           <div role="status" className={"rounded-xl border p-3 text-xs leading-5 " + (isMeshOnly ? "border-amber-400/30 bg-amber-400/5 text-amber-600" : "border-border bg-card text-text-muted")}>
-            {isMeshOnly
-              ? "This ESP32 is visible to the local mesh, but has no current direct connection to the secure device agent. Wi-Fi updates are paused until this exact board checks in. This avoids sending a configuration to a different ESP32."
-              : "The ESP32 must make a fresh direct secure check-in before the app can scan the requested Wi-Fi network or start an update."}
+              {isMeshOnly
+               ? "This ESP32 is visible to the local mesh, but has no current direct connection to the secure device agent. The update can remain pending safely, but delivery and verification wait for this exact board to check in."
+               : "The ESP32 is not currently reporting a fresh direct heartbeat. The protected update can be saved as pending and will be delivered when this exact board reconnects."}
           </div>
         )}
 
@@ -314,7 +314,7 @@ export default function DeviceUpdatePage() {
                 The server stores the password encrypted. The ESP32 tests the network and retains the last known-good settings if the new connection fails. A board that is offline cannot receive this update until it reconnects.
               </div>
 
-              <button type="submit" disabled={submitting || !accessToken || !isDirectOnline}
+              <button type="submit" disabled={submitting || !accessToken}
                 className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 text-sm font-black text-[var(--btn-text)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50">
                 {submitting ? <LoaderCircle size={16} className="animate-spin" /> : <Cloud size={16} />}
                 {submitting ? "Saving securely…" : "Save & start device update"}
@@ -384,7 +384,7 @@ export default function DeviceUpdatePage() {
                 <div className="flex items-center gap-2 font-black text-text"><RadioTower size={14} /> Device communication</div>
                 <p className="mt-1">{tracking ? "Waiting for firmware status updates…" : "No update is running. Save settings to start a tracked update."}</p>
                 <p className="mt-1 text-[10px]">Last status refresh: {formatTime(lastFetchedAt)}</p>
-                {!isDirectOnline && tracking && <p className="mt-2 inline-flex items-center gap-1 font-bold text-amber-500"><WifiOff size={12} /> {isMeshOnly ? "Device is mesh-visible but not directly connected to the device agent." : "Device is offline; wait for a direct secure check-in before retrying."}</p>}
+                {!isDirectOnline && tracking && <p className="mt-2 inline-flex items-center gap-1 font-bold text-amber-500"><WifiOff size={12} /> {isMeshOnly ? "Device is mesh-visible but not directly connected to the device agent; delivery is waiting." : "Device is offline; the request remains pending until a direct secure check-in arrives."}</p>}
               </div>
             )}
 

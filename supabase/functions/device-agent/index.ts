@@ -1,6 +1,8 @@
 const SUPABASE_URL = (Deno.env.get("SUPABASE_URL") || "").replace(/\/$/, "");
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const PROVISIONING_ENCRYPTION_KEY = Deno.env.get("PROVISIONING_ENCRYPTION_KEY") || "";
+const WIFI_SSID_RE = /^[\x20-\x7e]{1,32}$/;
+const WIFI_PASSWORD_RE = /^[\x20-\x7e]{8,63}$/;
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -97,7 +99,7 @@ async function getDevice(request: Request, boardIdentifier: unknown) {
   if (bearer.length < 32 || !validBoardIdentifier(boardIdentifier)) return null;
   const tokenHash = await sha256(bearer);
   const rows = await rest(
-    `device_runtime_configs?device_token_hash=eq.${encodeURIComponent(tokenHash)}&select=board_id,user_id,device_token_hash,wifi_ssid,wifi_security,encrypted_wifi_password,config_version,applied_config_version,config_update_status`,
+    `device_runtime_configs?device_token_hash=eq.${encodeURIComponent(tokenHash)}&revoked_at=is.null&select=board_id,user_id,device_token_hash,wifi_ssid,wifi_security,encrypted_wifi_password,config_version,applied_config_version,config_update_status`,
   );
   const config = Array.isArray(rows) ? rows[0] : null;
   if (!config) return null;
@@ -130,6 +132,46 @@ async function writeConfigEvent(
   });
 }
 
+async function recordDeviceHeartbeat(
+  config: Record<string, unknown>,
+  board: Record<string, unknown>,
+  body: Record<string, unknown>,
+) {
+  const now = new Date().toISOString();
+  const bootId = typeof body.boot_id === "string" ? body.boot_id.slice(0, 100) : "";
+  const ip = typeof body.ip === "string" ? body.ip.slice(0, 64) : "";
+  const uptimeMs = Number(body.uptime_ms);
+  const currentSsid = typeof body.current_wifi_ssid === "string"
+    ? body.current_wifi_ssid.slice(0, 32)
+    : "";
+  const currentSecurity = body.current_wifi_security === "open" || body.current_wifi_security === "wpa2_psk"
+    ? body.current_wifi_security
+    : "";
+  const patch: Record<string, unknown> = {
+    last_seen_at: now,
+    last_direct_seen_at: now,
+    updated_at: now,
+  };
+  if (ip) patch.last_ip = ip;
+  if (Number.isSafeInteger(uptimeMs) && uptimeMs >= 0) patch.last_uptime_ms = uptimeMs;
+  if (currentSsid) patch.applied_wifi_ssid = currentSsid;
+  if (currentSecurity) patch.applied_wifi_security = currentSecurity;
+  if (bootId && bootId !== String(config.last_boot_id || "")) {
+    patch.last_boot_id = bootId;
+    patch.last_boot_at = now;
+  }
+
+  await rest(
+    `device_runtime_configs?board_id=eq.${encodeURIComponent(String(board.id))}&user_id=eq.${encodeURIComponent(String(board.user_id))}&revoked_at=is.null`,
+    { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(patch) },
+  );
+  await rest(
+    `boards?id=eq.${encodeURIComponent(String(board.id))}&user_id=eq.${encodeURIComponent(String(board.user_id))}`,
+    { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_seen: now }) },
+  );
+  Object.assign(config, patch);
+}
+
 async function poll(request: Request, body: Record<string, unknown>) {
   const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
   const boardIdentifier = body.board_identifier;
@@ -153,6 +195,18 @@ async function poll(request: Request, body: Record<string, unknown>) {
   const userId = String(board.user_id || "");
   const boardId = String(board.id || "");
 
+  // The snapshot RPC intentionally excludes encrypted secrets from its JSON
+  // contract. Fetch the pending encrypted Wi-Fi value separately inside this
+  // service-role function; it is only decrypted into the authenticated device
+  // response when a valid configuration update is waiting.
+  const secretRows = await rest(
+    "device_runtime_configs?board_id=eq." + encodeURIComponent(boardId) +
+      "&user_id=eq." + encodeURIComponent(userId) +
+      "&revoked_at=is.null&select=encrypted_wifi_password",
+  );
+  const secretConfig = Array.isArray(secretRows) ? secretRows[0] : null;
+  if (secretConfig) config.encrypted_wifi_password = secretConfig.encrypted_wifi_password;
+
   // On first authenticated check-in, record the network this board is already
   // connected to. Do this only when no admin-defined config exists; never let
   // a later device heartbeat overwrite an admin's pending Wi-Fi change.
@@ -165,8 +219,8 @@ async function poll(request: Request, body: Record<string, unknown>) {
   const statusBeforeRegistration = String(config.config_update_status || "");
   let wifiConfigRegistered = existingSsid.length > 0;
   if (!existingSsid && statusBeforeRegistration === "unprovisioned" &&
-      currentSsid.length >= 1 && currentSsid.length <= 32 && !/[\\u0000-\\u001f]/.test(currentSsid) &&
-      (currentSecurity === "open" || (currentSecurity === "wpa2_psk" && currentPassword.length >= 8 && currentPassword.length <= 63)) &&
+      WIFI_SSID_RE.test(currentSsid) &&
+      (currentSecurity === "open" || (currentSecurity === "wpa2_psk" && WIFI_PASSWORD_RE.test(currentPassword))) &&
       (currentSecurity !== "open" || currentPassword.length === 0)) {
     const initialPassword = currentSecurity === "wpa2_psk" ? await encryptProvisioningValue(currentPassword) : null;
     const initialVersion = Math.max(1, Number(config.config_version || 1));
@@ -216,6 +270,8 @@ async function poll(request: Request, body: Record<string, unknown>) {
     }
   }
 
+  await recordDeviceHeartbeat(config, board, body);
+
   let configuration: Record<string, unknown> | null = null;
   let commands: Record<string, unknown>[] = Array.isArray(snapshot.commands)
     ? snapshot.commands.filter((item: Record<string, unknown>) =>
@@ -225,9 +281,35 @@ async function poll(request: Request, body: Record<string, unknown>) {
   const reportedVersion = Number(body.applied_config_version ?? config.applied_config_version ?? 0);
   const currentVersion = Number(config.config_version ?? 0);
   const ssid = String(config.wifi_ssid || "");
-  const deliveryStatus = String(config.config_update_status || "");
+  let deliveryStatus = String(config.config_update_status || "");
+
+  const configExpiry = Date.parse(String(config.config_expires_at || ""));
+  if (["pending", "sending", "checking_wifi", "applying"].includes(deliveryStatus) &&
+      Number.isFinite(configExpiry) && configExpiry <= Date.now()) {
+    const expiryMessage = "Configuration delivery expired before the ESP32 confirmed application.";
+    const expiredAt = new Date().toISOString();
+    const expiredRows = await rest(
+      `device_runtime_configs?board_id=eq.${encodeURIComponent(boardId)}&config_update_status=in.(pending,sending,checking_wifi,applying)`,
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({
+          config_update_status: "failed",
+          last_error: expiryMessage,
+          updated_at: expiredAt,
+        }),
+      },
+    );
+    if (Array.isArray(expiredRows) && expiredRows.length > 0) {
+      config.config_update_status = "failed";
+      config.last_error = expiryMessage;
+      deliveryStatus = "failed";
+      await writeConfigEvent(config, "failed", expiryMessage, "device-agent");
+    }
+  }
 
   if (currentVersion > reportedVersion && ssid.length > 0 &&
+      deliveryStatus !== "failed" &&
       ["pending", "sending", "checking_wifi", "applying"].includes(deliveryStatus)) {
     let password = "";
     if (config.wifi_security === "wpa2_psk") {
@@ -412,6 +494,14 @@ async function updateConfigStatus(device: { config: Record<string, unknown> }, b
     last_direct_seen_at: acknowledgedAt,
     updated_at: acknowledgedAt,
   };
+  const currentSsid = typeof body.current_wifi_ssid === "string" ? body.current_wifi_ssid.slice(0, 32) : "";
+  const currentSecurity = body.current_wifi_security === "open" || body.current_wifi_security === "wpa2_psk"
+    ? body.current_wifi_security
+    : "";
+  if (status === "applied" && currentSsid && currentSecurity) {
+    patch.applied_wifi_ssid = currentSsid;
+    patch.applied_wifi_security = currentSecurity;
+  }
   if (status === "applied") {
     patch.applied_config_version = version;
     patch.config_applied_at = new Date().toISOString();

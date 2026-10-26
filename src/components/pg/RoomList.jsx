@@ -15,7 +15,7 @@ export default function RoomList({
   onSelect,
 }) {
   return (
-    <nav aria-label="Rooms" className="flex flex-row lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0">
+    <nav aria-label="Rooms" className="flex min-w-0 flex-col gap-2 overflow-visible pb-1 lg:pb-0">
       <p className="hidden lg:block text-[11px] font-extrabold uppercase tracking-[0.12em] text-(--pg-muted) px-1">
         Rooms
       </p>
@@ -28,7 +28,7 @@ export default function RoomList({
             key={board.id}
             onClick={() => onSelect(board.id)}
             aria-current={selected ? 'true' : undefined}
-            className={`shrink-0 min-w-[210px] lg:min-w-0 w-auto lg:w-full min-h-[56px] flex items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-left transition-all cursor-pointer ${
+            className={`flex min-h-[56px] min-w-0 w-full items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-left transition-all cursor-pointer ${
               selected
                 ? 'border-(--pg-brand-line) bg-(--pg-brand-faint)'
                 : 'border-(--pg-line) bg-(--pg-card) hover:border-(--pg-brand-line)'

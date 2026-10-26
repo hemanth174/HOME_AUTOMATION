@@ -21,11 +21,11 @@ export async function POST(request, { params }) {
 
   const { data: config, error: configError } = await auth.admin
     .from('device_runtime_configs')
-    .select('board_id, user_id, device_token_hash, last_seen_at, last_direct_seen_at, last_mesh_seen_at')
+    .select('board_id, user_id, device_token_hash, revoked_at, last_seen_at, last_direct_seen_at, last_mesh_seen_at')
     .eq('board_id', boardId)
     .maybeSingle();
   if (configError) return NextResponse.json({ error: configError.message }, { status: 503 });
-  if (!config?.device_token_hash) {
+  if (!config?.device_token_hash || config.revoked_at) {
     return NextResponse.json({ error: 'This ESP32 needs the new device-agent firmware flashed once before remote restart is available.' }, { status: 409 });
   }
   const lastDirectSeen = config.last_direct_seen_at ? new Date(config.last_direct_seen_at).getTime() : 0;

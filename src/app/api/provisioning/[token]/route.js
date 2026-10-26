@@ -38,7 +38,9 @@ export async function GET(request, { params }) {
   const { error: usedError } = await admin.from('provisioning_records').update({ setup_token_used_at: new Date().toISOString() }).eq('id', record.id).is('setup_token_used_at', null);
   if (usedError) return NextResponse.json({ error: 'Could not finalize the one-time setup token. Please contact VikaTech support.' }, { status: 500 });
   await admin.from('approval_audit_log').insert({ user_id: record.user_id, order_id: record.order_id, actor_email: record.order_trackings?.email || 'customer', action: 'provisioning_downloaded', metadata: { provisioning_id: record.id } });
-  return NextResponse.json({ boardName: record.board_name, boardIdentifier: record.board_identifier, password, firmware, fileName: `${record.board_identifier}.cpp` }, { headers: { 'Cache-Control': 'no-store, private' } });
+  // The generated one-time firmware contains the installation values it needs;
+  // do not repeat the mesh password as a separate browser-readable field.
+  return NextResponse.json({ boardName: record.board_name, boardIdentifier: record.board_identifier, firmware, fileName: `${record.board_identifier}.cpp` }, { headers: { 'Cache-Control': 'no-store, private' } });
 }
 
 async function buildFirmware(record, password, deviceAuthToken) {

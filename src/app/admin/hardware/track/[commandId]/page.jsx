@@ -76,8 +76,8 @@ export default function Esp32CommandTrackerPage() {
         const command = json.command;
         setBoard(json.board || null);
 
-        if (command.status === "failed" || command.status === "expired") {
-          const message = command.result?.message || (command.status === "expired" ? "The command expired before the ESP32 completed it." : "The device reported a failure.");
+        if (command.status === "failed" || command.status === "expired" || command.status === "cancelled") {
+          const message = command.result?.message || command.last_error || (command.status === "cancelled" ? "The command expired or was cancelled before the ESP32 completed it." : "The device reported a failure.");
           setState({ status: "failed", step: (commandType === "restart" ? RESTART_STEPS : UPDATE_STEPS).length - 1, message });
           addEvent("failed-" + command.status, "Update needs attention", message);
           return;
@@ -90,7 +90,7 @@ export default function Esp32CommandTrackerPage() {
             addEvent("restart-completed", "ESP32 restarted successfully", "The selected board is online after its reboot.");
             return;
           }
-          if (command.status === "queued") {
+           if (command.status === "queued" || command.status === "pending") {
             setState({ status: "running", step: 1, message: "The restart command is queued. Waiting for this ESP32 to receive it." });
             addEvent("restart-queued", "Restart command queued", "Only " + (json.board?.board_identifier || "the selected board") + " can consume this command.");
           } else {

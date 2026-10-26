@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
+import fs from 'fs/promises';
+import path from 'path';
 import { requireAdmin } from '@/lib/adminServer';
 import { decryptProvisioningValue, encryptProvisioningValue, hashProvisioningToken } from '@/lib/provisioningServer';
 
 export const dynamic = 'force-dynamic';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const WIFI_SSID_RE = /^[\x20-\x7e]{1,32}$/;
+const WIFI_PASSWORD_RE = /^[\x20-\x7e]{8,63}$/;
 
 export async function POST(request, { params }) {
   const auth = await requireAdmin(request);
@@ -17,15 +21,13 @@ export async function POST(request, { params }) {
   if (boardError || !board) return NextResponse.json({ error: boardError?.message || 'Board not found' }, { status: 404 });
 
   const { data: existing, error: configError } = await auth.admin.from('device_runtime_configs')
-    .select('board_id, user_id, device_token_hash, encrypted_device_token, first_seen_at, last_seen_at, mesh_ssid, encrypted_mesh_password, wifi_ssid, wifi_security, encrypted_wifi_password, config_version, applied_config_version')
+    .select('board_id, user_id, device_token_hash, encrypted_device_token, first_seen_at, last_seen_at, last_direct_seen_at, last_mesh_seen_at, last_boot_id, last_boot_at, mesh_ssid, encrypted_mesh_password, wifi_ssid, wifi_security, encrypted_wifi_password, config_version, applied_config_version, applied_wifi_ssid, applied_wifi_security, config_update_status, revoked_at')
     .eq('board_id', boardId).maybeSingle();
   if (configError) return NextResponse.json({ error: configError.message }, { status: 503 });
 
   let deviceToken = '';
-  if (existing?.device_token_hash) {
-    if (existing.first_seen_at || existing.last_seen_at) {
-      return NextResponse.json({ error: 'This board has already checked in with its device credential. Use the controlled credential-rotation workflow instead of re-enrolling it.' }, { status: 409 });
-    }
+  const reEnrollment = Boolean(existing?.revoked_at);
+  if (existing?.device_token_hash && !reEnrollment) {
     if (!existing.encrypted_device_token) {
       return NextResponse.json({ error: 'This board has a legacy device token that cannot be recovered. It needs a controlled credential reset before provisioning.' }, { status: 409 });
     }
@@ -81,7 +83,8 @@ export async function POST(request, { params }) {
     }
   }
 
-  if (!meshSsid || meshSsid.length > 32 || !encryptedMeshPassword) {
+  meshSsid = String(meshSsid || '').trim();
+  if (!WIFI_SSID_RE.test(meshSsid) || !encryptedMeshPassword) {
     return NextResponse.json({ error: 'A valid installation mesh configuration is unavailable.' }, { status: 503 });
   }
   try {
@@ -90,16 +93,23 @@ export async function POST(request, { params }) {
     console.error('Could not decrypt installation mesh password:', error);
     return NextResponse.json({ error: 'The saved mesh password cannot be decrypted. Check PROVISIONING_ENCRYPTION_KEY.' }, { status: 503 });
   }
+  if (!WIFI_PASSWORD_RE.test(meshPassword)) {
+    return NextResponse.json({ error: 'The installation mesh password is not a supported WPA2 passphrase.' }, { status: 503 });
+  }
 
-  const templateUrl = process.env.ESP32_FIRMWARE_TEMPLATE_URL ||
-    'https://raw.githubusercontent.com/hemanth174/HOME_AUTOMATION/main/esp32.cpp';
+  const templateUrl = process.env.ESP32_FIRMWARE_TEMPLATE_URL || '';
   let source;
   try {
-    const response = await fetch(templateUrl, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
-    if (!response.ok) throw new Error('Firmware template returned HTTP ' + response.status);
-    source = await response.text();
+    if (templateUrl) {
+      const response = await fetch(templateUrl, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+      if (!response.ok) throw new Error('Firmware template returned HTTP ' + response.status);
+      source = await response.text();
+    } else {
+      source = await fs.readFile(path.join(process.cwd(), 'esp32.cpp'), 'utf8');
+    }
   } catch (error) {
-    return NextResponse.json({ error: 'Could not load the generic firmware template. No device credentials were changed.' }, { status: 503 });
+    console.error('Could not load the generic firmware template:', error);
+    return NextResponse.json({ error: 'Could not load the generic firmware template. Set ESP32_FIRMWARE_TEMPLATE_URL or include esp32.cpp in the server deployment. No device credentials were changed.' }, { status: 503 });
   }
 
   const requiredAnchors = [
@@ -108,6 +118,10 @@ export async function POST(request, { params }) {
     'const char* MESH_PASS = "',
     'const char* DEVICE_AGENT_URL = "',
     'const char* DEVICE_TOKEN = "',
+    'const char* MQTT_BROKER_HOST = "',
+    'const char* MQTT_BROKER_USERNAME = "',
+    'const char* MQTT_BROKER_PASSWORD = "',
+    'const uint16_t MQTT_BROKER_PORT = ',
   ];
   if (!requiredAnchors.every((anchor) => source.includes(anchor))) {
     return NextResponse.json({
@@ -115,7 +129,7 @@ export async function POST(request, { params }) {
     }, { status: 503 });
   }
 
-  let encryptedDeviceToken = existing?.encrypted_device_token || null;
+  let encryptedDeviceToken = reEnrollment ? null : existing?.encrypted_device_token || null;
   if (!encryptedDeviceToken) {
     try {
       encryptedDeviceToken = encryptProvisioningValue(deviceToken);
@@ -134,16 +148,48 @@ export async function POST(request, { params }) {
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
     .replace(/[\r\n]/g, '');
+  const mqttBrokerHost = String(process.env.ESP32_MQTT_BROKER_HOST || '').trim();
+  const mqttBrokerPort = Number(process.env.ESP32_MQTT_BROKER_PORT || 1883);
+  const mqttBrokerUsername = String(process.env.ESP32_MQTT_USERNAME || '').trim();
+  const mqttBrokerPassword = String(process.env.ESP32_MQTT_PASSWORD || '');
+  if (!Number.isInteger(mqttBrokerPort) || mqttBrokerPort < 1 || mqttBrokerPort > 65535) {
+    return NextResponse.json({ error: 'ESP32_MQTT_BROKER_PORT must be a valid TCP port.' }, { status: 503 });
+  }
+  if (mqttBrokerHost && /^(localhost|127\.|0\.0\.0\.0$|\[?::1\]?$)/i.test(mqttBrokerHost)) {
+    return NextResponse.json({ error: 'ESP32_MQTT_BROKER_HOST must be a LAN IP or hostname reachable from the ESP32, not localhost.' }, { status: 503 });
+  }
+  if (Boolean(mqttBrokerUsername) !== Boolean(mqttBrokerPassword)) {
+    return NextResponse.json({ error: 'Set both ESP32_MQTT_USERNAME and ESP32_MQTT_PASSWORD, or leave both empty.' }, { status: 503 });
+  }
 
   source = source
     .replace(/const char\* BOARD_IDENTIFIER = "[^"]*";/, 'const char* BOARD_IDENTIFIER = "' + escapeCString(board.board_identifier) + '";')
     .replace(/const char\* MESH_SSID = "[^"]*";/, 'const char* MESH_SSID = "' + escapeCString(meshSsid) + '";')
     .replace(/const char\* MESH_PASS = "[^"]*";/, 'const char* MESH_PASS = "' + escapeCString(meshPassword) + '";')
     .replace(/const char\* DEVICE_AGENT_URL = "[^"]*";/, 'const char* DEVICE_AGENT_URL = "' + escapeCString(agentUrl) + '";')
-    .replace(/const char\* DEVICE_TOKEN = "[^"]*";/, 'const char* DEVICE_TOKEN = "' + deviceToken + '";');
+    .replace(/const char\* DEVICE_TOKEN = "[^"]*";/, 'const char* DEVICE_TOKEN = "' + deviceToken + '";')
+    .replace(/const char\* MQTT_BROKER_HOST = "[^"]*";/, 'const char* MQTT_BROKER_HOST = "' + escapeCString(mqttBrokerHost) + '";')
+    .replace(/const uint16_t MQTT_BROKER_PORT = \d+;/, 'const uint16_t MQTT_BROKER_PORT = ' + mqttBrokerPort + ';')
+    .replace(/const char\* MQTT_BROKER_USERNAME = "[^"]*";/, 'const char* MQTT_BROKER_USERNAME = "' + escapeCString(mqttBrokerUsername) + '";')
+    .replace(/const char\* MQTT_BROKER_PASSWORD = "[^"]*";/, 'const char* MQTT_BROKER_PASSWORD = "' + escapeCString(mqttBrokerPassword) + '";');
 
   const now = new Date().toISOString();
-  const base = existing || {
+  const base = reEnrollment ? {
+    ...existing,
+    wifi_ssid: '',
+    wifi_security: 'wpa2_psk',
+    encrypted_wifi_password: null,
+    config_version: 1,
+    applied_config_version: 0,
+    applied_wifi_ssid: null,
+    applied_wifi_security: null,
+    first_seen_at: null,
+    last_seen_at: null,
+    last_direct_seen_at: null,
+    last_mesh_seen_at: null,
+    last_boot_id: null,
+    last_boot_at: null,
+  } : existing || {
     board_id: board.id,
     user_id: board.user_id,
     wifi_ssid: '',
@@ -160,17 +206,20 @@ export async function POST(request, { params }) {
     encrypted_device_token: encryptedDeviceToken,
     mesh_ssid: meshSsid,
     encrypted_mesh_password: encryptedMeshPassword,
-    config_update_status: existing?.wifi_ssid ? 'pending' : 'unprovisioned',
+    config_update_status: existing?.config_update_status || 'unprovisioned',
+    revoked_at: null,
     updated_at: now,
   };
+  if (reEnrollment) row.config_update_status = 'unprovisioned';
   const { error: saveError } = await auth.admin.from('device_runtime_configs')
     .upsert(row, { onConflict: 'board_id' });
   if (saveError) return NextResponse.json({ error: saveError.message }, { status: 500 });
 
+  const firmwareRegenerated = Boolean(existing?.first_seen_at || existing?.last_seen_at) && !reEnrollment;
   await auth.admin.from('approval_audit_log').insert({
     user_id: board.user_id,
     actor_email: auth.user.email,
-    action: 'esp32_device_agent_provisioned',
+    action: firmwareRegenerated ? 'esp32_firmware_regenerated' : 'esp32_device_agent_provisioned',
     metadata: { board_id: board.id, board_identifier: board.board_identifier, mesh_ssid: meshSsid },
   });
 
@@ -179,9 +228,10 @@ export async function POST(request, { params }) {
     fileName: board.board_identifier + '-vikatech.ino',
     board: { id: board.id, name: board.name, boardIdentifier: board.board_identifier },
     meshSsid,
-    meshPassword,
     setupUrl: 'http://192.168.4.1/setup',
     requiresFlash: true,
-    message: 'Flash this firmware once to enroll this board. Future Wi-Fi changes and restart requests can then be delivered remotely.',
+    message: firmwareRegenerated
+      ? 'This is the latest firmware for an already-enrolled board. Existing device and mesh credentials were preserved; flash it over USB to apply the update.'
+      : 'Flash this firmware once to enroll this board. Future Wi-Fi changes and restart requests can then be delivered remotely.',
   }, { headers: { 'Cache-Control': 'no-store' } });
 }
