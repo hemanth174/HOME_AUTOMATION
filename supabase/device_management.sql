@@ -27,6 +27,10 @@ create table if not exists public.device_runtime_configs (
   config_update_status text not null default 'unprovisioned'
     check (config_update_status in ('unprovisioned','pending','checking_wifi','sending','applying','applied','failed')),
   last_seen_at timestamptz,
+  -- Direct check-in means this exact ESP32 authenticated to the device-agent.
+  -- Mesh gateway observations are tracked separately and never authorize remote commands.
+  last_direct_seen_at timestamptz,
+  last_mesh_seen_at timestamptz,
   last_error text,
   last_ip text,
   config_requested_at timestamptz,
@@ -54,7 +58,24 @@ alter table public.device_runtime_configs
   add column if not exists encrypted_device_token text,
   add column if not exists mesh_ssid text not null default 'HOME-AUTO-LEADER',
   add column if not exists encrypted_mesh_password text,
-  add column if not exists first_seen_at timestamptz;
+  add column if not exists first_seen_at timestamptz,
+  add column if not exists last_direct_seen_at timestamptz,
+  add column if not exists last_mesh_seen_at timestamptz;
+
+-- Link legacy provisioning records to their registered board before the
+-- enrollment endpoint attempts to reuse their mesh credentials.
+update public.provisioning_records p
+set board_id = b.id
+from public.boards b
+where p.board_id is null
+  and p.user_id = b.user_id
+  and p.board_identifier = b.board_identifier;
+
+-- Existing direct device-agent check-ins predate the separate direct timestamp.
+-- This backfill is one-time; future mesh-only observations update last_mesh_seen_at.
+update public.device_runtime_configs
+set last_direct_seen_at = coalesce(last_direct_seen_at, last_seen_at)
+where last_seen_at is not null and last_direct_seen_at is null;
 
 -- Backfill enrollment timestamps for devices which already checked in before this migration.
 update public.device_runtime_configs
@@ -65,6 +86,8 @@ create index if not exists device_runtime_configs_user_id_idx
   on public.device_runtime_configs(user_id);
 create index if not exists device_runtime_configs_last_seen_idx
   on public.device_runtime_configs(last_seen_at desc);
+create index if not exists device_runtime_configs_direct_seen_idx
+  on public.device_runtime_configs(last_direct_seen_at desc);
 create index if not exists device_commands_board_status_idx
   on public.device_commands(board_id, status, requested_at);
 
@@ -136,6 +159,7 @@ begin
   update public.device_runtime_configs
   set first_seen_at = coalesce(first_seen_at, v_now),
       last_seen_at = v_now,
+      last_direct_seen_at = v_now,
       updated_at = case
         when last_seen_at is null or last_seen_at < v_now - interval '15 seconds' then v_now
         else updated_at
