@@ -25,8 +25,83 @@ export async function POST(request, { params }) {
     .eq('board_id', boardId).maybeSingle();
   if (configError) return NextResponse.json({ error: configError.message }, { status: 503 });
 
+  let body;
+  try { body = await request.json(); }
+  catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }); }
+  body = body || {};
+
   let deviceToken = '';
   const reEnrollment = Boolean(existing?.revoked_at);
+  const isInitialEnrollment = !existing?.first_seen_at || reEnrollment;
+
+  // The local setup page is gone. For first enrollment (and controlled
+  // re-enrollment) the customer Wi-Fi is baked into the downloadable firmware.
+  const providedWifi = typeof body.wifiSsid === 'string' && body.wifiSsid.trim().length > 0;
+  let targetWifiSsid = '';
+  let targetWifiSecurity = 'wpa2_psk';
+  let targetWifiPassword = '';
+  let targetEncryptedWifiPassword = null;
+  if (isInitialEnrollment) {
+    if (providedWifi) {
+      targetWifiSsid = body.wifiSsid.trim();
+      targetWifiSecurity = body.wifiSecurity === 'open' ? 'open' : 'wpa2_psk';
+      targetWifiPassword = typeof body.wifiPassword === 'string' ? body.wifiPassword : '';
+      if (!WIFI_SSID_RE.test(targetWifiSsid)) {
+        return NextResponse.json({ error: 'Wi-Fi name is required and must be 1–32 supported printable characters.' }, { status: 400 });
+      }
+      if (targetWifiSecurity === 'wpa2_psk' && !WIFI_PASSWORD_RE.test(targetWifiPassword)) {
+        return NextResponse.json({ error: 'WPA2-PSK passwords must be 8–63 supported printable characters.' }, { status: 400 });
+      }
+      if (targetWifiSecurity === 'open' && targetWifiPassword.length > 0) {
+        return NextResponse.json({ error: 'Open networks must not include a password.' }, { status: 400 });
+      }
+      if (targetWifiSecurity === 'wpa2_psk') {
+        try { targetEncryptedWifiPassword = encryptProvisioningValue(targetWifiPassword); }
+        catch (error) {
+          console.error('Wi-Fi encryption configuration error:', error);
+          return NextResponse.json({ error: 'Provisioning encryption is not configured securely on the server.' }, { status: 503 });
+        }
+      }
+    } else if (existing?.wifi_ssid) {
+      targetWifiSsid = String(existing.wifi_ssid).trim();
+      targetWifiSecurity = existing.wifi_security === 'open' ? 'open' : 'wpa2_psk';
+      targetEncryptedWifiPassword = existing.encrypted_wifi_password || null;
+      if (!WIFI_SSID_RE.test(targetWifiSsid)) {
+        return NextResponse.json({ error: 'The saved Wi-Fi name is invalid. Enter new Wi-Fi credentials for enrollment.' }, { status: 400 });
+      }
+      if (targetWifiSecurity === 'wpa2_psk') {
+        if (!targetEncryptedWifiPassword) {
+          return NextResponse.json({ error: 'A saved Wi-Fi password is unavailable. Enter the Wi-Fi password to generate enrollment firmware.', requiresWifi: true }, { status: 400 });
+        }
+        try { targetWifiPassword = decryptProvisioningValue(targetEncryptedWifiPassword); }
+        catch (error) {
+          console.error('Could not decrypt saved Wi-Fi password:', error);
+          return NextResponse.json({ error: 'The saved Wi-Fi password cannot be decrypted. Enter the password again.', requiresWifi: true }, { status: 503 });
+        }
+      }
+    } else {
+      return NextResponse.json({ error: 'Wi-Fi name and password are required for first enrollment because this firmware no longer serves a local setup page.', requiresWifi: true }, { status: 400 });
+    }
+  } else {
+    // A normal firmware refresh must not silently change Wi-Fi. Bake the saved
+    // credentials when they are recoverable; otherwise leave the constants
+    // empty and let the ESP32 keep using its NVS cache.
+    targetWifiSsid = String(existing?.wifi_ssid || '').trim();
+    targetWifiSecurity = existing?.wifi_security === 'open' ? 'open' : 'wpa2_psk';
+    targetEncryptedWifiPassword = existing?.encrypted_wifi_password || null;
+    if (targetWifiSsid && (targetWifiSecurity === 'open' || targetEncryptedWifiPassword)) {
+      if (targetWifiSecurity === 'wpa2_psk') {
+        try { targetWifiPassword = decryptProvisioningValue(targetEncryptedWifiPassword); }
+        catch {
+          targetWifiSsid = '';
+          targetWifiPassword = '';
+        }
+      }
+    } else {
+      targetWifiSsid = '';
+      targetWifiPassword = '';
+    }
+  }
   if (existing?.device_token_hash && !reEnrollment) {
     if (!existing.encrypted_device_token) {
       return NextResponse.json({ error: 'This board has a legacy device token that cannot be recovered. It needs a controlled credential reset before provisioning.' }, { status: 409 });
@@ -118,14 +193,17 @@ export async function POST(request, { params }) {
     'const char* MESH_PASS = "',
     'const char* DEVICE_AGENT_URL = "',
     'const char* DEVICE_TOKEN = "',
-    'const char* MQTT_BROKER_HOST = "',
-    'const char* MQTT_BROKER_USERNAME = "',
-    'const char* MQTT_BROKER_PASSWORD = "',
-    'const uint16_t MQTT_BROKER_PORT = ',
+    'const char* DISCOVERY_SUPABASE_URL = "',
+    'const char* DISCOVERY_SUPABASE_ANON_KEY = "',
+    'const char* DEVICE_WS_TOKEN = "',
+    'const char* HOME_WIFI_SSID = "',
+    'const char* HOME_WIFI_PASSWORD = "',
+    'const char* HOME_WIFI_SECURITY = "',
+    'const char* HOME_WIFI_SEED = "',
   ];
   if (!requiredAnchors.every((anchor) => source.includes(anchor))) {
     return NextResponse.json({
-      error: 'The firmware template does not contain all device-agent and mesh placeholders yet. Deploy the updated firmware template first.',
+      error: 'The firmware template does not contain all device-agent, gateway, and mesh placeholders yet. Deploy the updated firmware template first.',
     }, { status: 503 });
   }
 
@@ -148,18 +226,24 @@ export async function POST(request, { params }) {
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
     .replace(/[\r\n]/g, '');
-  const mqttBrokerHost = String(process.env.ESP32_MQTT_BROKER_HOST || '').trim();
-  const mqttBrokerPort = Number(process.env.ESP32_MQTT_BROKER_PORT || 1883);
-  const mqttBrokerUsername = String(process.env.ESP32_MQTT_USERNAME || '').trim();
-  const mqttBrokerPassword = String(process.env.ESP32_MQTT_PASSWORD || '');
-  if (!Number.isInteger(mqttBrokerPort) || mqttBrokerPort < 1 || mqttBrokerPort > 65535) {
-    return NextResponse.json({ error: 'ESP32_MQTT_BROKER_PORT must be a valid TCP port.' }, { status: 503 });
+  const discoverySupabaseUrl = String(
+    process.env.ESP32_DISCOVERY_SUPABASE_URL ||
+    process.env.MQTT_SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+  ).trim().replace(/\/$/, '');
+  const discoveryAnonKey = String(
+    process.env.ESP32_DISCOVERY_ANON_KEY ||
+    process.env.MQTT_SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+  ).trim();
+  const deviceWsToken = String(
+    process.env.ESP32_DEVICE_WS_TOKEN || process.env.DEVICE_WS_TOKEN || '',
+  ).trim();
+  if (!discoverySupabaseUrl.startsWith('https://') || !discoveryAnonKey) {
+    return NextResponse.json({ error: 'Configure ESP32_DISCOVERY_SUPABASE_URL and ESP32_DISCOVERY_ANON_KEY for app_discovery before provisioning.' }, { status: 503 });
   }
-  if (mqttBrokerHost && /^(localhost|127\.|0\.0\.0\.0$|\[?::1\]?$)/i.test(mqttBrokerHost)) {
-    return NextResponse.json({ error: 'ESP32_MQTT_BROKER_HOST must be a LAN IP or hostname reachable from the ESP32, not localhost.' }, { status: 503 });
-  }
-  if (Boolean(mqttBrokerUsername) !== Boolean(mqttBrokerPassword)) {
-    return NextResponse.json({ error: 'Set both ESP32_MQTT_USERNAME and ESP32_MQTT_PASSWORD, or leave both empty.' }, { status: 503 });
+  if (!deviceWsToken) {
+    return NextResponse.json({ error: 'Configure ESP32_DEVICE_WS_TOKEN (the custom MQTT backend DEVICE_WS_TOKEN) before provisioning.' }, { status: 503 });
   }
 
   source = source
@@ -168,21 +252,31 @@ export async function POST(request, { params }) {
     .replace(/const char\* MESH_PASS = "[^"]*";/, 'const char* MESH_PASS = "' + escapeCString(meshPassword) + '";')
     .replace(/const char\* DEVICE_AGENT_URL = "[^"]*";/, 'const char* DEVICE_AGENT_URL = "' + escapeCString(agentUrl) + '";')
     .replace(/const char\* DEVICE_TOKEN = "[^"]*";/, 'const char* DEVICE_TOKEN = "' + deviceToken + '";')
-    .replace(/const char\* MQTT_BROKER_HOST = "[^"]*";/, 'const char* MQTT_BROKER_HOST = "' + escapeCString(mqttBrokerHost) + '";')
-    .replace(/const uint16_t MQTT_BROKER_PORT = \d+;/, 'const uint16_t MQTT_BROKER_PORT = ' + mqttBrokerPort + ';')
-    .replace(/const char\* MQTT_BROKER_USERNAME = "[^"]*";/, 'const char* MQTT_BROKER_USERNAME = "' + escapeCString(mqttBrokerUsername) + '";')
-    .replace(/const char\* MQTT_BROKER_PASSWORD = "[^"]*";/, 'const char* MQTT_BROKER_PASSWORD = "' + escapeCString(mqttBrokerPassword) + '";');
+    .replace(/const char\* DISCOVERY_SUPABASE_URL = "[^"]*";/, 'const char* DISCOVERY_SUPABASE_URL = "' + escapeCString(discoverySupabaseUrl) + '";')
+    .replace(/const char\* DISCOVERY_SUPABASE_ANON_KEY = "[^"]*";/, 'const char* DISCOVERY_SUPABASE_ANON_KEY = "' + escapeCString(discoveryAnonKey) + '";')
+    .replace(/const char\* DEVICE_WS_TOKEN = "[^"]*";/, 'const char* DEVICE_WS_TOKEN = "' + escapeCString(deviceWsToken) + '";')
+    .replace(/const char\* HOME_WIFI_SSID = "[^"]*";/, 'const char* HOME_WIFI_SSID = "' + escapeCString(targetWifiSsid) + '";')
+    .replace(/const char\* HOME_WIFI_PASSWORD = "[^"]*";/, 'const char* HOME_WIFI_PASSWORD = "' + escapeCString(targetWifiSecurity === 'open' ? '' : targetWifiPassword) + '";')
+    .replace(/const char\* HOME_WIFI_SECURITY = "[^"]*";/, 'const char* HOME_WIFI_SECURITY = "' + targetWifiSecurity + '";')
+    .replace(/const char\* HOME_WIFI_SEED = "[^"]*";/, 'const char* HOME_WIFI_SEED = "' + crypto.randomBytes(16).toString('hex') + '";');
 
   const now = new Date().toISOString();
+  const initialWifiPatch = isInitialEnrollment ? {
+    wifi_ssid: targetWifiSsid,
+    wifi_security: targetWifiSecurity,
+    encrypted_wifi_password: targetEncryptedWifiPassword,
+    config_version: 1,
+    applied_config_version: 1,
+    applied_wifi_ssid: targetWifiSsid,
+    applied_wifi_security: targetWifiSecurity,
+    config_update_status: 'applied',
+    config_requested_at: now,
+    config_applied_at: now,
+    config_expires_at: null,
+    last_error: null,
+  } : {};
   const base = reEnrollment ? {
     ...existing,
-    wifi_ssid: '',
-    wifi_security: 'wpa2_psk',
-    encrypted_wifi_password: null,
-    config_version: 1,
-    applied_config_version: 0,
-    applied_wifi_ssid: null,
-    applied_wifi_security: null,
     first_seen_at: null,
     last_seen_at: null,
     last_direct_seen_at: null,
@@ -200,17 +294,17 @@ export async function POST(request, { params }) {
   };
   const row = {
     ...base,
+    ...initialWifiPatch,
     board_id: board.id,
     user_id: board.user_id,
     device_token_hash: tokenHash,
     encrypted_device_token: encryptedDeviceToken,
     mesh_ssid: meshSsid,
     encrypted_mesh_password: encryptedMeshPassword,
-    config_update_status: existing?.config_update_status || 'unprovisioned',
+    config_update_status: initialWifiPatch.config_update_status || existing?.config_update_status || 'unprovisioned',
     revoked_at: null,
     updated_at: now,
   };
-  if (reEnrollment) row.config_update_status = 'unprovisioned';
   const { error: saveError } = await auth.admin.from('device_runtime_configs')
     .upsert(row, { onConflict: 'board_id' });
   if (saveError) return NextResponse.json({ error: saveError.message }, { status: 500 });
@@ -220,18 +314,18 @@ export async function POST(request, { params }) {
     user_id: board.user_id,
     actor_email: auth.user.email,
     action: firmwareRegenerated ? 'esp32_firmware_regenerated' : 'esp32_device_agent_provisioned',
-    metadata: { board_id: board.id, board_identifier: board.board_identifier, mesh_ssid: meshSsid },
+    metadata: { board_id: board.id, board_identifier: board.board_identifier, mesh_ssid: meshSsid, wifi_baked: isInitialEnrollment },
   });
 
   return NextResponse.json({
     firmware: source,
     fileName: board.board_identifier + '-vikatech.ino',
     board: { id: board.id, name: board.name, boardIdentifier: board.board_identifier },
-    meshSsid,
-    setupUrl: 'http://192.168.4.1/setup',
+    wifiSsid: targetWifiSsid,
+    gatewayConfigured: true,
     requiresFlash: true,
-    message: firmwareRegenerated
-      ? 'This is the latest firmware for an already-enrolled board. Existing device and mesh credentials were preserved; flash it over USB to apply the update.'
-      : 'Flash this firmware once to enroll this board. Future Wi-Fi changes and restart requests can then be delivered remotely.',
+    message: (firmwareRegenerated
+      ? 'This is the latest firmware for an already-enrolled board. Existing device and Wi-Fi credentials were preserved; flash it over USB to apply the update.'
+      : 'Flash this firmware once to enroll this board. The Wi-Fi credentials and WSS gateway credentials are built into the file, so no local setup page or MQTT broker configuration is required. Future Wi-Fi changes can be delivered from the admin panel.'),
   }, { headers: { 'Cache-Control': 'no-store' } });
 }

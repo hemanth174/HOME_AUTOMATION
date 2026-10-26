@@ -12,6 +12,21 @@ import AdminOrderPipeline from "./AdminOrderPipeline";
 import AdminOrderDrawer from "./AdminOrderDrawer";
 
 const stageColors = { Received: "text-slate-300 border-slate-500/40 bg-slate-500/10", Survey: "text-cyan-300 border-cyan-400/40 bg-cyan-400/10", Quoting: "text-amber-300 border-amber-400/40 bg-amber-400/10", Manufacturing: "text-purple-300 border-purple-400/40 bg-purple-400/10", Shipping: "text-blue-300 border-blue-400/40 bg-blue-400/10", Installed: "text-accent border-accent/40 bg-accent/10" };
+const ADMIN_TAB_COOKIE = "vikatech_admin_tab";
+const ADMIN_TABS = ["orders", "users", "hardware"];
+function readAdminTabCookie() {
+  if (typeof document === "undefined") return "orders";
+  const prefix = ADMIN_TAB_COOKIE + "=";
+  const entry = document.cookie.split("; ").find((item) => item.startsWith(prefix));
+  if (!entry) return "orders";
+  let value = "";
+  try {
+    value = decodeURIComponent(entry.slice(prefix.length));
+  } catch {
+    return "orders";
+  }
+  return ADMIN_TABS.includes(value) ? value : "orders";
+}
 const approvalState = (item) => {
   if (item.account_status === "rejected") return { key: "denied", label: "Denied", tone: "border-red-400/40 bg-red-400/10 text-red-500" };
   if (item.account_status === "revoked") return { key: "revoked", label: "Revoked", tone: "border-orange-400/40 bg-orange-400/10 text-orange-500" };
@@ -23,9 +38,11 @@ const approvalState = (item) => {
 function AdminLoading() { return <div className="flex min-h-screen items-center justify-center bg-background px-6 text-text"><div className="w-full max-w-sm text-center animate-fade-in"><div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-accent/30 bg-accent-bg text-accent shadow-gold-glow"><ShieldCheck size={28} className="animate-pulse" /></div><p className="text-[10px] font-black uppercase tracking-[.24em] text-accent">VikaTech operations</p><h1 className="mt-3 text-2xl font-black">Loading command center</h1><div className="mx-auto mt-6 h-1.5 w-full overflow-hidden rounded-full bg-border"><div className="admin-loading-bar h-full rounded-full bg-accent" /></div></div></div>; }
 
 export default function AdminPage() {
-  const [user, setUser] = useState(null), [orders, setOrders] = useState([]), [users, setUsers] = useState([]), [approvals, setApprovals] = useState([]), [tab, setTab] = useState("orders"), [query, setQuery] = useState(""), [filter, setFilter] = useState("All stages"), [selected, setSelected] = useState(null), [loading, setLoading] = useState(true), [notice, setNotice] = useState(""), [approvalFilter, setApprovalFilter] = useState("all"), [approvalAction, setApprovalAction] = useState(null), [denyTarget, setDenyTarget] = useState(null), [denyReason, setDenyReason] = useState("");
+  const [user, setUser] = useState(null), [orders, setOrders] = useState([]), [users, setUsers] = useState([]), [approvals, setApprovals] = useState([]), [tab, setTab] = useState("orders"), [tabHydrated, setTabHydrated] = useState(false), [query, setQuery] = useState(""), [filter, setFilter] = useState("All stages"), [selected, setSelected] = useState(null), [loading, setLoading] = useState(true), [notice, setNotice] = useState(""), [approvalFilter, setApprovalFilter] = useState("all"), [approvalAction, setApprovalAction] = useState(null), [denyTarget, setDenyTarget] = useState(null), [denyReason, setDenyReason] = useState("");
   const load = useCallback(async () => { setLoading(true); try { const { data: { session } } = await supabase.auth.getSession(); setUser(session?.user || null); if (!session || !isAdminEmail(session.user.email)) return; const res = await fetch("/api/admin/orders", { headers: { Authorization: `Bearer ${session.access_token}` } }); const json = await res.json(); if (res.ok) { setOrders(json.orders || []); setUsers(json.users || []); setApprovals(json.approvals || []); } else setNotice(json.error || "Could not load admin data"); } catch (error) { setNotice(error.message || "Could not load admin data"); } finally { setLoading(false); } }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setTab(readAdminTabCookie()); setTabHydrated(true); }, []);
+  useEffect(() => { if (!tabHydrated) return; document.cookie = `${ADMIN_TAB_COOKIE}=${encodeURIComponent(tab)}; Max-Age=31536000; Path=/; SameSite=Lax`; }, [tab, tabHydrated]);
   useEffect(() => { if (!user || !isAdminEmail(user.email)) return; const channel = supabase.channel("admin-account-approval-queue").on("postgres_changes", { event: "*", schema: "public", table: "account_approval_requests" }, (payload) => { if (payload.eventType === "DELETE") setApprovals((current) => current.filter((item) => item.user_id !== payload.old.user_id)); else if (payload.eventType === "INSERT") setApprovals((current) => [payload.new, ...current.filter((item) => item.user_id !== payload.new.user_id)]); else setApprovals((current) => current.map((item) => item.user_id === payload.new.user_id ? payload.new : item)); }).subscribe(); return () => supabase.removeChannel(channel); }, [user]);
   const filtered = useMemo(() => orders.filter((o) => (filter === "All stages" || o.status === filter) && `${o.order_id} ${o.full_name} ${o.email}`.toLowerCase().includes(query.toLowerCase())), [orders, filter, query]);
   const approvalStats = useMemo(() => approvals.reduce((counts, item) => { const key = approvalState(item).key; counts[key] = (counts[key] || 0) + 1; counts.all += 1; return counts; }, { all: 0, pending: 0, awaiting_second: 0, approved: 0, denied: 0, revoked: 0 }), [approvals]);

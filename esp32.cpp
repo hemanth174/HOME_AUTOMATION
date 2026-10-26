@@ -1,10 +1,9 @@
 #include <WiFi.h>
-#include <WiFiMulti.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <esp_arduino_version.h>
 #include <ArduinoJson.h>
-#include <PubSubClient.h>
+#include <WebSocketsClient.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
@@ -57,14 +56,23 @@ String deviceBootId = "";
 String lastDeviceError = "";
 uint32_t deviceConfigVersion = 1;
 
-// MQTT is intentionally local-network only. The broker host must be a LAN
-// address reachable by the ESP32, never 127.0.0.1 from the board's point of
-// view. These values are injected into enrollment firmware or set manually in
-// a test sketch; never commit real broker credentials to this template.
-const char* MQTT_BROKER_HOST = "";
-const uint16_t MQTT_BROKER_PORT = 1883;
-const char* MQTT_BROKER_USERNAME = "";
-const char* MQTT_BROKER_PASSWORD = "";
+// The current device path is JSON over WSS through the custom MQTT backend.
+// The ESP32 discovers the latest Cloudflare URL from the public discovery row;
+// it never connects directly to Mosquitto and never receives broker credentials.
+const char* DISCOVERY_SUPABASE_URL = "";
+const char* DISCOVERY_SUPABASE_ANON_KEY = "";
+const char* DISCOVERY_TABLE = "app_discovery";
+const char* DEVICE_WS_PATH = "/device";
+const char* DEVICE_WS_TOKEN = "";
+// First-boot home Wi-Fi is injected during enrollment so the board can come
+// online without a local setup page. NVS remains authoritative after boot,
+// and a new enrollment token deliberately re-seeds these values.
+const char* HOME_WIFI_SSID = "";
+const char* HOME_WIFI_PASSWORD = "";
+const char* HOME_WIFI_SECURITY = "wpa2_psk";
+// Changes whenever Admin generates a new firmware file. This lets a deliberate
+// re-enrollment replace stale Wi-Fi values already stored in NVS.
+const char* HOME_WIFI_SEED = "";
 // Mesh credentials are injected during one-time enrollment. An unprovisioned
 // template must not start an open/default installation network.
 const char* MESH_SSID = "";
@@ -83,9 +91,7 @@ unsigned long lastDebounceTime[NUM_DEVICES] = {0, 0, 0, 0};
 const unsigned long DEBOUNCE_DELAY = 50;
 unsigned long lastSerialDumpTime = 0;
 const unsigned long SERIAL_DUMP_INTERVAL = 60000;
-WiFiMulti wifiMulti;
-WiFiClient mqttNetworkClient;
-PubSubClient mqttClient(mqttNetworkClient);
+WebSocketsClient deviceWebSocket;
 WebServer server(80);
 Preferences preferences;
 SemaphoreHandle_t preferencesMutex = nullptr;
@@ -94,7 +100,7 @@ SemaphoreHandle_t relayMutex = nullptr;
 TaskHandle_t cloudSyncTaskHandle = nullptr;
 TaskHandle_t cloudPollTaskHandle = nullptr;
 TaskHandle_t deviceAgentTaskHandle = nullptr;
-TaskHandle_t mqttTaskHandle = nullptr;
+TaskHandle_t deviceGatewayTaskHandle = nullptr;
 volatile bool cloudDevicesReady = false;
 // Cloud polling is a fallback for commands issued while the browser is not
 // connected to the local controller. Local REST commands remain immediate;
@@ -152,16 +158,25 @@ unsigned long pendingMeshRestartAt = 0;
 String pendingMeshRestartCommand = "";
 unsigned long lastWifiRetry     = 0;  const unsigned long WIFI_RETRY_INTERVAL      = 3000;   // Station reconnect attempts (was: every loop!)
 unsigned long lastLeaderWifiTry = 0;  const unsigned long LEADER_WIFI_RETRY_INTERVAL = 30000; // Leader home-Wi-Fi probes (non-blocking begin)
+unsigned long lastHomeWifiBegin = 0;
+unsigned long homeWifiAttemptStartedAt = 0;
+bool homeWifiAttemptInProgress = false;
+const unsigned long HOME_WIFI_ATTEMPT_TIMEOUT = 12000;
+const unsigned long HOME_WIFI_BEGIN_GUARD = 15000;
 unsigned long lastRoleEval      = 0;  const unsigned long ROLE_EVAL_INTERVAL       = 5000;   // Role decision cadence
 unsigned long lastMemberJoin    = 0;  const unsigned long MESH_JOIN_INTERVAL       = 25000;  // Member -> leader announce
 unsigned long lastHomeWifiProbe = 0;  const unsigned long HOME_WIFI_PROBE_INTERVAL = 60000;  // Member checks if home Wi-Fi returned
 unsigned long leaderUptimeMillis = 0;
-unsigned long lastMqttAttempt = 0;
-unsigned long lastMqttHeartbeat = 0;
-bool mqttWasWifiReady = false;
-// Other tasks never touch PubSubClient. They only mark a relay dirty; the
-// dedicated MQTT task owns the client and publishes the retained state.
-volatile bool mqttStateDirty[NUM_DEVICES] = {false, false, false, false};
+String deviceGatewayHost = "";
+uint16_t deviceGatewayPort = 443;
+String deviceGatewayPath = "";
+String deviceGatewayHeaders = "";
+bool deviceGatewayTls = true;
+volatile bool deviceGatewayConnected = false;
+unsigned long lastDeviceGatewayDiscovery = 0;
+const unsigned long DEVICE_GATEWAY_DISCOVERY_INTERVAL = 300000;
+const unsigned long DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL = 1000;
+const unsigned long DEVICE_GATEWAY_CONNECTED_RECONNECT_INTERVAL = 5000;
 void setRelay(int index, bool on, bool saveToNVS = true);
 bool updateDeviceInDB(int index, bool state);
 bool updateFeedbackInDB(int index, bool feedback);
@@ -200,14 +215,14 @@ void saveOfflineQueue();
 void cloudSyncTask(void* parameter);
 void cloudPollTask(void* parameter);
 void configureHttp(HTTPClient& http, uint16_t connectTimeout = 2500, uint16_t requestTimeout = 4000);
-bool isMqttConfigured();
-String mqttStatusTopic();
-String mqttDeviceTopic(int relayIndex, const char* suffix);
-void mqttPublishStatus(bool online);
-void mqttPublishRelayState(int relayIndex, const char* source, const String& commandId = "");
-void handleMqttMessage(char* topic, byte* payload, unsigned int length);
-void maintainMqtt();
-void mqttTask(void* parameter);
+bool isDeviceGatewayConfigured();
+bool fetchDeviceGatewayUrl(String& backendUrl);
+bool parseDeviceGatewayUrl(const String& backendUrl, String& host, uint16_t& port, bool& tls);
+void handleDeviceGatewayEvent(WStype_t type, uint8_t* payload, size_t length);
+void handleDeviceGatewayMessage(uint8_t* payload, size_t length);
+bool applyDeviceGatewayCommand(const String& topic, const String& payload);
+void startDeviceGateway(const String& backendUrl);
+void deviceGatewayTask(void* parameter);
 bool isCloudConfigured();
 bool isDirectCloudConfigured();
 bool isDeviceAgentConfigured();
@@ -217,6 +232,8 @@ void applyDeviceSnapshot(JsonDocument& response, bool applyRelayStates);
 void applyAlarmSnapshot(JsonDocument& response);
 void applyScheduleSnapshot(JsonDocument& response);
 void loadHomeWifiCredentials();
+void beginHomeWifiConnection(const char* reason = nullptr);
+void diagnoseHomeWifiFailure();
 void applyPendingWifiConfiguration();
 bool sendDeviceHeartbeat();
 bool pollRemoteCommands();
@@ -244,8 +261,10 @@ bool cloudStateSupersedesQueue(const PendingUpdate& queued, const String& cloudC
 bool getPendingRelayUpdate(int index, PendingUpdate& result);
 bool discardPendingRelayUpdate(const PendingUpdate& expected);
 bool isHomeWifiConnected() {
-  return homeWifiSSID.length() > 0 && WiFi.status() == WL_CONNECTED &&
-         WiFi.SSID() == homeWifiSSID;
+  const bool connected = homeWifiSSID.length() > 0 && WiFi.status() == WL_CONNECTED &&
+                         WiFi.SSID() == homeWifiSSID;
+  if (connected) homeWifiAttemptInProgress = false;
+  return connected;
 }
 void maintainMdns() {
   const bool shouldAdvertise = isHomeWifiConnected();
@@ -296,6 +315,7 @@ void configureTaskWatchdogForTls() {
   }
 }
 void loadHomeWifiCredentials() {
+  bool loadedFromEnrollmentFirmware = false;
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   homeWifiSSID = preferences.getString("wifi_ssid", "");
   homeWifiPassword = preferences.getString("wifi_pass", "");
@@ -304,6 +324,22 @@ void loadHomeWifiCredentials() {
   homeWifiSecurity = preferences.getString("wifi_sec", "wpa2_psk");
   if (homeWifiSecurity != "open" && homeWifiSecurity != "wpa2_psk") {
     homeWifiSecurity = "wpa2_psk";
+  }
+  const String bakedWifiSSID = String(HOME_WIFI_SSID);
+  const String bakedWifiSecurity = String(HOME_WIFI_SECURITY) == "open" ? "open" : "wpa2_psk";
+  const String wifiSeedToken = preferences.getString("wifi_seed", "");
+  const bool seedBakedWifi = strlen(HOME_WIFI_SSID) > 0 &&
+    (homeWifiSSID.length() == 0 || homeWifiSSID != bakedWifiSSID ||
+     (strlen(HOME_WIFI_SEED) > 0 && wifiSeedToken != String(HOME_WIFI_SEED)));
+  if (seedBakedWifi) {
+    loadedFromEnrollmentFirmware = true;
+    homeWifiSSID = bakedWifiSSID;
+    homeWifiPassword = bakedWifiSecurity == "open" ? "" : String(HOME_WIFI_PASSWORD);
+    homeWifiSecurity = bakedWifiSecurity;
+    preferences.putString("wifi_ssid", homeWifiSSID);
+    preferences.putString("wifi_pass", homeWifiPassword);
+    preferences.putString("wifi_sec", homeWifiSecurity);
+    if (strlen(HOME_WIFI_SEED) > 0) preferences.putString("wifi_seed", String(HOME_WIFI_SEED));
   }
   const uint32_t savedConfigVersion = preferences.getUInt("cfg_ver", 1);
   deviceConfigVersion = savedConfigVersion < 1 ? 1 : savedConfigVersion;
@@ -349,12 +385,60 @@ void loadHomeWifiCredentials() {
     }
   }
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  if (loadedFromEnrollmentFirmware) {
+    Serial.printf("-> Home Wi-Fi source: generated enrollment firmware (%s)\n", homeWifiSSID.c_str());
+  } else if (homeWifiSSID.length()) {
+    Serial.printf("-> Home Wi-Fi source: saved NVS credentials (%s)\n", homeWifiSSID.c_str());
+  } else {
+    Serial.println("-> Home Wi-Fi source: none");
+  }
   Serial.printf("-> Home Wi-Fi credentials: %s\n",
                 homeWifiSSID.length() ? "saved" : "not configured");
   Serial.printf("-> Device management API: %s\n",
                 deviceAuthToken.length() ? "configured" : "not provisioned (remote management disabled)");
   Serial.printf("-> Supabase cloud sync: %s\n",
                 isCloudConfigured() ? "configured" : "disabled (legacy cloud key not configured)");
+}
+void beginHomeWifiConnection(const char* reason) {
+  if (!homeWifiSSID.length() || isHomeWifiConnected()) return;
+  const unsigned long now = millis();
+  if (homeWifiAttemptInProgress) {
+    if (now - homeWifiAttemptStartedAt < HOME_WIFI_ATTEMPT_TIMEOUT) return;
+    Serial.println("-> Previous home Wi-Fi attempt timed out; releasing the station before retrying.");
+    WiFi.disconnect(false, false);
+    homeWifiAttemptInProgress = false;
+  }
+  if (lastHomeWifiBegin != 0 && now - lastHomeWifiBegin < HOME_WIFI_BEGIN_GUARD) return;
+  if (reason && strlen(reason)) {
+    Serial.printf("-> Home Wi-Fi attempt (%s): %s\n", reason, homeWifiSSID.c_str());
+  }
+  if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str());
+  else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+  lastHomeWifiBegin = now;
+  homeWifiAttemptStartedAt = now;
+  homeWifiAttemptInProgress = true;
+}
+void diagnoseHomeWifiFailure() {
+  if (!homeWifiSSID.length()) return;
+  homeWifiAttemptInProgress = false;
+  const wl_status_t status = WiFi.status();
+  Serial.printf("!! Home Wi-Fi did not connect. status=%d, configured SSID=%s\n",
+                (int)status, homeWifiSSID.c_str());
+  Serial.println("-> Scanning the ESP32-visible 2.4 GHz networks for the configured SSID...");
+  const int count = WiFi.scanNetworks(false, true);
+  bool found = false;
+  for (int i = 0; i < count; ++i) {
+    if (WiFi.SSID(i) != homeWifiSSID) continue;
+    found = true;
+    Serial.printf("-> Configured SSID is visible: RSSI=%d dBm, channel=%d, auth=%d\n",
+                  WiFi.RSSI(i), WiFi.channel(i), (int)WiFi.encryptionType(i));
+  }
+  WiFi.scanDelete();
+  if (!found) {
+    Serial.println("!! Configured SSID is not visible to the ESP32. Use the router's 2.4 GHz SSID; ESP32 does not support a 5 GHz-only network.");
+  } else {
+    Serial.println("!! Configured SSID is visible. Check the WPA2 password/security mode and ensure the router permits 2.4 GHz clients.");
+  }
 }
 String getSelfIp() {
   if (localRole == ROLE_LEADER) return WiFi.softAPIP().toString();
@@ -371,173 +455,242 @@ unsigned long nodeIdHashDelay() {
   while (*p) { h ^= (unsigned char)(*p++); h *= 16777619u; }
   return 1000 + (h % 3000); // 1s - 4s
 }
-bool isMqttConfigured() {
-  return MQTT_BROKER_HOST && MQTT_BROKER_HOST[0] != '\0' &&
+bool isDeviceGatewayConfigured() {
+  return strlen(DISCOVERY_SUPABASE_URL) > 0 &&
+         strlen(DISCOVERY_SUPABASE_ANON_KEY) > 0 &&
+         strlen(DEVICE_WS_TOKEN) > 0 &&
          String(BOARD_IDENTIFIER) != "esp32-unconfigured";
 }
-String mqttStatusTopic() {
-  return String("home/") + BOARD_IDENTIFIER + "/status";
-}
-String mqttDeviceTopic(int relayIndex, const char* suffix) {
-  return String("home/") + BOARD_IDENTIFIER + "/device/" + String(relayIndex) + "/" + suffix;
-}
-void mqttPublishStatus(bool online) {
-  if (!mqttClient.connected()) return;
-  DynamicJsonDocument doc(512);
-  doc["v"] = 1;
-  doc["board_identifier"] = BOARD_IDENTIFIER;
-  doc["online"] = online;
-  doc["ip"] = WiFi.localIP().toString();
-  doc["uptime_ms"] = millis();
-  doc["free_heap"] = ESP.getFreeHeap();
-  String payload;
-  serializeJson(doc, payload);
-  mqttClient.publish(mqttStatusTopic().c_str(), payload.c_str(), true);
-}
-void mqttPublishRelayState(int relayIndex, const char* source, const String& commandId) {
-  if (!mqttClient.connected() || relayIndex < 0 || relayIndex >= NUM_DEVICES) return;
-  bool relayState;
-  bool feedbackState;
-  if (relayMutex) xSemaphoreTake(relayMutex, portMAX_DELAY);
-  relayState = isRelayOn[relayIndex];
-  feedbackState = confirmedInputState[relayIndex] == LOW;
-  if (relayMutex) xSemaphoreGive(relayMutex);
+bool parseDeviceGatewayUrl(const String& backendUrl, String& host, uint16_t& port, bool& tls) {
+  String url = backendUrl;
+  url.trim();
+  tls = false;
+  if (url.startsWith("https://")) {
+    tls = true;
+    url.remove(0, 8);
+    port = 443;
+  } else if (url.startsWith("http://")) {
+    url.remove(0, 7);
+    port = 80;
+  } else {
+    return false;
+  }
 
-  DynamicJsonDocument doc(768);
-  doc["v"] = 1;
-  doc["board_identifier"] = BOARD_IDENTIFIER;
-  doc["relay_index"] = relayIndex;
-  doc["state"] = relayState;
-  doc["feedback_on"] = feedbackState;
-  doc["source"] = source;
-  if (commandId.length()) doc["command_id"] = commandId;
-  doc["ts"] = getIsoTime();
-  String payload;
-  serializeJson(doc, payload);
-  const String topic = mqttDeviceTopic(relayIndex, "state");
-  mqttClient.publish(topic.c_str(), payload.c_str(), true);
+  const int pathStart = url.indexOf('/');
+  String authority = pathStart >= 0 ? url.substring(0, pathStart) : url;
+  authority.trim();
+  if (!authority.length()) return false;
+
+  const int colon = authority.lastIndexOf(':');
+  if (colon > 0 && authority.indexOf(']') < 0) {
+    const String portText = authority.substring(colon + 1);
+    for (size_t i = 0; i < portText.length(); ++i) {
+      if (!isDigit(portText[i])) return false;
+    }
+    const int parsedPort = portText.toInt();
+    if (parsedPort < 1 || parsedPort > 65535) return false;
+    port = (uint16_t)parsedPort;
+    authority = authority.substring(0, colon);
+  }
+  host = authority;
+  return host.length() > 0;
 }
-void handleMqttMessage(char* topic, byte* payload, unsigned int length) {
+bool fetchDeviceGatewayUrl(String& backendUrl) {
+  backendUrl = "";
+  if (!isDeviceGatewayConfigured() || WiFi.status() != WL_CONNECTED) return false;
+
+  String discoveryBase = String(DISCOVERY_SUPABASE_URL);
+  while (discoveryBase.endsWith("/")) discoveryBase.remove(discoveryBase.length() - 1);
+  String url = discoveryBase + "/rest/v1/" + String(DISCOVERY_TABLE) +
+               "?id=eq.true&select=backend_url&limit=1";
+
+  VikaTechSecureClient secureClient;
+  secureClient.useBuiltinCACertBundle();
+  secureClient.setHandshakeTimeout(8);
+  HTTPClient http;
+  if (!http.begin(secureClient, url)) return false;
+  configureHttp(http, 3500, 6500);
+  http.addHeader("apikey", DISCOVERY_SUPABASE_ANON_KEY);
+  http.addHeader("Authorization", "Bearer " + String(DISCOVERY_SUPABASE_ANON_KEY));
+  http.addHeader("Accept", "application/json");
+  const int code = http.GET();
+  String body = (code >= 200 && code < 300) ? http.getString() : "";
+  http.end();
+  secureClient.stop();
+  if (code < 200 || code >= 300 || !body.length()) return false;
+
+  DynamicJsonDocument response(1536);
+  if (deserializeJson(response, body)) return false;
+  JsonArray rows = response.as<JsonArray>();
+  if (rows.isNull() || rows.size() == 0) return false;
+  const char* discovered = rows[0]["backend_url"] | "";
+  if (!discovered || !strlen(discovered)) return false;
+  String candidate = String(discovered);
+  candidate.trim();
+  String ignoredHost;
+  uint16_t ignoredPort = 0;
+  bool ignoredTls = false;
+  if (!parseDeviceGatewayUrl(candidate, ignoredHost, ignoredPort, ignoredTls)) return false;
+  backendUrl = candidate;
+  return true;
+}
+void startDeviceGateway(const String& backendUrl) {
+  String host;
+  uint16_t port = 443;
+  bool tls = true;
+  if (!parseDeviceGatewayUrl(backendUrl, host, port, tls)) return;
+
+  if (deviceWebSocket.isConnected()) deviceWebSocket.disconnect();
+  deviceGatewayHost = host;
+  deviceGatewayPort = port;
+  deviceGatewayTls = tls;
+  deviceGatewayPath = String(DEVICE_WS_PATH) + "?board=" + String(BOARD_IDENTIFIER);
+  // WebSocketsClient appends the final CRLF itself. Do not include a trailing
+  // CRLF here or the HTTP upgrade ends before the library's User-Agent header.
+  deviceGatewayHeaders = String("X-Device-Token: ") + String(DEVICE_WS_TOKEN);
+  deviceWebSocket.setExtraHeaders(deviceGatewayHeaders.c_str());
+  // Retry quickly while the gateway is unavailable. Once connected, the
+  // normal 5-second interval is restored for any later disconnect.
+  deviceWebSocket.setReconnectInterval(DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL);
+  // The backend sends JSON heartbeat messages. The library heartbeat is not
+  // used because overlapping heartbeat/send frames can corrupt JSON gateways.
+  deviceWebSocket.disableHeartbeat();
+  if (deviceGatewayTls) {
+    // The backend uses Cloudflare's public certificate. beginSSL() is the
+    // Links2004/arduinoWebSockets API used by its known-good ESP32 example.
+    deviceWebSocket.beginSSL(deviceGatewayHost.c_str(), deviceGatewayPort,
+                             deviceGatewayPath.c_str(), "", "arduino");
+  } else {
+    deviceWebSocket.begin(deviceGatewayHost.c_str(), deviceGatewayPort,
+                          deviceGatewayPath.c_str(), "arduino");
+  }
+  Serial.printf("-> Device gateway starting: %s://%s:%u%s\n",
+                deviceGatewayTls ? "wss" : "ws", deviceGatewayHost.c_str(),
+                deviceGatewayPort, deviceGatewayPath.c_str());
+}
+bool applyDeviceGatewayCommand(const String& topic, const String& payload) {
   const String prefix = String("home/") + BOARD_IDENTIFIER + "/device/";
   const String suffix = "/set";
-  const String receivedTopic = String(topic);
-  if (!receivedTopic.startsWith(prefix) || !receivedTopic.endsWith(suffix)) return;
+  if (!topic.startsWith(prefix) || !topic.endsWith(suffix)) return false;
 
-  const String relayText = receivedTopic.substring(prefix.length(), receivedTopic.length() - suffix.length());
-  if (!relayText.length()) return;
+  const String relayText = topic.substring(prefix.length(), topic.length() - suffix.length());
+  if (!relayText.length()) return false;
   for (size_t i = 0; i < relayText.length(); i++) {
-    if (!isDigit(relayText[i])) return;
+    if (!isDigit(relayText[i])) return false;
   }
   const int relayIndex = relayText.toInt();
   if (relayIndex < 0 || relayIndex >= NUM_DEVICES) {
-    Serial.printf("!! MQTT command rejected: invalid relay index %d\n", relayIndex);
-    return;
+    Serial.printf("!! WSS command rejected: invalid relay index %d\n", relayIndex);
+    return false;
   }
 
   DynamicJsonDocument doc(768);
-  DeserializationError error = deserializeJson(doc, payload, length);
+  DeserializationError error = deserializeJson(doc, payload);
   if (error || !doc["state"].is<bool>()) {
-    Serial.println("!! MQTT command rejected: invalid JSON/state payload");
-    return;
+    Serial.println("!! WSS command rejected: invalid JSON/state payload");
+    return false;
   }
   const bool targetState = doc["state"].as<bool>();
   const String commandId = doc["command_id"].as<String>();
-  Serial.printf("<< MQTT command | relay=%d | state=%s | id=%s\n",
+  Serial.printf("<< WSS command | relay=%d | state=%s | id=%s\n",
                 relayIndex, targetState ? "ON" : "OFF", commandId.c_str());
   bool currentState;
   if (relayMutex) xSemaphoreTake(relayMutex, portMAX_DELAY);
   currentState = isRelayOn[relayIndex];
   if (relayMutex) xSemaphoreGive(relayMutex);
   if (currentState == targetState) {
-    Serial.printf("-> MQTT command already applied | relay=%d\n", relayIndex);
-    return;
+    Serial.printf("-> WSS command already applied | relay=%d\n", relayIndex);
+    return true;
   }
-  // Mirror the local REST path: queue the state for the cloud worker so the
-  // relay converges even when MQTT was published outside the database trigger.
+  // Mirror the local REST path: queue the state so the cloud worker converges
+  // even when a retained MQTT command arrives after a reconnect.
   enqueueOfflineUpdate(relayIndex, targetState, false);
   setRelay(relayIndex, targetState);
-  Serial.printf("-> MQTT command applied | relay=%d | state=%s\n",
+  Serial.printf("-> WSS command applied | relay=%d | state=%s\n",
                 relayIndex, targetState ? "ON" : "OFF");
+  return true;
 }
-void maintainMqtt() {
-  if (!isMqttConfigured()) return;
-  if (!isHomeWifiConnected()) {
-    if (mqttClient.connected()) {
-      mqttClient.disconnect();
-      Serial.println("-> MQTT disconnected while Home Wi-Fi is unavailable.");
-    }
-    mqttWasWifiReady = false;
+void handleDeviceGatewayMessage(uint8_t* payload, size_t length) {
+  DynamicJsonDocument message(4096);
+  if (deserializeJson(message, payload, length)) {
+    Serial.println("!! WSS message rejected: invalid JSON");
     return;
   }
-
-  if (!mqttWasWifiReady) {
-    mqttWasWifiReady = true;
-    lastMqttAttempt = 0;
-  }
-  if (!mqttClient.connected()) {
-    if (millis() - lastMqttAttempt < 5000) return;
-    lastMqttAttempt = millis();
-    const String clientId = String("vikatech-") + BOARD_IDENTIFIER + "-" + String((uint32_t)(ESP.getEfuseMac() & 0xffffffffULL), HEX);
-    const String statusTopic = mqttStatusTopic();
-    Serial.printf("-> MQTT connecting to %s:%u...\n", MQTT_BROKER_HOST, MQTT_BROKER_PORT);
-    bool connected = false;
-    if (MQTT_BROKER_USERNAME && MQTT_BROKER_USERNAME[0] != '\0') {
-      connected = mqttClient.connect(
-        clientId.c_str(),
-        MQTT_BROKER_USERNAME,
-        MQTT_BROKER_PASSWORD,
-        statusTopic.c_str(),
-        0,
-        true,
-        "{\"online\":false}"
-      );
-    } else {
-      connected = mqttClient.connect(
-        clientId.c_str(),
-        statusTopic.c_str(),
-        0,
-        true,
-        "{\"online\":false}"
-      );
-    }
-    if (!connected) {
-      Serial.printf("!! MQTT connection failed, rc=%d\n", mqttClient.state());
-      return;
-    }
-
-    const String commandFilter = String("home/") + BOARD_IDENTIFIER + "/device/+/set";
-    if (!mqttClient.subscribe(commandFilter.c_str(), 1)) {
-      Serial.println("!! MQTT subscription failed.");
-      mqttClient.disconnect();
-      return;
-    }
-    Serial.printf("-> MQTT connected. Client ID: %s\n", clientId.c_str());
-    Serial.printf("-> MQTT subscribed: %s\n", commandFilter.c_str());
-    mqttPublishStatus(true);
-    for (int i = 0; i < NUM_DEVICES; i++) {
-      mqttStateDirty[i] = false;
-      mqttPublishRelayState(i, "connect");
-    }
-    lastMqttHeartbeat = millis();
+  const String type = message["type"].as<String>();
+  if (type == "heartbeat") {
+    String pong = "{\"type\":\"pong\"}";
+    if (!deviceWebSocket.sendTXT(pong)) Serial.println("!! WSS pong send failed");
     return;
   }
-
-  mqttClient.loop();
-  for (int i = 0; i < NUM_DEVICES; i++) {
-    if (!mqttStateDirty[i]) continue;
-    mqttStateDirty[i] = false;
-    mqttPublishRelayState(i, "firmware");
-  }
-  if (millis() - lastMqttHeartbeat >= HEARTBEAT_INTERVAL) {
-    lastMqttHeartbeat = millis();
-    mqttPublishStatus(true);
+  if (type != "mqtt") return;
+  const String topic = message["topic"].as<String>();
+  const String commandPayload = message["payload"].as<String>();
+  applyDeviceGatewayCommand(topic, commandPayload);
+}
+void handleDeviceGatewayEvent(WStype_t type, uint8_t* payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED:
+      deviceGatewayConnected = true;
+      deviceWebSocket.setReconnectInterval(DEVICE_GATEWAY_CONNECTED_RECONNECT_INTERVAL);
+      Serial.printf("-> WSS device gateway connected: %s\n", deviceWebSocket.getUrl().c_str());
+      break;
+    case WStype_DISCONNECTED:
+      deviceGatewayConnected = false;
+      deviceWebSocket.setReconnectInterval(DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL);
+      // A Quick Tunnel hostname may change when the tunnel restarts. Refresh
+      // discovery immediately instead of retrying the stale hostname for 5m.
+      lastDeviceGatewayDiscovery = millis() - DEVICE_GATEWAY_DISCOVERY_INTERVAL;
+      Serial.println("-> WSS device gateway disconnected; reconnecting.");
+      break;
+    case WStype_TEXT:
+      handleDeviceGatewayMessage(payload, length);
+      break;
+    case WStype_ERROR:
+      deviceGatewayConnected = false;
+      deviceWebSocket.setReconnectInterval(DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL);
+      lastDeviceGatewayDiscovery = millis() - DEVICE_GATEWAY_DISCOVERY_INTERVAL;
+      Serial.println("!! WSS device gateway error.");
+      break;
+    default:
+      break;
   }
 }
-void mqttTask(void* parameter) {
+void deviceGatewayTask(void* parameter) {
   (void)parameter;
+  bool ntpRequested = false;
   for (;;) {
-    maintainMqtt();
-    vTaskDelay(pdMS_TO_TICKS(200));
+    if (!isDeviceGatewayConfigured() || !isHomeWifiConnected()) {
+      if (deviceGatewayConnected) deviceWebSocket.disconnect();
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+    if (time(nullptr) < 100000) {
+      if (!ntpRequested) {
+        configTime(0, 0, "pool.ntp.org", "time.google.com");
+        ntpRequested = true;
+      }
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+
+    const bool discoveryDue = deviceGatewayHost.length() == 0 ||
+      millis() - lastDeviceGatewayDiscovery >= DEVICE_GATEWAY_DISCOVERY_INTERVAL;
+    if (discoveryDue) {
+      lastDeviceGatewayDiscovery = millis();
+      String discoveredUrl;
+      if (fetchDeviceGatewayUrl(discoveredUrl)) {
+        String discoveredHost;
+        uint16_t discoveredPort = 443;
+        bool discoveredTls = true;
+        parseDeviceGatewayUrl(discoveredUrl, discoveredHost, discoveredPort, discoveredTls);
+        if (discoveredHost != deviceGatewayHost || discoveredPort != deviceGatewayPort ||
+            discoveredTls != deviceGatewayTls || !deviceGatewayPath.length()) {
+          startDeviceGateway(discoveredUrl);
+        }
+      }
+    }
+    if (deviceGatewayHost.length()) deviceWebSocket.loop();
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 void setRelay(int index, bool on, bool saveToNVS) {
@@ -555,9 +708,6 @@ void setRelay(int index, bool on, bool saveToNVS) {
   }
   Serial.printf(">> RELAY [%d] -> %s\n", index, on ? "ON" : "OFF");
   if (relayMutex) xSemaphoreGive(relayMutex);
-  // PubSubClient is not thread-safe. Mark the state dirty and let the MQTT
-  // task publish it; setRelay may be called from any cloud or local task.
-  if (stateChanged) mqttStateDirty[index] = true;
 }
 String getIsoTime() {
   time_t now; time(&now); struct tm timeinfo; gmtime_r(&now, &timeinfo);
@@ -908,8 +1058,8 @@ void setupWebServer() {
   });
   server.on("/", HTTP_GET, []() {
     handleCORS();
-    server.sendHeader("Location", "/setup", true);
-    server.send(302, "text/plain", "Redirecting to /setup");
+    server.send(200, "application/json",
+      "{\"service\":\"VikaTech ESP32\",\"status\":\"ok\",\"setup\":\"managed from the admin panel\"}");
   });
   server.on("/api/status", HTTP_GET, []() {
     handleCORS();
@@ -1103,85 +1253,6 @@ void setupWebServer() {
     serializeJson(arr, res);
     server.send(200, "application/json", res);
   });
-  server.on("/setup", HTTP_GET, []() {
-    handleCORS();
-    const char* setupPage = R"rawliteral(
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VikaTech Device Setup</title>
-<style>
-:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#090d12;color:#eef4f8}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:18px;background:radial-gradient(circle at top,#143529 0,#090d12 56%)}
-main{width:min(100%,520px);border:1px solid #293843;border-radius:24px;padding:24px;background:#111920;box-shadow:0 24px 70px #0008}
-.brand{color:#45d483;font-size:11px;font-weight:900;letter-spacing:.2em;text-transform:uppercase}
-h1{font-size:26px;line-height:1.15;margin:10px 0}p{color:#aebcc6;font-size:13px;line-height:1.6}
-label{display:block;margin-top:16px;font-size:12px;font-weight:800}input,select{width:100%;min-height:48px;margin-top:7px;border-radius:12px;border:1px solid #34434e;background:#0a1016;color:#f8fafc;padding:0 13px;font:inherit;font-size:14px;outline:none}
-input:focus,select:focus{border-color:#43d483}.passwordRow{display:flex;gap:8px}.passwordRow input{flex:1;min-width:0}.passwordRow button{margin-top:7px;border-radius:12px;border:1px solid #34434e;background:#17242c;color:#fff;padding:0 12px}
-button.submit{width:100%;min-height:50px;margin-top:22px;border:0;border-radius:13px;background:#38cd79;color:#06130b;font-size:13px;font-weight:900}
-.message{margin-top:16px;padding:12px;border:1px solid #34434e;border-radius:12px;font-size:12px;line-height:1.6;overflow-wrap:anywhere}.good{border-color:#238754;color:#9ff2bd}.bad{border-color:#ac4747;color:#ffb6b6}.muted{font-size:11px}
-</style></head><body><main><div class="brand">VikaTech · Device Commissioning</div><h1>Connect this ESP32 to home Wi-Fi</h1>
-<p>This setup page is served by the device locally. The SSID is required. Select Open Network only when the router has no password.</p>
-<form id="wifiForm">
-<label for="ssid">Wi-Fi name (SSID) *</label><input id="ssid" name="ssid" maxlength="32" required autocomplete="off" placeholder="Enter the router or hotspot name">
-<label for="security">Wi-Fi security *</label><select id="security" name="security"><option value="wpa2_psk">WPA2-PSK · Password protected</option><option value="open">None · Open network</option></select>
-<div id="passwordWrap"><label for="password">Wi-Fi password *</label><div class="passwordRow"><input id="password" name="password" type="password" minlength="8" maxlength="63" autocomplete="new-password" placeholder="8–63 characters"><button type="button" id="showPassword">Show</button></div></div>
-<button class="submit" id="submit" type="submit">Save and connect</button></form>
-<div id="message" class="message" role="status">Connect your phone to the VikaTech ESP32 setup network, then open <b>http://192.168.4.1/setup</b>.</div>
-<p class="muted">Your router password is sent only to this local ESP32 setup endpoint. After the device connects, future changes can be managed securely from the VikaTech Admin Panel.</p>
-<script>
-const form=document.getElementById('wifiForm'),security=document.getElementById('security'),password=document.getElementById('password'),wrap=document.getElementById('passwordWrap'),message=document.getElementById('message'),submit=document.getElementById('submit');
-function updateSecurity(){const open=security.value==='open';wrap.hidden=open;password.required=!open;if(open)password.value=''}
-security.addEventListener('change',updateSecurity);updateSecurity();
-document.getElementById('showPassword').addEventListener('click',()=>{password.type=password.type==='password'?'text':'password';document.getElementById('showPassword').textContent=password.type==='password'?'Show':'Hide'});
-async function checkConnection(){try{const r=await fetch('/api/status',{cache:'no-store'});const d=await r.json();if(d.stationConnected){message.className='message good';message.textContent='Connected to home Wi-Fi. You can now return to the Admin Panel and refresh the hardware list.';submit.disabled=false;submit.textContent='Save and connect';return true}}catch(e){}return false}
-form.addEventListener('submit',async(event)=>{event.preventDefault();message.className='message';message.textContent='Saving settings on the ESP32 and starting Wi-Fi connection…';submit.disabled=true;submit.textContent='Connecting…';
-try{const response=await fetch('/api/wifi/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:document.getElementById('ssid').value,security:security.value,password:security.value==='open'?'':password.value})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not save Wi-Fi configuration');message.textContent='Settings saved. Checking the actual Wi-Fi connection…';let n=0;const timer=setInterval(async()=>{n++;if(await checkConnection()){clearInterval(timer);return}if(n>=20){clearInterval(timer);message.className='message bad';message.textContent='The ESP32 has not confirmed a home Wi-Fi connection yet. Keep this page open and check the SSID/password, then retry. Previously saved settings remain available for recovery.';submit.disabled=false;submit.textContent='Retry connection'}},1500)}catch(error){message.className='message bad';message.textContent=error.message||'Setup failed';submit.disabled=false;submit.textContent='Retry connection'}});
-</script></main></body></html>
-)rawliteral";
-    server.send(200, "text/html; charset=utf-8", setupPage);
-  });
-  server.on("/api/wifi/config", HTTP_POST, []() {
-    handleCORS();
-    if (!server.hasArg("plain")) {
-      server.send(400, "application/json", "{\"success\":false,\"error\":\"Missing request body\"}");
-      return;
-    }
-    DynamicJsonDocument req(512);
-    DeserializationError err = deserializeJson(req, server.arg("plain"));
-    if (err || !req["ssid"].is<const char*>()) {
-      server.send(400, "application/json", "{\"success\":false,\"error\":\"Invalid Wi-Fi configuration\"}");
-      return;
-    }
-    String newSSID = req["ssid"].as<String>();
-    String newPassword = req["password"] | "";
-    String newSecurity = req["security"] | "";
-    newSSID.trim();
-    bool printableSsid = newSSID.length() >= 1 && newSSID.length() <= 32;
-    for (size_t i = 0; i < newSSID.length(); ++i) {
-      if (newSSID[i] < 0x20 || newSSID[i] > 0x7e) printableSsid = false;
-    }
-    bool printablePassword = newPassword.length() >= 8 && newPassword.length() <= 63;
-    for (size_t i = 0; i < newPassword.length(); ++i) {
-      if (newPassword[i] < 0x20 || newPassword[i] > 0x7e) printablePassword = false;
-    }
-    if (!printableSsid ||
-        (newSecurity != "open" && newSecurity != "wpa2_psk") ||
-        (newSecurity == "wpa2_psk" && !printablePassword) ||
-        (newSecurity == "open" && newPassword.length() != 0)) {
-      server.send(400, "application/json",
-        "{\"success\":false,\"error\":\"SSID, security mode, or password is invalid\"}");
-      return;
-    }
-    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
-    homeWifiSSID = newSSID;
-    homeWifiPassword = newPassword;
-    homeWifiSecurity = newSecurity;
-    preferences.putString("wifi_ssid", homeWifiSSID);
-    preferences.putString("wifi_pass", homeWifiPassword);
-    preferences.putString("wifi_sec", homeWifiSecurity);
-    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-    wifiConfigPending = true;
-    server.send(200, "application/json",
-      "{\"success\":true,\"message\":\"Wi-Fi saved. Connecting in background; local control remains available.\"}");
-  });
   server.begin();
   Serial.println("-> Local IP REST API enabled on Port 80 (no web dashboard).");
 }
@@ -1321,7 +1392,7 @@ void becomeLeader() {
   Serial.print("-> SoftAP active. IP: ");
   Serial.println(WiFi.softAPIP());
   if (homeWifiSSID.length() > 0) {
-    if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str()); else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+    beginHomeWifiConnection("leader AP");
     lastLeaderWifiTry = millis();
     Serial.println("-> Attempting home Wi-Fi in background; local AP remains enabled.");
   }
@@ -1633,25 +1704,14 @@ void setup() {
   WiFi.setAutoReconnect(true);     // let the stack handle clean drops silently
   WiFi.mode(WIFI_STA);
   WiFi.setTxPower(WIFI_POWER_15dBm);
-  mqttClient.setCallback(handleMqttMessage);
-  mqttClient.setBufferSize(768);
-  mqttClient.setKeepAlive(30);
-  mqttClient.setSocketTimeout(5);
-  if (isMqttConfigured()) {
-    mqttClient.setServer(MQTT_BROKER_HOST, MQTT_BROKER_PORT);
-    Serial.printf("-> MQTT enabled for broker %s:%u.\n", MQTT_BROKER_HOST, MQTT_BROKER_PORT);
-  } else {
-    Serial.println("-> MQTT not configured; set MQTT_BROKER_HOST in enrollment firmware.");
-  }
+  deviceWebSocket.onEvent(handleDeviceGatewayEvent);
   if (homeWifiSSID.length() > 0) {
     Serial.print("-> Connecting to Home Wi-Fi: ");
     Serial.println(homeWifiSSID);
-    if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str());
-    else wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+    beginHomeWifiConnection("boot");
 
     unsigned long wifiStart = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 8000) {
-      if (homeWifiSecurity != "open") wifiMulti.run();
       delay(250);
     }
     if (WiFi.status() == WL_CONNECTED) {
@@ -1659,6 +1719,7 @@ void setup() {
       Serial.println(WiFi.localIP());
     } else {
       Serial.println("-> Home Wi-Fi unavailable; local AP will start.");
+      diagnoseHomeWifiFailure();
     }
   } else {
     Serial.println("-> No Home Wi-Fi credentials configured; skipping STA scans.");
@@ -1718,21 +1779,23 @@ void setup() {
     Serial.println("-> Device agent not provisioned; remote config/restart unavailable until enrollment firmware is flashed.");
   }
 
-  if (isMqttConfigured()) {
-    BaseType_t mqttTaskCreated = xTaskCreatePinnedToCore(
-      mqttTask,
-      "mqtt",
-      8192,
+  if (isDeviceGatewayConfigured()) {
+    BaseType_t gatewayTaskCreated = xTaskCreatePinnedToCore(
+      deviceGatewayTask,
+      "device_gateway",
+      12288,
       nullptr,
       1,
-      &mqttTaskHandle,
+      &deviceGatewayTaskHandle,
       0
     );
-    if (mqttTaskCreated != pdPASS) {
-      Serial.println("ERROR: MQTT task failed to start; relay MQTT control is disabled.");
+    if (gatewayTaskCreated != pdPASS) {
+      Serial.println("ERROR: WSS device gateway task failed to start; remote relay control is disabled.");
     } else {
-      Serial.println("-> MQTT task started (local broker control).");
+      Serial.println("-> WSS device gateway task started; MQTT credentials are not used on the ESP32.");
     }
+  } else {
+    Serial.println("-> WSS device gateway not provisioned; discovery/token settings are missing.");
   }
   Serial.println("===========================================\n");
 }
@@ -1780,7 +1843,6 @@ void loop() {
           http.end();
          }
          enqueueOfflineUpdate(i, isSwitchOn, true);
-         mqttStateDirty[i] = true;
        }
     }
     lastInputRead[i] = currentRead;
@@ -1792,12 +1854,12 @@ void loop() {
           millis() - lastLeaderWifiTry >= LEADER_WIFI_RETRY_INTERVAL) {
         lastLeaderWifiTry = millis();
         Serial.println("-> Retrying home Wi-Fi while preserving local AP...");
-        if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str()); else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+        beginHomeWifiConnection("leader retry");
       }
     } else if (localRole == ROLE_IDLE && homeWifiSSID.length() > 0 &&
                millis() - lastWifiRetry >= WIFI_RETRY_INTERVAL) {
       lastWifiRetry = millis();
-      wifiMulti.run();
+      beginHomeWifiConnection("retry");
     }
   }
   if (millis() - lastSerialDumpTime >= SERIAL_DUMP_INTERVAL) {
@@ -2278,8 +2340,6 @@ bool applyRemoteWifiConfiguration(const String& ssid, const String& security, co
     preferences.remove("p_sec");
     preferences.remove("p_ver");
     if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-    wifiMulti.APlistClean();
-    wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
     wifiConfigPending = false;
     lastDeviceError = "";
     Serial.println("-> New Wi-Fi connection verified; configuration committed.");
@@ -2302,8 +2362,6 @@ bool applyRemoteWifiConfiguration(const String& ssid, const String& security, co
   preferences.remove("p_sec");
   preferences.remove("p_ver");
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-  wifiMulti.APlistClean();
-  if (homeWifiSSID.length()) wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
   lastDeviceError = "New Wi-Fi connection failed; previous configuration retained";
   return false;
 }
@@ -2477,6 +2535,20 @@ bool deviceAgentPost(const String& payload, DynamicJsonDocument& response) {
   if (WiFi.status() != WL_CONNECTED || strlen(DEVICE_AGENT_URL) == 0 ||
       deviceAuthToken.length() < 32 || String(BOARD_IDENTIFIER) == "esp32-unconfigured") return false;
 
+  // CA validation rejects certificates while the ESP32 clock is still near
+  // the Unix epoch. The device-agent task starts NTP independently, but the
+  // cloud worker can reach this function first; wait for a valid clock rather
+  // than producing a misleading HTTP -1/TLS failure.
+  static unsigned long lastNtpWaitLog = 0;
+  if (time(nullptr) < 100000) {
+    if (millis() - lastNtpWaitLog >= 30000) {
+      lastNtpWaitLog = millis();
+      Serial.println("-> Device-agent HTTPS waiting for NTP time before certificate verification.");
+      configTime(0, 0, "pool.ntp.org", "time.google.com");
+    }
+    return false;
+  }
+
   // Never use HTTPClient.begin(url) without a CA: Arduino-ESP32's convenience
   // overload can create an insecure TLS client. Require the core's trusted CA bundle.
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -2493,11 +2565,17 @@ bool deviceAgentPost(const String& payload, DynamicJsonDocument& response) {
   http.addHeader("Authorization", "Bearer " + deviceAuthToken);
   int code = http.POST(payload);
   String body = (code >= 200 && code < 300) ? http.getString() : "";
+  char transportError[160] = {0};
+  const int transportErrorCode = code < 0
+    ? secureClient.lastError(transportError, sizeof(transportError))
+    : 0;
   http.end();
   secureClient.stop();
 
   if (code < 200 || code >= 300) {
-    Serial.printf("Device-agent HTTPS request failed (HTTP %d).\n", code);
+    Serial.printf("Device-agent HTTPS request failed (HTTP %d, transport %d: %s).\n",
+                  code, transportErrorCode,
+                  transportError[0] ? transportError : "no transport detail");
     return false;
   }
   DeserializationError err = deserializeJson(response, body);
@@ -2639,7 +2717,7 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
       oldSSID.length() && WiFi.status() == WL_CONNECTED && WiFi.SSID() == oldSSID;
     const String failureMessage = oldNetworkRestored
       ? "New Wi-Fi failed; previous network restored."
-      : "New Wi-Fi failed and the previous network could not be restored; local setup recovery may be required.";
+      : "New Wi-Fi failed and the previous network could not be restored; manual re-enrollment may be required.";
 
     // reportDeviceConfigStatus stores the failure in NVS before attempting the
     // HTTPS report. If rollback also failed, this marker survives until the

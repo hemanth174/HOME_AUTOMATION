@@ -16,7 +16,7 @@ export async function GET(request) {
 
   const { data: boards, error } = await auth.admin
     .from('boards')
-    .select('id, name, board_identifier, user_id, created_at, last_seen, hardware_model, devices(id, name, relay_index, is_on), device_runtime_configs(board_id, config_version, applied_config_version, device_token_hash, first_seen_at, config_update_status, config_expires_at, last_seen_at, last_direct_seen_at, last_mesh_seen_at, last_error, wifi_ssid, wifi_security, applied_wifi_ssid, applied_wifi_security, last_boot_id, last_boot_at, last_uptime_ms, last_ip, revoked_at, config_requested_at, config_applied_at)')
+    .select('id, name, board_identifier, user_id, created_at, last_seen, hardware_model, devices(id, name, relay_index, is_on), device_runtime_configs(board_id, config_version, applied_config_version, device_token_hash, first_seen_at, config_update_status, config_expires_at, last_seen_at, last_direct_seen_at, last_mesh_seen_at, last_error, wifi_ssid, wifi_security, encrypted_wifi_password, applied_wifi_ssid, applied_wifi_security, last_boot_id, last_boot_at, last_uptime_ms, last_ip, revoked_at, config_requested_at, config_applied_at)')
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -78,6 +78,7 @@ export async function GET(request) {
         wifiSecurity: config.applied_wifi_security || config.wifi_security,
         desiredWifiSsid: config.wifi_ssid,
         desiredWifiSecurity: config.wifi_security,
+        hasWifiPassword: Boolean(config.encrypted_wifi_password),
         desiredVersion: config.config_version,
         lastBootId: config.last_boot_id,
         lastBootAt: config.last_boot_at,
@@ -94,7 +95,7 @@ export async function GET(request) {
         configAppliedAt: config.config_applied_at,
       } : {
         version: null, appliedVersion: null, status: 'unprovisioned',
-        wifiSsid: '', wifiSecurity: 'wpa2_psk', desiredWifiSsid: '', desiredWifiSecurity: 'wpa2_psk', desiredVersion: null,
+        wifiSsid: '', wifiSecurity: 'wpa2_psk', desiredWifiSsid: '', desiredWifiSecurity: 'wpa2_psk', hasWifiPassword: false, desiredVersion: null,
         lastBootId: null, lastBootAt: null, lastUptimeMs: null, lastIp: null, credentialRevokedAt: null, configExpiresAt: null, lastSeenAt,
         directOnline: false, meshOnline: false, online: isOnline(lastSeenAt),
         lastError: null, configRequestedAt: null, configAppliedAt: null,

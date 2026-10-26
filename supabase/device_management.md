@@ -29,12 +29,11 @@ Set the same PROVISIONING_ENCRYPTION_KEY in the Vercel project server environmen
 
 ## First-time board enrollment
 
-1. In VikaTech, open Admin Panel → Hardware.
+1. In VikaTech, open Admin Panel -> Hardware.
 2. Find the customer's board and select Prepare one-time enrollment firmware.
-3. Save and flash the generated firmware once over USB. The generated image contains that board's identifier and a unique revocable device-agent token. It does not contain the Supabase service-role key.
-4. Connect a phone or laptop to the setup Wi-Fi details shown on the board card.
-5. Open http://192.168.4.1/setup while connected to that ESP32's setup network. Enter the customer's Wi-Fi SSID and choose Open Network or WPA2-PSK. The SSID is required; WPA2-PSK requires an 8–63 character password.
-6. Wait for the local setup page to confirm the board connected. Refresh Hardware in the Admin Panel until the board shows Online. The board's first authenticated device-agent check-in marks it as enrolled.
+3. In the Wi-Fi drawer, enter the customer's Wi-Fi SSID, choose Open Network or WPA2-PSK, and enter the password when required. These credentials are built into the downloaded firmware.
+4. Flash the generated firmware once over USB. The generated image contains that board's identifier, a unique revocable device-agent token, and the first-boot Wi-Fi credentials. It does not contain the Supabase service-role key.
+5. Refresh Hardware in the Admin Panel until the board shows Online. The board's first authenticated device-agent check-in marks it as enrolled. There is no local setup page.
 
 After that one-time flash and enrollment, supported Wi-Fi configuration updates and software restarts can be sent remotely. If the board is offline, the admin action remains unavailable or pending; a server cannot reach a device that has no network path.
 

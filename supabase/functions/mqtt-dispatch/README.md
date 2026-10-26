@@ -60,10 +60,9 @@ supabase functions deploy mqtt-dispatch --no-verify-jwt
    `POST /api/device/command`, then publishes
    `home/<boardIdentifier>/device/<relayIndex>/set`.
 
-The ESP32 firmware (`esp32.cpp` and `test_1_board-vikatech.ino`) now contains a
-PubSubClient MQTT client. It subscribes to
-`home/<boardIdentifier>/device/+/set`, publishes retained state on `.../state`,
-and publishes a retained `{"online":true}` heartbeat/LWT on `.../status`.
-Successful bridge publication still only proves cloud-to-broker dispatch; the
-direct ESP32 path must be confirmed on hardware via the serial log lines
-`-> MQTT connected`, `-> MQTT subscribed`, and `<< MQTT command`.
+The ESP32 firmware (`esp32.cpp`) connects to the backend's JSON-over-WSS device
+gateway instead of connecting directly to Mosquitto. The gateway subscribes to
+`home/<boardIdentifier>/device/+/set` and forwards matching JSON commands over
+the board's WebSocket. The ESP32 must be confirmed on hardware via the serial
+log lines `-> WSS device gateway connected`, `<< WSS command`, and
+`-> WSS command applied`.
