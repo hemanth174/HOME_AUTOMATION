@@ -79,7 +79,12 @@ export async function POST(request, { params }) {
     requested_by: auth.user.id,
     expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
   }).select('id, status, requested_at, expires_at').single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    if (error.code === '23505') {
+      return NextResponse.json({ error: 'A restart request was created by another admin moments ago. Check the latest command status before retrying.' }, { status: 409 });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
   await auth.admin.from('approval_audit_log').insert({
     user_id: board.user_id,
