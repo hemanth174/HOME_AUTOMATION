@@ -56,6 +56,11 @@ alter table public.device_runtime_configs
   add column if not exists encrypted_mesh_password text,
   add column if not exists first_seen_at timestamptz;
 
+-- Backfill enrollment timestamps for devices which already checked in before this migration.
+update public.device_runtime_configs
+set first_seen_at = coalesce(first_seen_at, last_seen_at)
+where last_seen_at is not null and first_seen_at is null;
+
 create index if not exists device_runtime_configs_user_id_idx
   on public.device_runtime_configs(user_id);
 create index if not exists device_runtime_configs_last_seen_idx
