@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import {
   ArrowLeft, Check, CheckCircle2, CircleAlert, CircleDashed, Cloud,
-  Cpu, LoaderCircle, LockKeyhole, RadioTower, RefreshCw, ShieldCheck,
+  Cpu, LoaderCircle, RadioTower, RefreshCw, ShieldCheck,
   Wifi, WifiOff, XCircle,
 } from "lucide-react";
 
