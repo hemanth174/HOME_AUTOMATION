@@ -555,10 +555,10 @@ try{const response=await fetch('/api/wifi/config',{method:'POST',headers:{'Conte
         "{\"success\":false,\"error\":\"SSID, security mode, or password is invalid\"}");
       return;
     }
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     homeWifiSSID = newSSID;
     homeWifiPassword = newPassword;
     homeWifiSecurity = newSecurity;
-    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     preferences.putString("wifi_ssid", homeWifiSSID);
     preferences.putString("wifi_pass", homeWifiPassword);
     preferences.putString("wifi_sec", homeWifiSecurity);
@@ -1972,10 +1972,10 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
     return false;
   }
 
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   homeWifiSSID = newSSID;
   homeWifiPassword = newPassword;
   homeWifiSecurity = newSecurity;
-  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   preferences.putString("wifi_ssid", homeWifiSSID);
   preferences.putString("wifi_pass", homeWifiPassword);
   preferences.putString("wifi_sec", homeWifiSecurity);
@@ -2089,19 +2089,22 @@ bool requestDeviceAgentSnapshot(DynamicJsonDocument& response) {
   // ESP32. The device-agent encrypts the passphrase before storing it. Never
   // include this field again after the server confirms registration.
   bool wifiRegistered = false;
+  int appliedVersion = 0;
+  String currentWifiSSID;
+  String currentWifiPassword;
+  String currentWifiSecurity;
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   wifiRegistered = preferences.getBool("wifi_registered", false);
-  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-  if (!wifiRegistered && homeWifiSSID.length()) {
-    requestDoc["current_wifi_ssid"] = homeWifiSSID;
-    requestDoc["current_wifi_security"] = homeWifiSecurity;
-    if (homeWifiSecurity == "wpa2_psk") requestDoc["current_wifi_password"] = homeWifiPassword;
-  }
-
-  int appliedVersion = 0;
-  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   appliedVersion = preferences.getInt("cfg_ver", 0);
+  currentWifiSSID = homeWifiSSID;
+  currentWifiPassword = homeWifiPassword;
+  currentWifiSecurity = homeWifiSecurity;
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  if (!wifiRegistered && currentWifiSSID.length()) {
+    requestDoc["current_wifi_ssid"] = currentWifiSSID;
+    requestDoc["current_wifi_security"] = currentWifiSecurity;
+    if (currentWifiSecurity == "wpa2_psk") requestDoc["current_wifi_password"] = currentWifiPassword;
+  }
   requestDoc["applied_config_version"] = appliedVersion;
   requestDoc["mesh_gateway"] = localRole == ROLE_LEADER;
 
