@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { speak } from "@/utils/voice";
 import { buildISO, defaultParts, formatAlarmDisplay, validateParts } from "./alarmUtils";
@@ -9,6 +9,8 @@ export default function useAlarmManager() {
   const [user, setUser] = useState(null), [alarms, setAlarms] = useState([]), [devices, setDevices] = useState([]);
   const [showModal, setShowModal] = useState(false), [showDeleteAllModal, setShowDeleteAllModal] = useState(false), [loading, setLoading] = useState(true), [toast, setToast] = useState("");
   const [selectedDevice, setSelectedDevice] = useState(""), [pickerParts, setPickerParts] = useState(defaultParts()), [alarmAction, setAlarmAction] = useState(true), [dateError, setDateError] = useState(""), [confirmed, setConfirmed] = useState(false), [editingAlarm, setEditingAlarm] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const savingRef = useRef(false);
 
   useEffect(() => { (async () => { const { data: { user: currentUser } } = await supabase.auth.getUser(); if (!currentUser) { window.location.href = "/login"; return; } setUser(currentUser); })(); }, []);
   useEffect(() => {
@@ -32,20 +34,32 @@ export default function useAlarmManager() {
   const handleConfirmDateTime = () => { const p = pickerParts, result = validateParts(p.year, p.month, p.day, p.hour, p.minute, p.ampm); if (!result.valid) { setDateError(result.error); return; } setDateError(""); setConfirmed(true); };
   const deleteAlarm = async (id) => { const { error } = await supabase.from("alarms").delete().eq("id", id).eq("user_id", user.id); if (error) { setToast(`Could not delete alarm: ${error.message}`); return false; } setAlarms((items) => items.filter((a) => a.id !== id)); setToast("Alarm deleted"); return true; };
   const addAlarm = async (e) => {
-    e.preventDefault(); if (!selectedDevice) return setToast("Please select a device"); if (!confirmed) return setToast('Please press "Confirm" to confirm the date & time');
+    e.preventDefault(); if (savingRef.current || isSaving || (editingAlarm && !alarmDraftChanged)) return; if (!selectedDevice) return setToast("Please select a device"); if (!confirmed) return setToast('Please press "Confirm" to confirm the date & time');
     const p = pickerParts, validation = validateParts(p.year, p.month, p.day, p.hour, p.minute, p.ampm); if (!validation.valid) { setDateError(validation.error); return; }
     const iso = buildISO(p.year, p.month, p.day, p.hour, p.minute, p.ampm); if (!iso) return setToast("Invalid date/time"); const triggerISO = new Date(iso).toISOString();
-    const conflicts = alarms.filter((a) => a.device_id === selectedDevice && !a.fired && (!editingAlarm || a.id !== editingAlarm.id) && new Date(a.trigger_at).getTime() === new Date(triggerISO).getTime());
-    if (conflicts.find((a) => a.action === alarmAction)) return setToast("Duplicate: this device already has an identical alarm at this time.");
-    const contra = conflicts.find((a) => a.action !== alarmAction); if (contra) return setToast(`Conflict: an alarm already sets this device to Turn ${contra.action ? "ON" : "OFF"} at this time. Delete it first.`);
-    const { data: schedules, error: scheduleError } = await supabase.from("schedules").select("id, time, days, action").eq("user_id", user.id).eq("device_id", selectedDevice).eq("enabled", true); if (scheduleError) return setToast("Could not check schedule conflicts. Please retry.");
-    const date = new Date(triggerISO); for (const schedule of schedules || []) { const [h, m] = schedule.time.split(":").map(Number); if (Array.isArray(schedule.days) && schedule.days.includes(date.getDay()) && h === date.getHours() && m === date.getMinutes()) return setToast(schedule.action === alarmAction ? "Duplicate: a schedule already matches this device/time/action." : `Cross-conflict: a schedule already sets this device to Turn ${schedule.action ? "ON" : "OFF"} at this day/time.`); }
-    const query = editingAlarm ? supabase.from("alarms").update({ device_id: selectedDevice, action: alarmAction, trigger_at: triggerISO, fired: false }).eq("id", editingAlarm.id) : supabase.from("alarms").insert({ user_id: user.id, device_id: selectedDevice, action: alarmAction, trigger_at: triggerISO, fired: false });
-    const { error } = await query; if (error) return setToast(error.message); setToast(editingAlarm ? "Alarm updated" : "Alarm created"); closeModal();
+    savingRef.current = true;
+    setIsSaving(true);
+    try {
+      const conflicts = alarms.filter((a) => a.device_id === selectedDevice && !a.fired && (!editingAlarm || a.id !== editingAlarm.id) && new Date(a.trigger_at).getTime() === new Date(triggerISO).getTime());
+      if (conflicts.find((a) => a.action === alarmAction)) return setToast("Duplicate: this device already has an identical alarm at this time.");
+      const contra = conflicts.find((a) => a.action !== alarmAction); if (contra) return setToast(`Conflict: an alarm already sets this device to Turn ${contra.action ? "ON" : "OFF"} at this time. Delete it first.`);
+      const { data: schedules, error: scheduleError } = await supabase.from("schedules").select("id, time, days, action").eq("user_id", user.id).eq("device_id", selectedDevice).eq("enabled", true); if (scheduleError) return setToast("Could not check schedule conflicts. Please retry.");
+      const date = new Date(triggerISO); for (const schedule of schedules || []) { const [h, m] = schedule.time.split(":").map(Number); if (Array.isArray(schedule.days) && schedule.days.includes(date.getDay()) && h === date.getHours() && m === date.getMinutes()) return setToast(schedule.action === alarmAction ? "Duplicate: a schedule already matches this device/time/action." : `Cross-conflict: a schedule already sets this device to Turn ${schedule.action ? "ON" : "OFF"} at this day/time.`); }
+      const query = editingAlarm ? supabase.from("alarms").update({ device_id: selectedDevice, action: alarmAction, trigger_at: triggerISO, fired: false }).eq("id", editingAlarm.id) : supabase.from("alarms").insert({ user_id: user.id, device_id: selectedDevice, action: alarmAction, trigger_at: triggerISO, fired: false });
+      const { error } = await query; if (error) return setToast(error.message); setToast(editingAlarm ? "Alarm updated" : "Alarm created"); closeModal();
+    } finally {
+      savingRef.current = false;
+      setIsSaving(false);
+    }
   };
   const deleteAllAlarms = async () => { const { error } = await supabase.from("alarms").delete().eq("user_id", user.id); if (error) return setToast(`Could not delete alarms: ${error.message}`); setAlarms([]); setShowDeleteAllModal(false); setToast("All alarms deleted"); };
   const handleAlarmCardCommand = async (alarm, transcript) => { const text = transcript.toLowerCase().trim(), name = alarm.devices?.name || "device"; if (["delete", "remove", "cancel", "trash"].some((word) => text.includes(word))) { if (await deleteAlarm(alarm.id)) speak(`Alarm for ${name} deleted`); } else { setToast(`Command not recognized: "${transcript}". Try "delete" or "cancel".`); speak("Command not recognized"); } };
   const pISO = useMemo(() => buildISO(pickerParts.year, pickerParts.month, pickerParts.day, pickerParts.hour, pickerParts.minute, pickerParts.ampm), [pickerParts]);
   const previewDisplay = useMemo(() => { try { return pISO ? formatAlarmDisplay(pISO) : null; } catch { return null; } }, [pISO]);
-  return { user, alarms, devices, loading, toast, setToast, showModal, setShowModal, showDeleteAllModal, setShowDeleteAllModal, selectedDevice, setSelectedDevice, pickerParts, alarmAction, setAlarmAction, dateError, confirmed, editingAlarm, closeModal, openEditModal, handlePartsChange, handleConfirmDateTime, addAlarm, deleteAlarm, deleteAllAlarms, handleAlarmCardCommand, previewDisplay };
+  const alarmDraftChanged = !editingAlarm ||
+    selectedDevice !== editingAlarm.device_id ||
+    alarmAction !== editingAlarm.action ||
+    !pISO ||
+    new Date(pISO).getTime() !== new Date(editingAlarm.trigger_at).getTime();
+  return { user, alarms, devices, loading, toast, setToast, showModal, setShowModal, showDeleteAllModal, setShowDeleteAllModal, selectedDevice, setSelectedDevice, pickerParts, alarmAction, setAlarmAction, dateError, confirmed, editingAlarm, isSaving, alarmDraftChanged, closeModal, openEditModal, handlePartsChange, handleConfirmDateTime, addAlarm, deleteAlarm, deleteAllAlarms, handleAlarmCardCommand, previewDisplay };
 }

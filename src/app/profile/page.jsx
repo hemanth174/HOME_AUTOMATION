@@ -12,6 +12,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
+  const [savedProfile, setSavedProfile] = useState({ name: '', email: '' });
   const [updating, setUpdating] = useState(false);
   const [toast, setToast] = useState('');
   const [promptUpdate, setPromptUpdate] = useState(false);
@@ -40,8 +41,11 @@ export default function ProfilePage() {
       }
       setUser(user);
       const metadata = user.user_metadata || {};
-      setNewName(metadata.full_name || metadata.name || '');
-      setNewEmail(user.email || '');
+      const profileName = metadata.full_name || metadata.name || '';
+      const profileEmail = user.email || '';
+      setNewName(profileName);
+      setNewEmail(profileEmail);
+      setSavedProfile({ name: profileName, email: profileEmail.toLowerCase() });
 
       const elapsed = Date.now() - startTime;
       const remaining = Math.max(0, 500 - elapsed);
@@ -70,6 +74,13 @@ export default function ProfilePage() {
 
   const isGoogle = user?.app_metadata?.provider === 'google' || user?.identities?.some(id => id.provider === 'google');
   const isEmailVerified = user && (user.user_metadata?.email_verified === true || isGoogle);
+  const profileHasChanges = Boolean(
+    user && (
+      newName.trim() !== savedProfile.name ||
+      newEmail.trim().toLowerCase() !== savedProfile.email ||
+      (!isGoogle && newPassword.length > 0)
+    )
+  );
 
   const sendOtpEmail = async (emailAddress, code, isVerification) => {
     const subject = isVerification 
@@ -109,6 +120,7 @@ export default function ProfilePage() {
   };
 
   const handleTriggerEmailVerification = async () => {
+    if (mfaLoading || updating) return;
     setMfaLoading(true);
     setVerifyingCurrentEmail(true);
     setShowMfaModal(true);
@@ -129,9 +141,9 @@ export default function ProfilePage() {
 
   const handleSubmitProfileChanges = async (e) => {
     e.preventDefault();
-    const currentName = user.user_metadata?.full_name || user.user_metadata?.name || '';
-    const hasNameChanged = newName.trim() !== currentName;
-    const hasEmailChanged = newEmail.trim().toLowerCase() !== user.email.toLowerCase();
+    if (mfaLoading || updating || !profileHasChanges) return;
+    const hasNameChanged = newName.trim() !== savedProfile.name;
+    const hasEmailChanged = newEmail.trim().toLowerCase() !== savedProfile.email;
     const hasPasswordChanged = !isGoogle && newPassword.length > 0;
 
     if (!newName.trim()) {
@@ -219,6 +231,10 @@ export default function ProfilePage() {
         if (error) throw error;
 
         setUser(data.user);
+        setSavedProfile({
+          name: newName.trim(),
+          email: newEmail.trim().toLowerCase(),
+        });
         setToast(hasEmailChanged ? 'Profile updated! Please check both your old and new emails to confirm the address change.' : 'Profile updated successfully!');
         setPromptUpdate(false);
         setNewPassword('');
@@ -316,6 +332,7 @@ export default function ProfilePage() {
                       <button
                         type="button"
                         onClick={handleTriggerEmailVerification}
+                        disabled={mfaLoading || updating}
                         className="text-[10px] font-extrabold text-accent hover:underline cursor-pointer"
                       >
                         Verify
@@ -368,9 +385,9 @@ export default function ProfilePage() {
               )}
               
               <button
-                className="w-full py-3 rounded-xl text-xs font-extrabold bg-accent text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow min-h-[44px]"
                 type="submit"
-                disabled={updating}
+                disabled={updating || mfaLoading || !profileHasChanges}
+                className="w-full py-3 rounded-xl text-xs font-extrabold bg-accent text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow min-h-[44px] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {updating ? 'Saving changes...' : 'Save Profile Changes'}
               </button>

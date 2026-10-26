@@ -42,6 +42,24 @@ function SettingSwitch({ label, description, checked, onChange, disabled = false
   );
 }
 
+const DEFAULT_ENERGY_SETTINGS = {
+  tariff: "8.00",
+  voltage: "230",
+  currency: "INR",
+  timezone: "Asia/Kolkata",
+};
+
+const DEFAULT_NOTIFICATION_SETTINGS = {
+  notificationsEnabled: true,
+  notifyAlarm: true,
+  notifySchedule: true,
+  scheduleLeadMinutes: "5",
+  notifyEnergy: true,
+  energyThreshold: "3",
+  notifyGhost: true,
+  ghostSummaryHour: "20",
+};
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
@@ -58,7 +76,7 @@ export default function SettingsPage() {
   const [notifyGhost, setNotifyGhost] = useState(true);
   const [ghostSummaryHour, setGhostSummaryHour] = useState("20");
   const [dashboardViewSwitcherEnabled, setDashboardViewSwitcherEnabled] = useState(false);
-  const [activeTab, setActiveTab] = useState("energy");
+  const [activeTab, setActiveTab] = useState("dashboard");
   const [notificationPermission, setNotificationPermission] = useState("default");
   const [agentAvailable, setAgentAvailable] = useState(false);
   const [agentVisible, setAgentVisible] = useState(true);
@@ -66,6 +84,11 @@ export default function SettingsPage() {
   const [savingNotifications, setSavingNotifications] = useState(false);
   const [savingDashboard, setSavingDashboard] = useState(false);
   const [toast, setToast] = useState("");
+  const [savedEnergySettings, setSavedEnergySettings] = useState(DEFAULT_ENERGY_SETTINGS);
+  const [savedNotificationSettings, setSavedNotificationSettings] = useState(DEFAULT_NOTIFICATION_SETTINGS);
+  const [savedDashboardSettings, setSavedDashboardSettings] = useState({
+    dashboardViewSwitcherEnabled: false,
+  });
 
   useEffect(() => {
     let active = true;
@@ -88,23 +111,44 @@ export default function SettingsPage() {
       const detectedTimeZone =
         Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata";
 
+      const nextEnergySettings = {
+        tariff: String(data?.tariff_per_kwh ?? DEFAULT_ENERGY_SETTINGS.tariff),
+        voltage: String(data?.voltage ?? DEFAULT_ENERGY_SETTINGS.voltage),
+        currency: data?.currency || DEFAULT_ENERGY_SETTINGS.currency,
+        timezone: data?.timezone || detectedTimeZone,
+      };
+      const nextNotificationSettings = {
+        notificationsEnabled: data?.notifications_enabled !== false,
+        notifyAlarm: data?.notify_alarm !== false,
+        notifySchedule: data?.notify_schedule !== false,
+        scheduleLeadMinutes: String(data?.schedule_lead_minutes ?? DEFAULT_NOTIFICATION_SETTINGS.scheduleLeadMinutes),
+        notifyEnergy: data?.notify_energy !== false,
+        energyThreshold: String(data?.energy_device_kwh_threshold ?? DEFAULT_NOTIFICATION_SETTINGS.energyThreshold),
+        notifyGhost: data?.notify_ghost !== false,
+        ghostSummaryHour: String(data?.ghost_summary_hour ?? DEFAULT_NOTIFICATION_SETTINGS.ghostSummaryHour),
+      };
+      const nextDashboardSettings = {
+        dashboardViewSwitcherEnabled: data?.dashboard_view_switcher_enabled === true,
+      };
+
       setUser(currentUser);
-      setTimezone(data?.timezone || detectedTimeZone);
+      setTariff(nextEnergySettings.tariff);
+      setVoltage(nextEnergySettings.voltage);
+      setCurrency(nextEnergySettings.currency);
+      setTimezone(nextEnergySettings.timezone);
+      setNotificationsEnabled(nextNotificationSettings.notificationsEnabled);
+      setNotifyAlarm(nextNotificationSettings.notifyAlarm);
+      setNotifySchedule(nextNotificationSettings.notifySchedule);
+      setScheduleLeadMinutes(nextNotificationSettings.scheduleLeadMinutes);
+      setNotifyEnergy(nextNotificationSettings.notifyEnergy);
+      setEnergyThreshold(nextNotificationSettings.energyThreshold);
+      setNotifyGhost(nextNotificationSettings.notifyGhost);
+      setGhostSummaryHour(nextNotificationSettings.ghostSummaryHour);
+      setDashboardViewSwitcherEnabled(nextDashboardSettings.dashboardViewSwitcherEnabled);
+      setSavedEnergySettings(nextEnergySettings);
+      setSavedNotificationSettings(nextNotificationSettings);
+      setSavedDashboardSettings(nextDashboardSettings);
       setNotificationPermission(getNotificationPermission());
-      if (data) {
-        setTariff(String(data.tariff_per_kwh));
-        setVoltage(String(data.voltage));
-        setCurrency(data.currency || "INR");
-        setNotificationsEnabled(data.notifications_enabled !== false);
-        setNotifyAlarm(data.notify_alarm !== false);
-        setNotifySchedule(data.notify_schedule !== false);
-        setScheduleLeadMinutes(String(data.schedule_lead_minutes ?? 5));
-        setNotifyEnergy(data.notify_energy !== false);
-        setEnergyThreshold(String(data.energy_device_kwh_threshold ?? 3));
-        setNotifyGhost(data.notify_ghost !== false);
-        setGhostSummaryHour(String(data.ghost_summary_hour ?? 20));
-        setDashboardViewSwitcherEnabled(data.dashboard_view_switcher_enabled === true);
-      }
        setAgentAvailable(isVoiceAgentAvailable());
        setAgentVisible(isVoiceAgentVisible());
       setLoading(false);
@@ -115,8 +159,28 @@ export default function SettingsPage() {
     };
   }, []);
 
+  const energySettingsChanged =
+    tariff !== savedEnergySettings.tariff ||
+    voltage !== savedEnergySettings.voltage ||
+    currency !== savedEnergySettings.currency ||
+    timezone !== savedEnergySettings.timezone;
+
+  const notificationSettingsChanged =
+    notificationsEnabled !== savedNotificationSettings.notificationsEnabled ||
+    notifyAlarm !== savedNotificationSettings.notifyAlarm ||
+    notifySchedule !== savedNotificationSettings.notifySchedule ||
+    scheduleLeadMinutes !== savedNotificationSettings.scheduleLeadMinutes ||
+    notifyEnergy !== savedNotificationSettings.notifyEnergy ||
+    energyThreshold !== savedNotificationSettings.energyThreshold ||
+    notifyGhost !== savedNotificationSettings.notifyGhost ||
+    ghostSummaryHour !== savedNotificationSettings.ghostSummaryHour;
+
+  const dashboardSettingsChanged =
+    dashboardViewSwitcherEnabled !== savedDashboardSettings.dashboardViewSwitcherEnabled;
+
   const saveEnergySettings = async (event) => {
     event.preventDefault();
+    if (!user || saving || !energySettingsChanged) return;
     const parsedTariff = parseFloat(tariff);
     const parsedVoltage = parseInt(voltage, 10);
     if (!Number.isFinite(parsedTariff) || parsedTariff <= 0) {
@@ -145,6 +209,9 @@ export default function SettingsPage() {
       { onConflict: "user_id" },
     );
     setSaving(false);
+    if (!error) {
+      setSavedEnergySettings({ tariff, voltage, currency, timezone });
+    }
     setToast(
       error
         ? `Failed to save settings: ${error.message}`
@@ -154,6 +221,7 @@ export default function SettingsPage() {
 
   const saveNotificationSettings = async (event) => {
     event.preventDefault();
+    if (!user || savingNotifications || !notificationSettingsChanged) return;
     const lead = parseInt(scheduleLeadMinutes, 10);
     const threshold = parseFloat(energyThreshold);
     const ghostHour = parseInt(ghostSummaryHour, 10);
@@ -192,6 +260,19 @@ export default function SettingsPage() {
       { onConflict: "user_id" },
     );
     setSavingNotifications(false);
+    if (!error) {
+      setSavedNotificationSettings({
+        notificationsEnabled,
+        notifyAlarm,
+        notifySchedule,
+        scheduleLeadMinutes,
+        notifyEnergy,
+        energyThreshold,
+        notifyGhost,
+        ghostSummaryHour,
+      });
+      setSavedEnergySettings({ tariff, voltage, currency, timezone });
+    }
     setToast(
       error
         ? `Failed to save notification settings: ${error.message}`
@@ -201,6 +282,7 @@ export default function SettingsPage() {
 
   const saveDashboardSettings = async (event) => {
     event.preventDefault();
+    if (!user || savingDashboard || !dashboardSettingsChanged) return;
     setSavingDashboard(true);
     const { error } = await supabase.from("user_settings").upsert(
       {
@@ -211,6 +293,9 @@ export default function SettingsPage() {
       { onConflict: "user_id" },
     );
     setSavingDashboard(false);
+    if (!error) {
+      setSavedDashboardSettings({ dashboardViewSwitcherEnabled });
+    }
     setToast(
       error
         ? `Failed to save dashboard settings: ${error.message}`
@@ -310,7 +395,7 @@ export default function SettingsPage() {
               />
               <button
                 type="submit"
-                disabled={savingDashboard}
+                disabled={savingDashboard || !dashboardSettingsChanged}
                 className="w-full sm:w-auto min-h-[44px] rounded-xl bg-accent px-6 py-2.5 text-xs font-extrabold text-[var(--btn-text)] hover:bg-accent-hover transition-colors disabled:opacity-50"
               >
                 {savingDashboard ? "Saving..." : "Save Dashboard Settings"}
@@ -382,8 +467,8 @@ export default function SettingsPage() {
             </label>
             <button
               type="submit"
-              disabled={saving}
-              className="w-full sm:w-auto min-h-[44px] rounded-xl bg-accent px-6 py-2.5 text-xs font-extrabold text-[var(--btn-text)] hover:bg-accent-hover transition-colors disabled:opacity-50"
+              disabled={saving || !energySettingsChanged}
+                className="w-full sm:w-auto min-h-[44px] rounded-xl bg-accent px-6 py-2.5 text-xs font-extrabold text-[var(--btn-text)] hover:bg-accent-hover transition-colors disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save Energy Settings"}
             </button>
@@ -523,7 +608,7 @@ export default function SettingsPage() {
 
             <button
               type="submit"
-              disabled={savingNotifications}
+              disabled={savingNotifications || !notificationSettingsChanged}
               className="w-full sm:w-auto min-h-[44px] rounded-xl bg-accent px-6 py-2.5 text-xs font-extrabold text-[var(--btn-text)] hover:bg-accent-hover transition-colors disabled:opacity-50"
             >
               {savingNotifications ? "Saving..." : "Save Notification Settings"}

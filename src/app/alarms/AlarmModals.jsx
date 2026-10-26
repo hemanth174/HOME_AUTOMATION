@@ -2,7 +2,7 @@ import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { DevicePicker, DateTimePicker12h } from "./AlarmPickers";
 
 export function AlarmModal({ manager }) {
-  const { showModal, closeModal, editingAlarm, selectedDevice, devices, addAlarm, pickerParts, handlePartsChange, dateError, confirmed, previewDisplay, handleConfirmDateTime, alarmAction, setAlarmAction } = manager;
+  const { showModal, closeModal, editingAlarm, selectedDevice, devices, addAlarm, pickerParts, handlePartsChange, dateError, confirmed, previewDisplay, handleConfirmDateTime, alarmAction, setAlarmAction, isSaving, alarmDraftChanged } = manager;
   if (!showModal) return null;
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md max-md:items-end max-md:p-0" onClick={closeModal}>
@@ -51,7 +51,7 @@ export function AlarmModal({ manager }) {
 
           <div className="mt-4 flex justify-end gap-2.5">
             <button type="button" data-sheet-close="1" onClick={closeModal} className="inline-flex min-h-[36px] items-center rounded-lg border border-border bg-card px-4 text-xs font-semibold text-text">Cancel</button>
-            <button type="submit" disabled={Boolean(dateError) || !confirmed} className="inline-flex min-h-[36px] items-center rounded-lg bg-accent px-5 text-xs font-extrabold text-[var(--btn-text)] disabled:opacity-40">{editingAlarm ? "Save Changes" : "Create Alarm"}</button>
+            <button type="submit" disabled={Boolean(dateError) || !confirmed || isSaving || (Boolean(editingAlarm) && !alarmDraftChanged)} className="inline-flex min-h-[36px] items-center rounded-lg bg-accent px-5 text-xs font-extrabold text-[var(--btn-text)] disabled:cursor-not-allowed disabled:opacity-40">{isSaving ? "Saving..." : editingAlarm ? "Save Changes" : "Create Alarm"}</button>
           </div>
         </form>
       </div>

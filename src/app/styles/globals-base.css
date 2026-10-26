@@ -298,6 +298,115 @@ body,
     transition: left 200ms ease-out;
 }
 
+/* Desktop status controls expand into labeled hover targets. The sharp
+   trailing edge keeps the control visually connected to its popover. */
+@media (min-width: 768px) {
+    .desktop-shell-header > div:last-child > .relative > button[title="Wi-Fi Router Network Status"],
+    .desktop-shell-header > div:last-child > .relative > button[title="Hardware Board Range"],
+    .desktop-shell-header > div:last-child > .relative > button[title="ESP32 Local Mesh Server (192.168.4.1)"],
+    .desktop-shell-header > div:last-child > .relative > button[title="Notifications"] {
+        width: 34px;
+        height: 34px;
+        flex: 0 0 34px;
+        justify-content: flex-start;
+        overflow: hidden;
+        padding-left: 8px;
+        padding-right: 8px;
+        white-space: nowrap;
+        transition: width 180ms ease-out, border-radius 180ms ease-out, background-color 180ms ease-out, border-color 180ms ease-out;
+    }
+
+    .desktop-shell-header > div:last-child > .relative:hover > button[title="Wi-Fi Router Network Status"],
+    .desktop-shell-header > div:last-child > .relative:hover > button[title="Hardware Board Range"],
+    .desktop-shell-header > div:last-child > .relative:hover > button[title="ESP32 Local Mesh Server (192.168.4.1)"],
+    .desktop-shell-header > div:last-child > .relative:hover > button[title="Notifications"] {
+        width: 116px;
+        flex-basis: 116px;
+        padding-right: 12px;
+    }
+
+    .desktop-shell-header > div:last-child > .relative > button[title="Wi-Fi Router Network Status"]::after,
+    .desktop-shell-header > div:last-child > .relative > button[title="Hardware Board Range"]::after,
+    .desktop-shell-header > div:last-child > .relative > button[title="ESP32 Local Mesh Server (192.168.4.1)"]::after,
+    .desktop-shell-header > div:last-child > .relative > button[title="Notifications"]::after {
+        display: inline-block;
+        max-width: 0;
+        margin-left: 0;
+        overflow: hidden;
+        color: var(--text);
+        content: "";
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: -0.01em;
+        opacity: 0;
+        transition: max-width 180ms ease-out, margin-left 180ms ease-out, opacity 120ms ease-out;
+    }
+
+    .desktop-shell-header > div:last-child > .relative:hover > button[title="Wi-Fi Router Network Status"]::after,
+    .desktop-shell-header > div:last-child > .relative:hover > button[title="Hardware Board Range"]::after,
+    .desktop-shell-header > div:last-child > .relative:hover > button[title="ESP32 Local Mesh Server (192.168.4.1)"]::after,
+    .desktop-shell-header > div:last-child > .relative:hover > button[title="Notifications"]::after {
+        max-width: 84px;
+        margin-left: 7px;
+        opacity: 1;
+    }
+
+    .desktop-shell-header > div:last-child > .relative > button[title="Wi-Fi Router Network Status"]::after {
+        content: "Network";
+    }
+
+    .desktop-shell-header > div:last-child > .relative > button[title="Hardware Board Range"]::after {
+        content: "Boards";
+    }
+
+    .desktop-shell-header > div:last-child > .relative > button[title="ESP32 Local Mesh Server (192.168.4.1)"]::after {
+        content: "Local Mesh";
+    }
+
+    .desktop-shell-header > div:last-child > .relative > button[title="Notifications"]::after {
+        content: "Notifications";
+    }
+}
+
+/* Pointed popover caret for the desktop status dropdowns and their mobile
+   counterparts. Keep the pointer on the panel, not on the trigger button. */
+.desktop-shell-header > div:last-child > .relative > div.absolute[class*="top-full"]::before,
+header.fixed.top-0 div.fixed[class*="top-[70px]"]::before {
+    content: "";
+    position: absolute;
+    top: -6px;
+    right: 16px;
+    width: 10px;
+    height: 10px;
+    background: var(--bg-card);
+    border-left: 1px solid var(--border);
+    border-top: 1px solid var(--border);
+    border-top-left-radius: 2px;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+@media (max-width: 767px) {
+    /* The mobile cards are viewport-anchored, so move the caret back over the
+       exact icon that opened each card instead of leaving it at the panel's
+       right edge. */
+    header.fixed.top-0 > div:last-child > div:nth-child(1) > div.fixed[class*="top-[70px]"]::before {
+        right: 176px;
+    }
+
+    header.fixed.top-0 > div:last-child > div:nth-child(2) > div.fixed[class*="top-[70px]"]::before {
+        right: 136px;
+    }
+
+    header.fixed.top-0 > div:last-child > div:nth-child(3) > div.fixed[class*="top-[70px]"]::before {
+        right: 96px;
+    }
+
+    header.fixed.top-0 > div:last-child > div:nth-child(4) > div.fixed[class*="top-[70px]"]::before {
+        right: 56px;
+    }
+}
+
 @media (min-width: 768px) {
     .desktop-shell-content {
         padding-left: var(--desktop-sidebar-width);

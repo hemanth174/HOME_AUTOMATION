@@ -6,10 +6,22 @@ import { supabase } from '@/lib/supabase';
 import Loader from '@/components/Loader';
 import OnboardingGuide from '@/components/OnboardingGuide';
 import Link from 'next/link';
-import { HelpCircle, TrendingUp, X, RotateCw, FileSpreadsheet, Settings } from 'lucide-react';
+import { Download, FileText, HelpCircle, LoaderCircle, TrendingUp, X, RotateCw, Settings } from 'lucide-react';
 import { getDeviceWattage, getDeviceRunHoursToday } from './helpers';
 
 const AnalyticsCharts = dynamic(() => import('./AnalyticsCharts'));
+
+const fetchImageDataUrl = async (src) => {
+  const response = await fetch(src);
+  if (!response.ok) throw new Error(`Could not load image: ${response.status}`);
+  const blob = await response.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
 
 export default function AnalyticsPage() {
   const [user, setUser] = useState(null);
@@ -24,7 +36,15 @@ export default function AnalyticsPage() {
 
   // Guide and Tour States
   const [showPowerGuide, setShowPowerGuide] = useState(false);
+  const [powerGuideY, setPowerGuideY] = useState(0);
+  const [isPowerGuideDragging, setIsPowerGuideDragging] = useState(false);
+  const powerGuideDragStartYRef = useRef(0);
+  const powerGuideDragYRef = useRef(0);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showPdfConfirm, setShowPdfConfirm] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
   // Auth check
   useEffect(() => {
@@ -39,9 +59,32 @@ export default function AnalyticsPage() {
     checkAuth();
   }, []);
 
+  useEffect(() => {
+    if (!showPdfConfirm) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape' && !pdfBusy) setShowPdfConfirm(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [showPdfConfirm, pdfBusy]);
+
+  useEffect(() => {
+    if (!showPowerGuide) return undefined;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setShowPowerGuide(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [showPowerGuide]);
+
   // Fetch devices, boards, and logs from today (memoized for recurring updates)
   const fetchData = useCallback(async (isSilent = false) => {
-    if (!user || fetchInFlightRef.current) return;
+    if (!user || fetchInFlightRef.current) return false;
     fetchInFlightRef.current = true;
     if (!isSilent) setLoading(true);
     const startOfToday = new Date();
@@ -79,19 +122,76 @@ export default function AnalyticsPage() {
           .maybeSingle()
       ]);
 
+      const queryError = [devicesRes, boardsRes, logsRes, dailyAnalyticsRes, weeklyAnalyticsRes, settingsRes]
+        .find((result) => result.error)?.error;
+      if (queryError) throw queryError;
+
       if (devicesRes.data) setDevices(devicesRes.data);
       if (boardsRes.data) setBoards(boardsRes.data);
       if (logsRes.data) setLogs(logsRes.data);
       if (dailyAnalyticsRes.data) setDailyAnalytics(dailyAnalyticsRes.data);
       if (weeklyAnalyticsRes.data) setWeeklyAnalytics(weeklyAnalyticsRes.data);
       if (settingsRes.data) setUserSettings({ tariff_per_kwh: settingsRes.data.tariff_per_kwh, voltage: settingsRes.data.voltage, currency: settingsRes.data.currency });
+      return true;
     } catch (err) {
       console.error('Failed to load analytics data', err);
+      return false;
     } finally {
       fetchInFlightRef.current = false;
       if (!isSilent) setLoading(false);
     }
   }, [user]);
+
+  const refreshAnalytics = useCallback(async () => {
+    if (!user || fetchInFlightRef.current) return;
+    setRefreshing(true);
+    const refreshed = await fetchData(true);
+    setRefreshing(false);
+    window.dispatchEvent(new CustomEvent('show-global-toast', {
+      detail: refreshed ? '✅ Analytics data refreshed.' : '⚠ Could not refresh analytics data. Please try again.',
+    }));
+  }, [fetchData, user]);
+
+  const openPowerGuide = () => {
+    setPowerGuideY(0);
+    setShowPowerGuide(true);
+  };
+
+  const closePowerGuide = () => {
+    setIsPowerGuideDragging(false);
+    powerGuideDragYRef.current = 0;
+    setPowerGuideY(0);
+    setShowPowerGuide(false);
+  };
+
+  const handlePowerGuidePointerDown = (event) => {
+    if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    powerGuideDragStartYRef.current = event.clientY;
+    powerGuideDragYRef.current = 0;
+    setIsPowerGuideDragging(true);
+  };
+
+  const handlePowerGuidePointerMove = (event) => {
+    if (!isPowerGuideDragging) return;
+    const deltaY = Math.max(0, event.clientY - powerGuideDragStartYRef.current);
+    if (event.cancelable) event.preventDefault();
+    powerGuideDragYRef.current = deltaY;
+    setPowerGuideY(deltaY);
+  };
+
+  const handlePowerGuidePointerEnd = () => {
+    if (!isPowerGuideDragging) return;
+    const shouldClose = powerGuideDragYRef.current > 96;
+    setIsPowerGuideDragging(false);
+    powerGuideDragYRef.current = 0;
+    if (shouldClose) {
+      setPowerGuideY(0);
+      setShowPowerGuide(false);
+    } else {
+      setPowerGuideY(0);
+    }
+  };
 
   // Initial load
   useEffect(() => {
@@ -110,15 +210,21 @@ export default function AnalyticsPage() {
     return () => clearInterval(timer);
   }, [user, fetchData]);
 
-  const handleExportData = async () => {
-    if (!user) return;
-    
+  const handleDownloadPdf = async () => {
+    if (!user || pdfBusy) return;
+
+    setPdfBusy(true);
+    setPdfError('');
     try {
+      const reportStart = new Date();
+      reportStart.setDate(reportStart.getDate() - 30);
       const [fullLogsRes, schedulesRes, alarmsRes] = await Promise.all([
         supabase.from('activity_logs')
           .select('created_at, device_name, action, triggered_by')
           .eq('user_id', user.id)
-          .order('created_at', { ascending: false }),
+          .gte('created_at', reportStart.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(1000),
         supabase.from('schedules')
           .select('time, days, action, enabled, devices(name)')
           .eq('user_id', user.id),
@@ -127,72 +233,150 @@ export default function AnalyticsPage() {
           .eq('user_id', user.id)
       ]);
 
-      const fullLogs = fullLogsRes.data || [];
-      const schedules = schedulesRes.data || [];
-      const alarms = alarmsRes.data || [];
+      const queryError = fullLogsRes.error || schedulesRes.error || alarmsRes.error;
+      if (queryError) throw new Error(queryError.message);
 
-      let csvContent = '';
-
-      const escape = (val) => {
-        if (val === null || val === undefined) return '';
-        let str = String(val);
-        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-          str = '"' + str.replace(/"/g, '""') + '"';
-        }
-        return str;
+      const [{ default: JsPDF }, { default: autoTable }] = await Promise.all([
+        import('jspdf'),
+        import('jspdf-autotable'),
+      ]);
+      let logoDataUrl = null;
+      try {
+        logoDataUrl = await fetchImageDataUrl('/vikatech-logo.png');
+      } catch (logoError) {
+        console.warn('Analytics PDF logo skipped:', logoError.message);
+      }
+      const pdf = new JsPDF({ unit: 'mm', format: 'a4' });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const generatedAt = new Date();
+      const reportId = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const boardById = new Map(boards.map((board) => [board.id, board.name]));
+      const number = (value, digits = 2) => Number(value || 0).toFixed(digits);
+      const date = (value) => value ? new Date(value).toLocaleString('en-IN') : 'Not recorded';
+      const days = (value) => {
+        if (!Array.isArray(value)) return value || 'Every day';
+        if (value.length === 7) return 'Every day';
+        return value.map((day) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][Number(day)] || day).join(', ');
       };
 
-      csvContent += `SMART HOME AUTOMATION - MASTER SYSTEM EXPORT\n`;
-      csvContent += `Export Date,${new Date().toLocaleString()}\n`;
-      csvContent += `User ID,${user.id}\n\n`;
-
-      csvContent += `SECTION: DAILY ANALYTICS HISTORY (LAST 30 DAYS)\n`;
-      csvContent += `Date,Energy Consumed (kWh),Estimated Cost (INR),Average Device On-Time (Hours)\n`;
-      dailyAnalytics.forEach((row) => {
-        csvContent += `${escape(row.date)},${escape(row.total_kwh)},${escape(row.total_cost)},${escape(row.avg_on_time)}\n`;
+      pdf.setProperties({
+        title: `Power Analytics Report ${reportId}`,
+        subject: 'Home energy and device overview',
+        author: 'VikaTech Home Automation',
+        keywords: `report-id:${reportId}`,
       });
-      csvContent += `\n`;
+      pdf.setFillColor(24, 24, 24);
+      pdf.rect(0, 0, pageWidth, 34, 'F');
+      let titleX = 14;
+      if (logoDataUrl) {
+        const logoProperties = pdf.getImageProperties(logoDataUrl);
+        const logoHeight = 16;
+        const logoWidth = (logoProperties.width / logoProperties.height) * logoHeight;
+        pdf.addImage(logoDataUrl, 'PNG', 14, 7, logoWidth, logoHeight);
+        titleX = 14 + logoWidth + 7;
+      }
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(20);
+      pdf.text('POWER ANALYTICS', titleX, 15);
+      pdf.setTextColor(201, 168, 76);
+      pdf.setFontSize(9);
+      pdf.text('HOME AUTOMATION OVERVIEW', titleX, 22);
+      pdf.setTextColor(210, 210, 210);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(8);
+      pdf.text(`Generated ${date(generatedAt)}`, pageWidth - 14, 15, { align: 'right' });
+      pdf.text(`${devices.length} devices / ${boards.length} boards`, pageWidth - 14, 22, { align: 'right' });
+      pdf.setFontSize(6.5);
+      pdf.setTextColor(170, 170, 170);
+      pdf.text(`Report ID ${reportId}`, pageWidth - 14, 29, { align: 'right' });
 
-      csvContent += `SECTION: CURRENT REGISTERED DEVICES\n`;
-      csvContent += `Device Name,Current Status,Last Changed Timestamp\n`;
-      devices.forEach((dev) => {
-        csvContent += `${escape(dev.name)},${dev.is_on ? 'ON' : 'OFF'},${escape(dev.last_changed)}\n`;
-      });
-      csvContent += `\n`;
+      let cursorY = 43;
+      const addSection = (title, head, body) => {
+        if (cursorY > pageHeight - 48) {
+          pdf.addPage();
+          cursorY = 18;
+        }
+        pdf.setTextColor(36, 36, 36);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(11);
+        pdf.text(title, 14, cursorY);
+        autoTable(pdf, {
+          startY: cursorY + 4,
+          head: [head],
+          body: body.length ? body : [['No data available', ...Array(Math.max(0, head.length - 1)).fill('')]],
+          theme: 'grid',
+          margin: { left: 14, right: 14 },
+          styles: { font: 'helvetica', fontSize: 7.5, cellPadding: 2.5, textColor: [45, 45, 45], overflow: 'linebreak' },
+          headStyles: { fillColor: [44, 44, 44], textColor: [255, 255, 255], fontStyle: 'bold' },
+          alternateRowStyles: { fillColor: [247, 245, 239] },
+          columnStyles: { 0: { cellWidth: 'auto' } },
+        });
+        cursorY = pdf.lastAutoTable.finalY + 10;
+      };
 
-      csvContent += `SECTION: AUTOMATION SCHEDULES\n`;
-      csvContent += `Target Device,Trigger Time,Days of Week,Switch Action,Enabled Status\n`;
-      schedules.forEach((sch) => {
-        const daysMap = sch.days || [];
-        const daysLabel = daysMap.length === 7 ? 'Everyday' : daysMap.map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join('|');
-        csvContent += `${escape(sch.devices?.name || 'Unknown')},${escape(sch.time)},${escape(daysLabel)},${sch.action ? 'ON' : 'OFF'},${sch.enabled ? 'Active' : 'Disabled'}\n`;
-      });
-      csvContent += `\n`;
+      addSection('Overview', ['Metric', 'Value', 'Details'], [
+        ['Consumption today', `${number(totalKwhToday, 4)} kWh`, 'Calculated from device runtime'],
+        ['Estimated cost today', `${userSettings.currency || 'INR'} ${number(estimatedCostToday, 4)}`, `Tariff ${number(userSettings.tariff_per_kwh, 2)} / kWh`],
+        ['Current live draw', `${currentDraw} W`, `${number(currentDraw / (userSettings.voltage || 230), 2)} A at ${userSettings.voltage || 230} V`],
+        ['Active devices', `${activeDevices.length} of ${devices.length}`, 'Current relay state'],
+      ]);
 
-      csvContent += `SECTION: FUTURE ALARMS\n`;
-      csvContent += `Target Device,Trigger Date & Time,Switch Action,Fired Status\n`;
-      alarms.forEach((al) => {
-        csvContent += `${escape(al.devices?.name || 'Unknown')},${escape(al.trigger_at)},${al.action ? 'ON' : 'OFF'},${al.fired ? 'Executed' : 'Pending'}\n`;
-      });
-      csvContent += `\n`;
+      addSection('Current Devices', ['Board / room', 'Device', 'State', 'Watts', 'Hours today', 'kWh today'], deviceStats.map((device) => [
+        boardById.get(device.board_id) || 'Unassigned',
+        device.name || 'Unnamed device',
+        device.is_on ? 'ON' : 'OFF',
+        String(device.wattage),
+        number(device.runHours),
+        number(device.kwh, 4),
+      ]));
 
-      csvContent += `SECTION: SYSTEM ACTIVITY LOGS (LAST 7 DAYS)\n`;
-      csvContent += `Timestamp,Device Name,Action Performed,Triggered By\n`;
-      fullLogs.forEach((log) => {
-        csvContent += `${escape(log.created_at)},${escape(log.device_name)},${escape(log.action)},${escape(log.triggered_by)}\n`;
-      });
+      addSection('Daily Energy History (Last 30 Days)', ['Date', 'Energy kWh', 'Cost', 'Avg on-time', 'Usage duration'], dailyAnalytics.map((row) => [
+        row.date || '-', number(row.total_kwh, 4), `${userSettings.currency || 'INR'} ${number(row.total_cost, 2)}`,
+        `${number(row.avg_on_time)} hrs`, `${number(row.usage_duration)} hrs`,
+      ]));
 
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.setAttribute('href', url);
-      link.setAttribute('download', `smart_home_data_export_${new Date().toISOString().slice(0, 10)}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      addSection('Weekly Comparison', ['Week', 'Energy kWh', 'Cost', 'Usage duration'], weeklyAnalytics.map((row) => [
+        `${row.week_start || '-'} to ${row.week_end || '-'}`,
+        number(row.total_kwh, 4), `${userSettings.currency || 'INR'} ${number(row.total_cost, 2)}`,
+        `${number(row.usage_duration)} hrs`,
+      ]));
 
+      addSection('Activity Log (Last 30 Days)', ['Timestamp', 'Device', 'Action', 'Triggered by'], (fullLogsRes.data || []).map((log) => [
+        date(log.created_at), log.device_name || 'Unknown', log.action || '-', log.triggered_by || '-',
+      ]));
+
+      addSection('Automation Schedules', ['Device', 'Time', 'Days', 'Action', 'Status'], (schedulesRes.data || []).map((schedule) => [
+        schedule.devices?.name || 'Unknown', schedule.time || '-', days(schedule.days),
+        schedule.action ? 'ON' : 'OFF', schedule.enabled ? 'Active' : 'Disabled',
+      ]));
+
+      addSection('Alarms', ['Device', 'Trigger time', 'Action', 'Status'], (alarmsRes.data || []).map((alarm) => [
+        alarm.devices?.name || 'Unknown', date(alarm.trigger_at), alarm.action ? 'ON' : 'OFF', alarm.fired ? 'Executed' : 'Pending',
+      ]));
+
+      const totalPages = pdf.internal.getNumberOfPages();
+      for (let page = 1; page <= totalPages; page += 1) {
+        pdf.setPage(page);
+        pdf.setDrawColor(220, 220, 220);
+        pdf.line(14, pageHeight - 12, pageWidth - 14, pageHeight - 12);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(7);
+        pdf.setTextColor(120, 120, 120);
+        pdf.text('VikaTech Home Automation', 14, pageHeight - 7);
+        pdf.text(`Page ${page} of ${totalPages}`, pageWidth - 14, pageHeight - 7, { align: 'right' });
+      }
+
+      pdf.save(`power-analytics-${generatedAt.toISOString().slice(0, 10)}-${reportId}.pdf`);
+      setShowPdfConfirm(false);
     } catch (error) {
-      console.error('Failed to export system data:', error);
+      console.error('Failed to generate analytics PDF:', error);
+      setPdfError(error.message || 'Could not generate the PDF. Please try again.');
+    } finally {
+      setPdfBusy(false);
     }
   };
 
@@ -333,7 +517,7 @@ export default function AnalyticsPage() {
               Dashboard
             </button>
             <button
-              onClick={() => fetchData(false)}
+              onClick={refreshAnalytics}
               className="flex-1 inline-flex min-h-[36px] items-center justify-center rounded-xl border border-border bg-card text-xs font-extrabold text-text transition-all hover:bg-card-alt cursor-pointer"
             >
               <RotateCw size={13} className="stroke-[2.5px] mr-1.5" />
@@ -375,41 +559,45 @@ export default function AnalyticsPage() {
 
   return (
     <div className="relative w-full h-full">
-      <div className="dashboard-container animate-fade-up">
+      <div className="dashboard-container min-w-0 animate-fade-up">
       {/* Header section with buttons */}
-      <div className="ml-1 mb-6 flex flex-wrap items-center justify-between gap-4 select-none">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-black uppercase tracking-wider text-text">Power Analytics</h1>
-          <span className="text-xs font-bold text-text-muted">Monitor and audit energy consumption across your home.</span>
+      <div className="mb-5 flex flex-col gap-4 select-none sm:mb-6">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex flex-col gap-1">
+            <h1 className="min-w-0 text-[clamp(1.15rem,4vw,1.35rem)] font-black uppercase tracking-[0.08em] text-text">Power Analytics</h1>
+            <span className="max-w-2xl text-[11px] font-bold leading-relaxed text-text-muted sm:text-xs">Monitor and audit energy consumption across your home.</span>
+          </div>
+          <button
+            type="button"
+            onClick={refreshAnalytics}
+            disabled={refreshing}
+            aria-label="Refresh analytics data"
+            title="Refresh analytics data"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-text-muted transition hover:border-accent/50 hover:bg-card-alt hover:text-accent disabled:cursor-wait disabled:opacity-60"
+          >
+            <RotateCw size={16} className={refreshing ? 'animate-spin text-accent' : ''} strokeWidth={2.5} />
+          </button>
         </div>
 
-        <div className="flex gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
           <button
-            onClick={handleExportData}
-            className="inline-flex min-h-[32px] items-center gap-1.5 rounded-lg bg-[#217346] hover:bg-[#1e6b3e] text-white px-3 py-1 text-xs font-extrabold transition-all duration-250 cursor-pointer shadow-[0_4px_12px_rgba(33,115,70,0.25)] whitespace-nowrap"
-            title="Export Master Data to Excel"
+            onClick={() => { setPdfError(''); setShowPdfConfirm(true); }}
+            className="col-span-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-xs font-extrabold text-[var(--btn-text)] shadow-gold-glow transition-all duration-250 hover:bg-accent-hover sm:col-span-1 sm:min-h-[36px] sm:justify-start"
+            title="Download formatted PDF report"
           >
-            <FileSpreadsheet size={14} className="stroke-[2.5px]" />
-            Export Data
-          </button>
-          <button
-            onClick={() => fetchData(false)}
-            className="inline-flex min-h-[32px] items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1 text-xs font-extrabold text-text transition-all hover:bg-card-alt cursor-pointer"
-            title="Refresh Data"
-          >
-            <RotateCw size={14} className="stroke-[2.5px]" />
-            Refresh
+            <FileText size={14} className="stroke-[2.5px]" />
+            Download PDF
           </button>
           <button
             onClick={() => setShowOnboarding(true)}
-            className="inline-flex min-h-[32px] items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1 text-xs font-extrabold text-text transition-all hover:bg-card-alt cursor-pointer"
+            className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-extrabold text-text transition-all hover:bg-card-alt sm:min-h-[36px]"
           >
             <HelpCircle size={14} className="stroke-[2.5px]" />
             User Guide
           </button>
           <button
-            onClick={() => setShowPowerGuide(true)}
-            className="inline-flex min-h-[32px] items-center gap-1.5 rounded-lg bg-accent px-3 py-1 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover shadow-gold-glow cursor-pointer"
+            onClick={openPowerGuide}
+            className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover shadow-gold-glow sm:min-h-[36px]"
           >
             How it Works
           </button>
@@ -417,23 +605,23 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Metrics Cards */}
-      <section className="grid grid-cols-3 gap-4 mb-6 max-md:grid-cols-1">
-        <article className="border border-border bg-card p-5 rounded-2xl shadow-lg backdrop-blur-md">
+      <section className="mb-5 grid grid-cols-1 gap-3 sm:mb-6 sm:grid-cols-3 sm:gap-4">
+        <article className="min-w-0 rounded-2xl border border-border bg-card p-4 shadow-lg backdrop-blur-md sm:p-5">
           <span className="text-[10px] font-extrabold uppercase tracking-wider text-text-muted block mb-1">Total Consumption Today</span>
-          <div className="text-2xl font-black text-accent">{totalKwhToday.toFixed(4)} <span className="text-sm text-text-muted">kWh</span></div>
+          <div className="break-words text-xl font-black text-accent sm:text-2xl">{totalKwhToday.toFixed(4)} <span className="text-sm text-text-muted">kWh</span></div>
         </article>
 
-        <article className="border border-border bg-card p-5 rounded-2xl shadow-lg backdrop-blur-md">
+        <article className="min-w-0 rounded-2xl border border-border bg-card p-4 shadow-lg backdrop-blur-md sm:p-5">
           <span className="text-[10px] font-extrabold uppercase tracking-wider text-text-muted block mb-1">Current Realtime Draw</span>
-          <div className="text-2xl font-black text-accent">{currentDraw} <span className="text-sm text-text-muted">Watts</span></div>
+          <div className="break-words text-xl font-black text-accent sm:text-2xl">{currentDraw} <span className="text-sm text-text-muted">Watts</span></div>
           <span className="text-[10px] font-bold text-text-muted block mt-1">
             ⚡ {(currentDraw / (userSettings.voltage || 230)).toFixed(2)} A (Current at {userSettings.voltage || 230}V)
           </span>
         </article>
 
-        <article className="border border-border bg-card p-5 rounded-2xl shadow-lg backdrop-blur-md font-bold">
+        <article className="min-w-0 rounded-2xl border border-border bg-card p-4 font-bold shadow-lg backdrop-blur-md sm:p-5">
           <span className="text-[10px] font-extrabold uppercase tracking-wider text-text-muted block mb-1">Estimated Cost Today</span>
-          <div className="text-2xl font-black text-accent">{userSettings.currency === 'USD' ? '$' : userSettings.currency === 'EUR' ? '€' : '₹'}{estimatedCostToday.toFixed(4)} <span className="text-xs text-text-muted font-bold">(₹{userSettings.tariff_per_kwh}/kWh)</span></div>
+          <div className="break-words text-xl font-black text-accent sm:text-2xl">{userSettings.currency === 'USD' ? '$' : userSettings.currency === 'EUR' ? '€' : '₹'}{estimatedCostToday.toFixed(4)} <span className="text-xs text-text-muted font-bold">(₹{userSettings.tariff_per_kwh}/kWh)</span></div>
           <Link href="/profile" className="text-[10px] font-bold text-accent/70 hover:text-accent mt-1 flex items-center gap-1 cursor-pointer">
             <Settings size={9} /> Adjust tariff & voltage
           </Link>
@@ -456,28 +644,49 @@ export default function AnalyticsPage() {
 
       {/* Power Calculation & System Guide Modal */}
       {showPowerGuide && (
-        <div 
-          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/75 p-6 backdrop-blur-md animate-fade-in"
-          onClick={() => setShowPowerGuide(false)}
+        <div
+          className="fixed inset-0 z-[10000] flex items-end justify-center bg-black/75 p-0 backdrop-blur-md animate-fade-in sm:p-4"
+          onClick={closePowerGuide}
         >
-          <div 
-            className="w-[min(100%,500px)] max-h-[85vh] overflow-y-auto rounded-[24px] border border-border bg-card p-6 shadow-2xl flex flex-col gap-4 animate-scale-in select-none text-left"
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="power-guide-title"
+            className="flex w-full max-h-[88svh] flex-col overflow-hidden rounded-t-[28px] border border-border bg-card p-5 text-left shadow-2xl sm:w-[min(100%,620px)] sm:rounded-[24px] sm:p-6"
+            style={{
+              transform: `translateY(${powerGuideY}px)`,
+              transition: isPowerGuideDragging ? "none" : "transform 280ms cubic-bezier(0.16, 1, 0.3, 1)",
+            }}
             onClick={e => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+            <div
+              data-sheet-handle="1"
+              onPointerDown={handlePowerGuidePointerDown}
+              onPointerMove={handlePowerGuidePointerMove}
+              onPointerUp={handlePowerGuidePointerEnd}
+              onPointerCancel={handlePowerGuidePointerEnd}
+              className="mb-3 flex shrink-0 cursor-grab touch-none flex-col items-center gap-3 active:cursor-grabbing"
+              aria-label="Drag down to close guide"
+            >
+              <span className="h-1.5 w-12 rounded-full bg-border" />
+            </div>
+
+            <div className="flex shrink-0 items-center justify-between border-b border-border/60 pb-3">
               <div className="flex items-center gap-2 text-accent">
                 <TrendingUp size={18} className="stroke-[2.5px]" />
-                <h3 className="text-base font-extrabold text-text tracking-tight">How Power is Calculated</h3>
+                <h3 id="power-guide-title" className="text-base font-extrabold tracking-tight text-text">How Power is Calculated</h3>
               </div>
               <button 
-                onClick={() => setShowPowerGuide(false)} 
+                onClick={closePowerGuide}
+                aria-label="Close power calculation guide"
                 className="text-text-muted hover:text-accent p-1 rounded-lg hover:bg-white/5 cursor-pointer border-none bg-transparent"
               >
                 <X size={16} />
               </button>
             </div>
             
-            <div className="flex flex-col gap-4 text-xs font-bold leading-relaxed text-text mt-1">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 pt-1 text-xs font-bold leading-relaxed text-text">
+              <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
                 <h4 className="text-accent font-extrabold">1. Real-Time Current Estimation</h4>
                 <div className="text-text-muted">The system detects active devices (confirming current is flowing) and maps them to standard appliance wattages:
@@ -512,8 +721,64 @@ export default function AnalyticsPage() {
 
               <div className="flex flex-col gap-1.5 border-t border-border/40 pt-3">
                 <h4 className="text-accent font-extrabold">4. Customize Tariff &amp; Voltage</h4>
-                <p className="text-text-muted">You can adjust your electricity tariff rate and household voltage in your <Link href="/profile" className="text-accent underline" onClick={() => setShowPowerGuide(false)}>Profile Settings</Link>. This ensures cost calculations match your actual electricity bill.</p>
+                <p className="text-text-muted">You can adjust your electricity tariff rate and household voltage in your <Link href="/profile" className="text-accent underline" onClick={closePowerGuide}>Profile Settings</Link>. This ensures cost calculations match your actual electricity bill.</p>
               </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPdfConfirm && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm max-md:items-end max-md:p-0"
+          onClick={() => { if (!pdfBusy) setShowPdfConfirm(false); }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pdf-confirm-title"
+            aria-describedby="pdf-confirm-description"
+            className="flex w-[min(100%,410px)] flex-col gap-4 rounded-[22px] border border-border bg-card p-5 text-left shadow-2xl max-md:w-full max-md:rounded-b-none max-md:rounded-t-[24px] max-md:p-6 max-md:pb-[calc(1.5rem+env(safe-area-inset-bottom))]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mx-auto -mt-1 hidden h-1 w-12 rounded-full bg-border max-md:block" />
+            <div className="flex items-start gap-3.5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-accent/30 bg-accent-bg text-accent">
+                <FileText size={20} strokeWidth={2.5} />
+              </div>
+              <div className="min-w-0">
+                <h3 id="pdf-confirm-title" className="text-base font-extrabold tracking-tight text-text">
+                  Download analytics PDF?
+                </h3>
+                <p id="pdf-confirm-description" className="mt-1 text-xs font-semibold leading-relaxed text-text-muted">
+                  A formatted report will include your overview, devices, energy history, activity, schedules, and alarms.
+                </p>
+              </div>
+            </div>
+            {pdfError && (
+              <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold leading-relaxed text-red-400">
+                {pdfError}
+              </p>
+            )}
+            <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowPdfConfirm(false)}
+                disabled={pdfBusy}
+                className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-border bg-card px-4 text-xs font-extrabold text-text transition hover:bg-card-alt disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                disabled={pdfBusy}
+                className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-accent px-5 text-xs font-extrabold text-[var(--btn-text)] transition hover:bg-accent-hover disabled:opacity-50"
+              >
+                {pdfBusy ? <LoaderCircle size={15} className="animate-spin" /> : <Download size={15} />}
+                {pdfBusy ? 'Preparing PDF...' : 'Download PDF'}
+              </button>
             </div>
           </div>
         </div>

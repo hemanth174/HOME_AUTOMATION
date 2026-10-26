@@ -14,6 +14,7 @@ export default function ScheduleFormModal({ state }) {
     timeError,
     timeConfirmed,
     isSaving,
+    scheduleDraftChanged,
     devices,
     toggleDeviceSelection,
     handleTimeChange,
@@ -140,7 +141,7 @@ export default function ScheduleFormModal({ state }) {
             </button>
             <button
               type="submit"
-              disabled={Boolean(timeError) || !timeConfirmed || !scheduleDays.length || isSaving}
+              disabled={Boolean(timeError) || !timeConfirmed || !scheduleDays.length || isSaving || (Boolean(editingSchedule) && !scheduleDraftChanged)}
               className="inline-flex min-h-[36px] items-center rounded-lg bg-accent px-5 text-xs font-extrabold text-(--btn-text) cursor-pointer disabled:opacity-40 disabled:cursor-wait"
             >
               {isSaving ? "Saving..." : editingSchedule ? "Save Changes" : "Create Schedule"}

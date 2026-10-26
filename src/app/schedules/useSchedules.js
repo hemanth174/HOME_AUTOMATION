@@ -35,11 +35,17 @@ export default function useSchedules() {
   const handleTimeChange = useCallback((value) => { setScheduleTime(value); setTimeConfirmed(false); setTimeError(validateTime(value).error); }, []);
   const toggleDay = useCallback((day) => setScheduleDays((days) => days.includes(day) ? days.filter((d) => d !== day) : [...days, day]), []);
   const toggleDeviceSelection = useCallback((idOrIds, force) => setSelectedDevices((current) => Array.isArray(idOrIds) ? force ? [...new Set([...current, ...idOrIds])] : current.filter((id) => !idOrIds.includes(id)) : current.includes(idOrIds) ? current.filter((id) => id !== idOrIds) : [...current, idOrIds]), []);
+  const scheduleDraftChanged = !editingSchedule ||
+    selectedDevices.length !== 1 ||
+    selectedDevices[0] !== editingSchedule.device_id ||
+    scheduleTime !== editingSchedule.time.substring(0, 5) ||
+    JSON.stringify([...scheduleDays].sort()) !== JSON.stringify([...(editingSchedule.days || [])].sort()) ||
+    scheduleAction !== editingSchedule.action;
   const deleteSchedule = useCallback(async (id) => { const { error } = await supabase.from("schedules").delete().eq("id", id).eq("user_id", user.id); if (error) { setToast(`Could not delete schedule: ${error.message}`); return false; } setSchedules((all) => all.filter((s) => s.id !== id)); setToast("Schedule deleted"); return true; }, [user]);
   const toggleSchedule = useCallback(async (schedule) => { const { error } = await supabase.from("schedules").update({ enabled: !schedule.enabled }).eq("id", schedule.id).eq("user_id", user.id); if (error) { setToast(`Could not ${schedule.enabled ? "disable" : "enable"} schedule: ${error.message}`); return false; } setSchedules((all) => all.map((s) => s.id === schedule.id ? { ...s, enabled: !schedule.enabled } : s)); return true; }, [user]);
   const addSchedule = useCallback(async (event) => {
     event.preventDefault();
-    if (savingRef.current) return;
+    if (savingRef.current || isSaving || (editingSchedule && !scheduleDraftChanged)) return;
     if (!selectedDevices.length) return setToast("Please select at least one device");
     if (!scheduleDays.length) return setToast("Please select at least one day");
     if (!timeConfirmed) return setToast('Please press "Confirm" to confirm the time');
@@ -76,7 +82,7 @@ export default function useSchedules() {
       savingRef.current = false;
       setIsSaving(false);
     }
-  }, [selectedDevices, scheduleDays, timeConfirmed, scheduleTime, schedules, editingSchedule, scheduleAction, devices, user, closeModal]);
+  }, [selectedDevices, scheduleDays, timeConfirmed, scheduleTime, schedules, editingSchedule, scheduleAction, devices, user, closeModal, isSaving, scheduleDraftChanged]);
   const deleteAllSchedules = useCallback(async () => { const { error } = await supabase.from("schedules").delete().eq("user_id", user.id); if (error) return setToast(`Could not delete schedules: ${error.message}`); setSchedules([]); setShowDeleteAllModal(false); setToast("All schedules deleted"); }, [user]);
-  return { user, schedules, devices, loading, toast, setToast, showModal, setShowModal, showDeleteAllModal, setShowDeleteAllModal, selectedDevices, scheduleTime, scheduleDays, scheduleAction, setScheduleAction, timeConfirmed, timeError, editingSchedule, isSaving, closeModal, openEditModal, handleTimeChange, toggleDay, toggleDeviceSelection, addSchedule, deleteSchedule, toggleSchedule, deleteAllSchedules, confirmTime: () => { const result = validateTime(scheduleTime); setTimeError(result.error); if (result.valid) setTimeConfirmed(true); } };
+  return { user, schedules, devices, loading, toast, setToast, showModal, setShowModal, showDeleteAllModal, setShowDeleteAllModal, selectedDevices, scheduleTime, scheduleDays, scheduleAction, setScheduleAction, timeConfirmed, timeError, editingSchedule, isSaving, scheduleDraftChanged, closeModal, openEditModal, handleTimeChange, toggleDay, toggleDeviceSelection, addSchedule, deleteSchedule, toggleSchedule, deleteAllSchedules, confirmTime: () => { const result = validateTime(scheduleTime); setTimeError(result.error); if (result.valid) setTimeConfirmed(true); } };
 }

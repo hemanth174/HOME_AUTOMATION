@@ -8,6 +8,12 @@ import ConfirmModal from '@/components/ConfirmModal';
 import { Edit, LucidePower, LucidePowerOff, Trash, SlidersHorizontal } from 'lucide-react';
 import PresetModal from './PresetModal';
 
+const presetActionsSignature = (actions) => JSON.stringify(
+  Object.entries(actions || {})
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([deviceId, action]) => [deviceId, Boolean(action.included), Boolean(action.is_on)]),
+);
+
 export default function PresetsPage() {
   const [user, setUser] = useState(null);
   const [presets, setPresets] = useState([]);
@@ -24,6 +30,8 @@ export default function PresetsPage() {
   // Form
   const [presetName, setPresetName] = useState('');
   const [presetActions, setPresetActions] = useState({});
+  const [savedPresetDraft, setSavedPresetDraft] = useState(null);
+  const [savingPreset, setSavingPreset] = useState(false);
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -123,12 +131,14 @@ export default function PresetsPage() {
     setEditingPreset(null);
     setPresetName('');
     setPresetActions({});
+    setSavedPresetDraft(null);
   };
 
   const openCreateModal = () => {
     setEditingPreset(null);
     setPresetActions(buildPresetActions(devices));
     setPresetName('');
+    setSavedPresetDraft(null);
     setShowModal(true);
   };
 
@@ -137,9 +147,11 @@ export default function PresetsPage() {
     if (typeof actions === 'string') {
       try { actions = JSON.parse(actions); } catch(e) { actions = []; }
     }
+    const nextActions = buildPresetActions(devices, actions || []);
     setEditingPreset(preset);
     setPresetName(preset.name);
-    setPresetActions(buildPresetActions(devices, actions || []));
+    setPresetActions(nextActions);
+    setSavedPresetDraft({ name: preset.name, actions: presetActionsSignature(nextActions) });
     setShowModal(true);
   };
 
@@ -159,37 +171,50 @@ export default function PresetsPage() {
 
   const savePreset = async (e) => {
     e.preventDefault();
+    if (savingPreset || (editingPreset && !presetFormChanged)) return;
     if (!presetName.trim()) { setToast('Please enter a preset name'); return; }
     const actions = Object.entries(presetActions)
       .filter(([, v]) => v.included)
       .map(([deviceId, v]) => ({ device_id: deviceId, is_on: v.is_on }));
     if (actions.length === 0) { setToast('Please include at least one device'); return; }
 
-    if (editingPreset) {
-      // ── Edit mode: UPDATE existing preset ──────────────────────────────
-      const { error } = await supabase
-        .from('presets')
-        .update({ name: presetName.trim(), actions })
-        .eq('id', editingPreset.id);
-      if (error) { setToast(error.message); return; }
-      // Optimistic local update (realtime will also sync)
-      setPresets(prev => prev.map(p =>
-        p.id === editingPreset.id ? { ...p, name: presetName.trim(), actions } : p
-      ));
-      closeModal();
-      setToast('Preset updated');
-    } else {
-      // ── Create mode: INSERT new preset ────────────────────────────────
-      const { error } = await supabase
-        .from('presets')
-        .insert({ user_id: user.id, name: presetName.trim(), actions });
-      if (error) { setToast(error.message); return; }
-      const { data } = await supabase.from('presets').select('id, name, actions').eq('user_id', user.id).order('created_at');
-      if (data) setPresets(data);
-      closeModal();
-      setToast('Preset created');
+    setSavingPreset(true);
+    try {
+      if (editingPreset) {
+        // ── Edit mode: UPDATE existing preset ──────────────────────────────
+        const { error } = await supabase
+          .from('presets')
+          .update({ name: presetName.trim(), actions })
+          .eq('id', editingPreset.id);
+        if (error) { setToast(error.message); return; }
+        // Optimistic local update (realtime will also sync)
+        setPresets(prev => prev.map(p =>
+          p.id === editingPreset.id ? { ...p, name: presetName.trim(), actions } : p
+        ));
+        closeModal();
+        setToast('Preset updated');
+      } else {
+        // ── Create mode: INSERT new preset ────────────────────────────────
+        const { error } = await supabase
+          .from('presets')
+          .insert({ user_id: user.id, name: presetName.trim(), actions });
+        if (error) { setToast(error.message); return; }
+        const { data } = await supabase.from('presets').select('id, name, actions').eq('user_id', user.id).order('created_at');
+        if (data) setPresets(data);
+        closeModal();
+        setToast('Preset created');
+      }
+    } finally {
+      setSavingPreset(false);
     }
   };
+
+  const presetFormChanged = Boolean(
+    !editingPreset ||
+    !savedPresetDraft ||
+    presetName.trim() !== savedPresetDraft.name ||
+    presetActionsSignature(presetActions) !== savedPresetDraft.actions,
+  );
 
   const isPresetActive = (preset) => {
     let actions = preset.actions;
@@ -374,7 +399,7 @@ export default function PresetsPage() {
       </div>
 
       {showModal && (
-        <PresetModal editingPreset={editingPreset} presetActions={presetActions} presetName={presetName} setPresetName={setPresetName} devices={devices} savePreset={savePreset} closeModal={closeModal} togglePresetDevice={togglePresetDevice} togglePresetAction={togglePresetAction} />
+        <PresetModal editingPreset={editingPreset} presetActions={presetActions} presetName={presetName} setPresetName={setPresetName} devices={devices} savePreset={savePreset} closeModal={closeModal} togglePresetDevice={togglePresetDevice} togglePresetAction={togglePresetAction} saving={savingPreset} canSave={presetFormChanged} />
       )}
 
       <ConfirmModal

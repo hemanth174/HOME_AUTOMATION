@@ -38,6 +38,8 @@ export default function FeatureNotificationBell({
   notificationPermission = "default",
   onEnableNotifications,
   mobile = false,
+  onMouseEnter,
+  onMouseLeave,
 }) {
   const [notifications, setNotifications] = useState([]);
   const [user, setUser] = useState(null);
@@ -281,7 +283,17 @@ export default function FeatureNotificationBell({
   );
 
   return (
-    <div className={mobile ? "relative" : "relative"}>
+    <div
+      className="relative"
+      onMouseEnter={(event) => {
+        onMouseEnter?.(event);
+        if (!mobile && !open) onToggle?.();
+      }}
+      onMouseLeave={(event) => {
+        onMouseLeave?.(event);
+        if (!mobile && open) onClose?.();
+      }}
+    >
       <button
         type="button"
         onClick={onToggle}

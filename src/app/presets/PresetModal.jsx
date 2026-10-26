@@ -12,6 +12,8 @@ export default function PresetModal({
   closeModal,
   togglePresetDevice,
   togglePresetAction,
+  saving = false,
+  canSave = true,
 }) {
   return (
     <div
@@ -43,7 +45,7 @@ export default function PresetModal({
           </div>
           <div className="mt-4 flex justify-end gap-2.5">
             <button type="button" data-sheet-close="1" className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-xs font-semibold text-text transition-all hover:bg-card-alt cursor-pointer" onClick={closeModal}>Cancel</button>
-            <button type="submit" className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow">{editingPreset ? 'Save Changes' : 'Create'}</button>
+            <button type="submit" disabled={saving || !canSave} className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2 text-xs font-extrabold text-[var(--btn-text)] transition-all hover:bg-accent-hover cursor-pointer shadow-gold-glow disabled:cursor-not-allowed disabled:opacity-50">{saving ? 'Saving...' : editingPreset ? 'Save Changes' : 'Create'}</button>
           </div>
         </form>
       </div>

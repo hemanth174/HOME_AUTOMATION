@@ -34,12 +34,12 @@ export default function AnalyticsCharts({ devices, boards, logs, dailyAnalytics,
   const { thisWeek, lastWeek, hourlyData, boardData, pieData, uptimeData, heatmapData, activeDevices2, ghostDevices, ghostPie, wowData, radarData, scatterData, errorDevices, reliabilityPct, gaugeColor, gaugeData, sortedPeaks, automationData, alwaysOnData, hasAlwaysOn, relayColors, relayData, relayHasData } = useAnalyticsChartData({ devices, boards, logs, dailyAnalytics, weeklyAnalytics, deviceStats });
 
   return (
-    <>
-      <div className="grid grid-cols-2 gap-6 max-md:grid-cols-1 mb-6">
+    <div className="min-w-0">
+      <div className="grid min-w-0 grid-cols-2 gap-4 mb-5 sm:gap-6 sm:mb-6 max-md:grid-cols-1">
         {/* Hourly Usage Trend */}
-        <section className="border border-border bg-card p-5 rounded-2xl shadow-lg flex flex-col min-h-[340px]">
-          <h2 className="text-xs font-black uppercase tracking-wider text-text mb-4">Hourly Usage Trend (Last 24 Hours)</h2>
-          <div className="flex-1 w-full min-h-[250px]">
+        <section className="min-w-0 rounded-2xl border border-border bg-card p-4 shadow-lg flex flex-col min-h-[300px] sm:min-h-[340px] sm:p-5">
+          <h2 className="text-[10px] font-black uppercase leading-snug tracking-wider text-text mb-4 sm:text-xs">Hourly Usage Trend (Last 24 Hours)</h2>
+          <div className="min-w-0 flex-1 w-full min-h-[220px] sm:min-h-[250px]">
             {totalKwhToday === 0 ? (
               <div className="grid h-full place-items-center text-xs font-bold text-text-muted select-none text-center px-4">
                 No consumption logged today yet. Turn ON devices to monitor trends.
@@ -65,9 +65,9 @@ export default function AnalyticsCharts({ devices, boards, logs, dailyAnalytics,
         </section>
 
         {/* Board Consumption */}
-        <section className="border border-border bg-card p-5 rounded-2xl shadow-lg flex flex-col min-h-[340px]">
-          <h2 className="text-xs font-black uppercase tracking-wider text-text mb-4">Daily Usage by Board (Real kWh)</h2>
-          <div className="flex-1 w-full min-h-[250px]">
+        <section className="min-w-0 rounded-2xl border border-border bg-card p-4 shadow-lg flex flex-col min-h-[300px] sm:min-h-[340px] sm:p-5">
+          <h2 className="text-[10px] font-black uppercase leading-snug tracking-wider text-text mb-4 sm:text-xs">Daily Usage by Board (Real kWh)</h2>
+          <div className="min-w-0 flex-1 w-full min-h-[220px] sm:min-h-[250px]">
             {boardData.every(b => b.Usage === 0) ? (
               <div className="grid h-full place-items-center text-xs font-bold text-text-muted select-none text-center px-4">
                 No active load on boards to display.
@@ -92,9 +92,9 @@ export default function AnalyticsCharts({ devices, boards, logs, dailyAnalytics,
       </div>
 
       {/* Share Breakdown Pie Chart */}
-      <section className="border border-border bg-card p-5 rounded-2xl shadow-lg flex flex-col min-h-[340px]">
-        <h2 className="text-xs font-black uppercase tracking-wider text-text mb-2">Power Load Allocation (Device Wattages)</h2>
-        <div className="flex-1 flex max-md:flex-col items-center justify-around gap-4 min-h-[250px]">
+      <section className="min-w-0 rounded-2xl border border-border bg-card p-4 shadow-lg flex flex-col min-h-[300px] sm:min-h-[340px] sm:p-5">
+        <h2 className="text-[10px] font-black uppercase leading-snug tracking-wider text-text mb-2 sm:text-xs">Power Load Allocation (Device Wattages)</h2>
+        <div className="min-w-0 flex-1 flex max-md:flex-col items-center justify-around gap-4 min-h-[220px] sm:min-h-[250px]">
           {pieData.length === 0 ? (
             <div className="text-xs font-bold text-text-muted select-none text-center px-4">
               No consumption recorded yet today. Turn ON devices to populate distribution data.
@@ -473,6 +473,6 @@ export default function AnalyticsCharts({ devices, boards, logs, dailyAnalytics,
           </div>
         </section>
       </div>
-    </>
+    </div>
   );
 }
