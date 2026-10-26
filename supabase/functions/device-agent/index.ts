@@ -129,7 +129,11 @@ async function poll(request: Request, body: Record<string, unknown>) {
   const boardId = String(board.id || "");
   let configuration: Record<string, unknown> | null = null;
   let meshConfigurations: Record<string, unknown>[] = [];
-  let commands: Record<string, unknown>[] = Array.isArray(snapshot.commands) ? snapshot.commands : [];
+  let commands: Record<string, unknown>[] = Array.isArray(snapshot.commands)
+    ? snapshot.commands.filter((item: Record<string, unknown>) =>
+        String(item.board_id || "") === boardId &&
+        String(item.board_identifier || "") === String(board.board_identifier || ""))
+    : [];
   const reportedVersion = Number(body.applied_config_version ?? config.applied_config_version ?? 0);
   const currentVersion = Number(config.config_version ?? 0);
   const ssid = String(config.wifi_ssid || "");
@@ -159,111 +163,49 @@ async function poll(request: Request, body: Record<string, unknown>) {
     }
   }
 
+  // Mesh presence is informative only. Do not return another board's commands
+  // or decrypt its Wi-Fi password for this gateway: current firmware has no
+  // authenticated per-member command/config forwarding path.
   const isMeshGateway = body.mesh_gateway === true;
-  let knownBoards: Record<string, string> = { [String(board.board_identifier)]: boardId };
   if (isMeshGateway && userId && boardId) {
     const userBoards = await rest(
       "boards?user_id=eq." + encodeURIComponent(userId) + "&select=id,board_identifier",
     );
+    const knownBoards: Record<string, string> = { [String(board.board_identifier)]: boardId };
     for (const item of Array.isArray(userBoards) ? userBoards : []) {
-      if (typeof item.board_identifier === "string" && isValidBoardIdentifier(item.board_identifier)) {
+      if (typeof item.board_identifier === "string" && validBoardIdentifier(item.board_identifier)) {
         knownBoards[item.board_identifier] = String(item.id);
       }
     }
 
-    // Keep member-board presence fresh only when the leader reports a live mesh
-    // heartbeat. This lets the admin distinguish a reachable mesh member from
-    // a board that has not checked in recently.
     const meshNodes = Array.isArray(body.mesh_nodes) ? body.mesh_nodes.slice(0, 8) : [];
     const liveBoardIds: string[] = [];
     for (const node of meshNodes) {
-      if (!node || !isValidBoardIdentifier(node.node_id)) continue;
+      if (!node || !validBoardIdentifier(node.node_id)) continue;
       const lastSeenMs = Number(node.last_seen_ms);
       if (!Number.isFinite(lastSeenMs) || lastSeenMs < 0 || lastSeenMs > 45000) continue;
       const memberBoardId = knownBoards[String(node.node_id)];
       if (memberBoardId && memberBoardId !== boardId) liveBoardIds.push(memberBoardId);
     }
+
     const uniqueLiveIds = Array.from(new Set(liveBoardIds));
     if (uniqueLiveIds.length) {
       const idFilter = "in.(" + uniqueLiveIds.map((id) => encodeURIComponent(id)).join(",") + ")";
-      const runtimeRows = await rest(
-        "device_runtime_configs?board_id=" + idFilter + "&user_id=eq." + encodeURIComponent(userId) + "&select=board_id,device_token_hash",
+      const now = new Date().toISOString();
+      // This timestamp indicates mesh reachability only. Admin remote control
+      // requires a recent direct authenticated check-in from the target board.
+      await rest(
+        "device_runtime_configs?board_id=" + idFilter + "&user_id=eq." + encodeURIComponent(userId),
+        {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ last_mesh_seen_at: now, last_seen_at: now }),
+        },
       );
-      const enrolledIds = Array.from(new Set(
-        (Array.isArray(runtimeRows) ? runtimeRows : [])
-          .filter((row) => typeof row.device_token_hash === "string" && row.device_token_hash.length > 0)
-          .map((row) => String(row.board_id)),
-      ));
-      if (enrolledIds.length) {
-        const now = new Date().toISOString();
-        const idList = "in.(" + enrolledIds.map((id) => encodeURIComponent(id)).join(",") + ")";
-        await rest(
-          "device_runtime_configs?board_id=" + idList + "&user_id=eq." + encodeURIComponent(userId),
-          {
-            method: "PATCH",
-            headers: { Prefer: "return=minimal" },
-            body: JSON.stringify({ last_seen_at: now, first_seen_at: now }),
-          },
-        );
-        await rest(
-          "boards?id=" + idList + "&user_id=eq." + encodeURIComponent(userId),
-          { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_seen: now }) },
-        );
-      }
-    }
-
-    // Only a leader/gateway can receive its customer's other board commands and
-    // pending configuration. Directly connected member boards see only their
-    // own board-scoped records.
-    const fleetCommandRows = await rest(
-      "device_commands?user_id=eq." + encodeURIComponent(userId) +
-      "&status=eq.pending&select=id,board_id,command_type,requested_at&order=requested_at.asc&limit=64",
-    );
-    commands = (Array.isArray(fleetCommandRows) ? fleetCommandRows : []).map((item: Record<string, unknown>) => ({
-      id: item.id,
-      board_id: item.board_id,
-      board_identifier: Object.keys(knownBoards).find((id) => knownBoards[id] === String(item.board_id)) || "",
-      command_type: item.command_type,
-      requested_at: item.requested_at,
-    }));
-
-    const fleetConfigs = await rest(
-      "device_runtime_configs?user_id=eq." + encodeURIComponent(userId) +
-      "&board_id=neq." + encodeURIComponent(boardId) +
-      "&device_token_hash=not.is.null" +
-      "&config_update_status=in.(pending,sending)" +
-      "&select=board_id,user_id,wifi_ssid,wifi_security,encrypted_wifi_password,config_version,applied_config_version,config_update_status&order=updated_at.asc&limit=64",
-    );
-    for (const memberConfig of Array.isArray(fleetConfigs) ? fleetConfigs : []) {
-      const memberBoardId = String(memberConfig.board_id || "");
-      const memberIdentifier = Object.keys(knownBoards).find((id) => knownBoards[id] === memberBoardId);
-      const memberSsid = String(memberConfig.wifi_ssid || "");
-      const memberVersion = Number(memberConfig.config_version || 0);
-      const memberAppliedVersion = Number(memberConfig.applied_config_version || 0);
-      const memberStatus = String(memberConfig.config_update_status || "");
-      if (!memberIdentifier || !memberSsid || memberVersion <= memberAppliedVersion ||
-          !["pending", "sending"].includes(memberStatus)) continue;
-      let memberPassword = "";
-      if (memberConfig.wifi_security === "wpa2_psk") {
-        if (!memberConfig.encrypted_wifi_password) continue;
-        memberPassword = await decryptProvisioningValue(String(memberConfig.encrypted_wifi_password));
-      }
-      meshConfigurations.push({
-        board_id: memberBoardId,
-        board_identifier: memberIdentifier,
-        version: memberVersion,
-        wifi_ssid: memberSsid,
-        wifi_security: memberConfig.wifi_security,
-        wifi_password: memberPassword,
-      });
-      if (memberStatus === "pending") {
-        await rest(
-          "device_runtime_configs?board_id=eq." + encodeURIComponent(memberBoardId) +
-          "&user_id=eq." + encodeURIComponent(userId),
-          { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ config_update_status: "sending" }) },
-        );
-        await writeConfigEvent(memberConfig, "sending", "Gateway queued the configuration for delivery to this mesh member.", "mesh_gateway");
-      }
+      await rest(
+        "boards?id=" + idFilter + "&user_id=eq." + encodeURIComponent(userId),
+        { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_seen: now }) },
+      );
     }
   }
 
@@ -280,7 +222,6 @@ async function poll(request: Request, body: Record<string, unknown>) {
     schedules: Array.isArray(snapshot.schedules) ? snapshot.schedules : [],
     config: configuration,
     commands,
-    mesh_configs: meshConfigurations,
   });
 }
 
@@ -354,6 +295,149 @@ async function acknowledgeCommand(device: { config: Record<string, unknown> }, b
     return json({ ok: true, ignored: true, reason: "already_acknowledged_or_not_found" });
   }
   return json({ ok: true, command_id: commandId, status });
+}
+
+async function handleDeviceDataAction(
+  device: { config: Record<string, unknown>; board: Record<string, unknown> },
+  body: Record<string, unknown>,
+) {
+  const action = String(body.action || "");
+  const boardId = String(device.config.board_id || "");
+  const userId = String(device.config.user_id || "");
+  if (!boardId || !userId) return json({ error: "Device board is not registered" }, 409);
+
+  const deviceRows = await rest(
+    "devices?board_id=eq." + encodeURIComponent(boardId) +
+      "&user_id=eq." + encodeURIComponent(userId) +
+      "&select=id,name,relay_index,is_on,last_changed,feedback_on&order=relay_index.asc",
+  );
+  const devices = Array.isArray(deviceRows) ? deviceRows : [];
+  const deviceIds = devices.map((item: Record<string, unknown>) => String(item.id || "")).filter(Boolean);
+  const rawRelayIndex = Number(body.relay_index);
+  const relayIndex = Number.isInteger(rawRelayIndex) ? rawRelayIndex : -1;
+  const relay = devices.find((item: Record<string, unknown>) => Number(item.relay_index) === relayIndex);
+
+  if (action === "read_relay") {
+    if (relayIndex < 0 || relayIndex >= 4 || !relay) return json({ error: "Relay does not belong to this board" }, 404);
+    return json({ ok: true, is_on: Boolean(relay.is_on), last_changed: relay.last_changed || null });
+  }
+
+  if (action === "set_relay") {
+    if (relayIndex < 0 || relayIndex >= 4 || !relay || typeof body.state !== "boolean") {
+      return json({ error: "A valid board relay and explicit boolean state are required" }, 400);
+    }
+    const rows = await rest(
+      "devices?id=eq." + encodeURIComponent(String(relay.id)) +
+        "&board_id=eq." + encodeURIComponent(boardId) +
+        "&user_id=eq." + encodeURIComponent(userId) + "&select=id,is_on,last_changed",
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ is_on: body.state, last_changed: new Date().toISOString() }),
+      },
+    );
+    if (!Array.isArray(rows) || !rows.length) return json({ error: "Relay update was not saved" }, 409);
+    return json({ ok: true, is_on: Boolean(rows[0].is_on), last_changed: rows[0].last_changed || null });
+  }
+
+  if (action === "set_feedback") {
+    if (relayIndex < 0 || relayIndex >= 4 || !relay || typeof body.state !== "boolean") {
+      return json({ error: "A valid board relay and explicit feedback value are required" }, 400);
+    }
+    const rows = await rest(
+      "devices?id=eq." + encodeURIComponent(String(relay.id)) +
+        "&board_id=eq." + encodeURIComponent(boardId) +
+        "&user_id=eq." + encodeURIComponent(userId) + "&select=id,feedback_on",
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ feedback_on: body.state }),
+      },
+    );
+    if (!Array.isArray(rows) || !rows.length) return json({ error: "Feedback update was not saved" }, 409);
+    return json({ ok: true, feedback_on: Boolean(rows[0].feedback_on) });
+  }
+
+  if (action === "poll_alarms") {
+    if (!deviceIds.length) return json({ ok: true, alarms: [] });
+    const idFilter = "in.(" + deviceIds.map((id) => encodeURIComponent(id)).join(",") + ")";
+    const rows = await rest(
+      "alarms?user_id=eq." + encodeURIComponent(userId) +
+        "&device_id=" + idFilter + "&fired=eq.false" +
+        "&select=id,device_id,trigger_at,action,fired&order=trigger_at.asc",
+    );
+    return json({ ok: true, alarms: Array.isArray(rows) ? rows : [] });
+  }
+
+  if (action === "poll_schedules") {
+    if (!deviceIds.length) return json({ ok: true, schedules: [] });
+    const idFilter = "in.(" + deviceIds.map((id) => encodeURIComponent(id)).join(",") + ")";
+    const rows = await rest(
+      "schedules?user_id=eq." + encodeURIComponent(userId) +
+        "&device_id=" + idFilter + "&enabled=eq.true" +
+        "&select=id,device_id,time,days,action,enabled&order=time.asc",
+    );
+    return json({ ok: true, schedules: Array.isArray(rows) ? rows : [] });
+  }
+
+  if (action === "claim_alarm") {
+    const alarmId = String(body.alarm_id || "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(alarmId)) {
+      return json({ error: "A valid alarm ID is required" }, 400);
+    }
+    if (!deviceIds.length) return json({ ok: true, claimed: false });
+    const idFilter = "in.(" + deviceIds.map((id) => encodeURIComponent(id)).join(",") + ")";
+    const rows = await rest(
+      "alarms?id=eq." + encodeURIComponent(alarmId) +
+        "&user_id=eq." + encodeURIComponent(userId) +
+        "&device_id=" + idFilter + "&fired=eq.false&select=id",
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ fired: true }),
+      },
+    );
+    return json({ ok: true, claimed: Array.isArray(rows) && rows.length > 0 });
+  }
+
+  if (action === "log_activity") {
+    if (relayIndex < 0 || relayIndex >= 4 || !relay || typeof body.state !== "boolean") {
+      return json({ error: "Activity log target is invalid for this board" }, 400);
+    }
+    const triggeredBy = String(body.triggered_by || "ESP32").slice(0, 80);
+    await rest("activity_logs", {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        user_id: userId,
+        device_id: relay.id,
+        device_name: relay.name || "Device " + String(relayIndex + 1),
+        action: body.state ? "turned ON" : "turned OFF",
+        triggered_by: triggeredBy,
+      }),
+    });
+    return json({ ok: true });
+  }
+
+  if (action === "heartbeat") {
+    const now = new Date().toISOString();
+    await rest(
+      "device_runtime_configs?board_id=eq." + encodeURIComponent(boardId) +
+        "&user_id=eq." + encodeURIComponent(userId),
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ last_seen_at: now, last_direct_seen_at: now, updated_at: now }),
+      },
+    );
+    await rest(
+      "boards?id=eq." + encodeURIComponent(boardId) + "&user_id=eq." + encodeURIComponent(userId),
+      { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_seen: now }) },
+    );
+    return json({ ok: true });
+  }
+
+  return null;
 }
 
 Deno.serve(async (request) => {
