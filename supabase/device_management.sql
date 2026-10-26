@@ -14,6 +14,10 @@ create table if not exists public.device_runtime_configs (
   board_id uuid primary key references public.boards(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
   device_token_hash text unique,
+  encrypted_device_token text,
+  mesh_ssid text not null default 'HOME-AUTO-LEADER',
+  encrypted_mesh_password text,
+  first_seen_at timestamptz,
   wifi_ssid text not null default '',
   wifi_security text not null default 'wpa2_psk'
     check (wifi_security in ('open', 'wpa2_psk')),
@@ -47,7 +51,10 @@ create table if not exists public.device_commands (
 );
 
 alter table public.device_runtime_configs
-  add column if not exists encrypted_device_token text;
+  add column if not exists encrypted_device_token text,
+  add column if not exists mesh_ssid text not null default 'HOME-AUTO-LEADER',
+  add column if not exists encrypted_mesh_password text,
+  add column if not exists first_seen_at timestamptz;
 
 create index if not exists device_runtime_configs_user_id_idx
   on public.device_runtime_configs(user_id);
@@ -122,7 +129,8 @@ begin
   end if;
 
   update public.device_runtime_configs
-  set last_seen_at = v_now,
+  set first_seen_at = coalesce(first_seen_at, v_now),
+      last_seen_at = v_now,
       updated_at = case
         when last_seen_at is null or last_seen_at < v_now - interval '15 seconds' then v_now
         else updated_at
