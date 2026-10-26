@@ -171,11 +171,13 @@ async function poll(request: Request, body: Record<string, unknown>) {
     const initialPassword = currentSecurity === "wpa2_psk" ? await encryptProvisioningValue(currentPassword) : null;
     const initialVersion = Math.max(1, Number(config.config_version || 1));
     const registeredAt = new Date().toISOString();
-    await rest(
-      "device_runtime_configs?board_id=eq." + encodeURIComponent(boardId) + "&user_id=eq." + encodeURIComponent(userId),
+    const registrationRows = await rest(
+      "device_runtime_configs?board_id=eq." + encodeURIComponent(boardId) +
+        "&user_id=eq." + encodeURIComponent(userId) +
+        "&config_update_status=eq.unprovisioned",
       {
         method: "PATCH",
-        headers: { Prefer: "return=minimal" },
+        headers: { Prefer: "return=representation" },
         body: JSON.stringify({
           wifi_ssid: currentSsid,
           wifi_security: currentSecurity,
@@ -189,14 +191,29 @@ async function poll(request: Request, body: Record<string, unknown>) {
         }),
       },
     );
-    config.wifi_ssid = currentSsid;
-    config.wifi_security = currentSecurity;
-    config.encrypted_wifi_password = initialPassword;
-    config.applied_config_version = initialVersion;
-    config.config_update_status = "applied";
-    config.config_applied_at = registeredAt;
-    wifiConfigRegistered = true;
-    await writeConfigEvent(config, "applied", "Initial Wi-Fi settings registered from the authenticated ESP32 check-in.", "device");
+    if (Array.isArray(registrationRows) && registrationRows.length > 0) {
+      config.wifi_ssid = currentSsid;
+      config.wifi_security = currentSecurity;
+      config.encrypted_wifi_password = initialPassword;
+      config.applied_config_version = initialVersion;
+      config.config_update_status = "applied";
+      config.config_applied_at = registeredAt;
+      wifiConfigRegistered = true;
+      await writeConfigEvent(config, "applied", "Initial Wi-Fi settings registered from the authenticated ESP32 check-in.", "device");
+    } else {
+      // Another concurrent first check-in may already have registered it.
+      // Re-fetch metadata without exposing or decrypting the stored secret.
+      const savedRows = await rest(
+        "device_runtime_configs?board_id=eq." + encodeURIComponent(boardId) +
+          "&user_id=eq." + encodeURIComponent(userId) +
+          "&select=wifi_ssid,wifi_security,config_version,applied_config_version,config_update_status",
+      );
+      const saved = Array.isArray(savedRows) ? savedRows[0] : null;
+      if (saved?.wifi_ssid) {
+        Object.assign(config, saved);
+        wifiConfigRegistered = true;
+      }
+    }
   }
 
   let configuration: Record<string, unknown> | null = null;
