@@ -112,7 +112,9 @@ async function poll(request: Request, device: { config: Record<string, unknown>;
   const appliedVersion = Number(body.applied_config_version ?? config.applied_config_version ?? 0);
   const currentVersion = Number(config.config_version ?? 0);
   const ssid = String(config.wifi_ssid || "");
-  if (currentVersion > appliedVersion && ssid.length > 0) {
+  if (currentVersion > appliedVersion && ssid.length > 0 &&
+      config.config_update_status !== "failed" &&
+      config.config_update_status !== "unprovisioned") {
     let password = "";
     if (config.wifi_security === "wpa2_psk") {
       if (!config.encrypted_wifi_password) {
