@@ -39,11 +39,24 @@ export async function POST(request, { params }) {
     }, { status: 409 });
   }
 
+  const nowIso = new Date().toISOString();
+  const { error: expireError } = await auth.admin.from('device_commands')
+    .update({
+      status: 'cancelled',
+      completed_at: nowIso,
+      last_error: 'Restart request expired before the ESP32 accepted it.',
+    })
+    .eq('board_id', boardId)
+    .in('status', ['pending', 'accepted'])
+    .lt('expires_at', nowIso);
+  if (expireError) return NextResponse.json({ error: expireError.message }, { status: 503 });
+
   const { data: activeCommands, error: activeError } = await auth.admin
     .from('device_commands')
     .select('id, status')
     .eq('board_id', boardId)
     .in('status', ['pending', 'accepted'])
+    .gt('expires_at', nowIso)
     .limit(1);
   if (activeError) return NextResponse.json({ error: activeError.message }, { status: 503 });
   if (activeCommands?.length) {
@@ -64,7 +77,8 @@ export async function POST(request, { params }) {
     command_type: 'restart',
     status: 'pending',
     requested_by: auth.user.id,
-  }).select('id, status, requested_at').single();
+    expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+  }).select('id, status, requested_at, expires_at').single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   await auth.admin.from('approval_audit_log').insert({
@@ -85,8 +99,20 @@ export async function GET(request, { params }) {
   const { boardId } = await params;
   if (!UUID_RE.test(boardId || '')) return NextResponse.json({ error: 'Invalid board ID' }, { status: 400 });
 
+  const nowIso = new Date().toISOString();
+  const { error: expireError } = await auth.admin.from('device_commands')
+    .update({
+      status: 'cancelled',
+      completed_at: nowIso,
+      last_error: 'Restart request expired before the ESP32 accepted it.',
+    })
+    .eq('board_id', boardId)
+    .in('status', ['pending', 'accepted'])
+    .lt('expires_at', nowIso);
+  if (expireError) return NextResponse.json({ error: expireError.message }, { status: 503 });
+
   const { data: commands, error } = await auth.admin.from('device_commands')
-    .select('id, command_type, status, requested_at, accepted_at, completed_at, last_error')
+    .select('id, command_type, status, requested_at, accepted_at, completed_at, expires_at, last_error')
     .eq('board_id', boardId).order('requested_at', { ascending: false }).limit(10);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ commands: commands || [] }, { headers: { 'Cache-Control': 'no-store' } });
