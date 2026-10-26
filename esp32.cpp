@@ -181,7 +181,14 @@ void loadHomeWifiCredentials() {
   if (homeWifiSecurity != "open" && homeWifiSecurity != "wpa2_psk") {
     homeWifiSecurity = homeWifiPassword.length() ? "wpa2_psk" : "open";
   }
-  deviceConfigVersion = max((uint32_t)1, preferences.getUInt("cfg_ver", 1));
+  const uint32_t savedConfigVersion = preferences.getUInt("cfg_ver", 1);
+  deviceConfigVersion = savedConfigVersion < 1 ? 1 : savedConfigVersion;
+  // An interrupted configuration attempt must not override active settings.
+  // Staged values are re-fetched from the server after reconnect.
+  preferences.remove("p_ssid");
+  preferences.remove("p_pass");
+  preferences.remove("p_sec");
+  preferences.remove("p_ver");
   deviceAuthToken = preferences.getString("device_token", "");
   if (deviceAuthToken.length() == 0 && strlen(DEVICE_AUTH_TOKEN) > 0) {
     deviceAuthToken = String(DEVICE_AUTH_TOKEN);
@@ -1652,9 +1659,9 @@ void cloudSyncTask(void* parameter) {
   unsigned long lastCloudHeartbeat = 0;
   unsigned long nextQueueAttempt = 0;
   unsigned long queueRetryDelay = 2000;
-  unsigned long lastDeviceHeartbeatAttempt = 0;
-  unsigned long lastDeviceCommandPoll = 0;
-  unsigned long lastDeviceConfigPoll = 0;
+  unsigned long lastDeviceHeartbeatAttempt = millis() - 15000;
+  unsigned long lastDeviceCommandPoll = millis() - 5000;
+  unsigned long lastDeviceConfigPoll = millis() - 30000;
   loadScheduleCache();
   for (;;) {
     runLocalSchedules();
