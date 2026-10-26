@@ -11,7 +11,7 @@ async function loadBoardConfig(admin, boardId) {
     .eq('id', boardId).maybeSingle();
   if (boardError || !board) return { error: boardError?.message || 'Board not found', status: 404 };
   const { data: config, error } = await admin.from('device_runtime_configs')
-    .select('board_id, user_id, device_token_hash, wifi_ssid, wifi_security, config_version, applied_config_version, config_update_status, last_seen_at, last_error, config_requested_at, config_applied_at')
+    .select('board_id, user_id, device_token_hash, wifi_ssid, wifi_security, config_version, applied_config_version, config_update_status, last_seen_at, last_error, encrypted_wifi_password, config_requested_at, config_applied_at')
     .eq('board_id', boardId).maybeSingle();
   if (error) return { error: error.message, status: 503 };
   return { board, config: config || null };
@@ -32,6 +32,7 @@ export async function GET(request, { params }) {
     config: config ? {
       wifiSsid: config.wifi_ssid,
       wifiSecurity: config.wifi_security,
+      hasWifiPassword: Boolean(config.encrypted_wifi_password),
       version: config.config_version,
       appliedVersion: config.applied_config_version,
       status: config.config_update_status,
@@ -60,11 +61,12 @@ export async function POST(request, { params }) {
     return NextResponse.json({ error: 'Wi-Fi name is required and must be 1–32 printable characters.' }, { status: 400 });
   }
   if (!wifiSecurity) return NextResponse.json({ error: 'Choose Open Network or WPA2-PSK.' }, { status: 400 });
-  if (wifiSecurity === 'wpa2_psk' && (wifiPassword.length < 8 || wifiPassword.length > 63)) {
-    return NextResponse.json({ error: 'WPA2-PSK passwords must be 8–63 characters.' }, { status: 400 });
+  const keepExistingPassword = body.keepExistingPassword === true;
+  if (wifiSecurity === 'wpa2_psk' && !keepExistingPassword && (wifiPassword.length < 8 || wifiPassword.length > 63)) {
+    return NextResponse.json({ error: 'WPA2-PSK passwords must be 8–63 characters, unless you choose to keep the existing password.' }, { status: 400 });
   }
-  if (wifiSecurity === 'open' && wifiPassword.length > 0) {
-    return NextResponse.json({ error: 'Open networks must not include a password.' }, { status: 400 });
+  if (wifiSecurity === 'open' && (wifiPassword.length > 0 || keepExistingPassword)) {
+    return NextResponse.json({ error: 'Open networks must not include or retain a password.' }, { status: 400 });
   }
 
   const loaded = await loadBoardConfig(auth.admin, boardId);
@@ -78,10 +80,17 @@ export async function POST(request, { params }) {
 
   let encryptedPassword = null;
   if (wifiSecurity === 'wpa2_psk') {
-    try { encryptedPassword = encryptProvisioningValue(wifiPassword); }
-    catch (error) {
-      console.error('Wi-Fi encryption configuration error:', error);
-      return NextResponse.json({ error: 'Secure configuration storage is not configured on the server.' }, { status: 503 });
+    if (keepExistingPassword) {
+      if (loaded.config.wifi_security !== 'wpa2_psk' || !loaded.config.encrypted_wifi_password) {
+        return NextResponse.json({ error: 'There is no saved WPA2 password to retain. Enter the new password.' }, { status: 400 });
+      }
+      encryptedPassword = loaded.config.encrypted_wifi_password;
+    } else {
+      try { encryptedPassword = encryptProvisioningValue(wifiPassword); }
+      catch (error) {
+        console.error('Wi-Fi encryption configuration error:', error);
+        return NextResponse.json({ error: 'Secure configuration storage is not configured on the server.' }, { status: 503 });
+      }
     }
   }
 
