@@ -1,7 +1,7 @@
 import { ChevronDown, Search } from 'lucide-react';
 
 function StatusPill({ status, stageColors }) {
-  return <span className={\`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-black uppercase \${stageColors[status] || stageColors.Received}\`}>{status}</span>;
+  return <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${stageColors[status] || stageColors.Received}`}>{status}</span>;
 }
 
 export default function AdminOrderPipeline({ filtered, orders, query, setQuery, filter, setFilter, setSelected, stages, categoryLabels, stageColors }) {
