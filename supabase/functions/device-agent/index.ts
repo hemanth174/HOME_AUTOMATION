@@ -288,7 +288,7 @@ async function acknowledgeCommand(device: { config: Record<string, unknown> }, b
   if (status === "completed" || status === "failed") patch.completed_at = now;
 
   const rows = await rest(
-    `device_commands?id=eq.${encodeURIComponent(commandId)}&board_id=eq.${encodeURIComponent(String(device.config.board_id))}&status=in.(pending,accepted)`,
+    `device_commands?id=eq.${encodeURIComponent(commandId)}&board_id=eq.${encodeURIComponent(String(device.config.board_id))}&status=in.(pending,accepted)&expires_at=gt.${encodeURIComponent(now)}`,
     { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) },
   );
   if (!Array.isArray(rows) || rows.length === 0) {
