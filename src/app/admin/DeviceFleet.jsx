@@ -100,6 +100,16 @@ export default function DeviceFleet() {
           ) || (data.commands || [])[0];
           if (!command || !active) return;
           const terminal = ["completed", "failed", "cancelled"].includes(command.status);
+          const startedAt = restartByBoard[boardId]?.startedAt || Date.now();
+          if (!terminal && Date.now() - startedAt > 120000) {
+            setRestartByBoard((previous) => {
+              const current = previous[boardId];
+              if (current?.polling === false && current?.timedOut) return previous;
+              return { ...previous, [boardId]: { ...current, polling: false, timedOut: true } };
+            });
+            setNotice("No restart acknowledgement arrived within 2 minutes. The command remains in the audit history; check status before requesting another restart.");
+            return;
+          }
           setRestartByBoard((previous) => {
             const current = previous[boardId];
             const error = command.last_error || "";
@@ -160,13 +170,53 @@ export default function DeviceFleet() {
       if (!response.ok) throw new Error(data.error || "Could not queue restart");
       setRestartByBoard((previous) => ({
         ...previous,
-        [device.id]: { commandId: data.command.id, status: data.command.status, polling: true, error: "" },
+        [device.id]: { commandId: data.command.id, status: data.command.status, polling: true, startedAt: Date.now(), timedOut: false, error: "" },
       }));
       setNotice("Restart queued. Waiting for the ESP32 to acknowledge and reconnect.");
     } catch (error) {
       setNotice(error.message || "Could not queue restart");
     } finally {
       setBusy((current) => ({ ...current, [device.id]: "" }));
+    }
+  };
+
+  const checkRestartStatus = async (device) => {
+    const current = restartByBoard[device.id];
+    if (!current?.commandId || !accessToken) return;
+    setBusy((previous) => ({ ...previous, [device.id]: "check-restart" }));
+    try {
+      const response = await fetch("/api/admin/devices/" + device.id + "/restart", {
+        cache: "no-store",
+        headers: { Authorization: "Bearer " + accessToken },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not check restart status");
+      const command = (data.commands || []).find((item) => item.id === current.commandId);
+      if (!command) throw new Error("The restart command is not in the latest history.");
+      const terminal = ["completed", "failed", "cancelled"].includes(command.status);
+      setRestartByBoard((previous) => ({
+        ...previous,
+        [device.id]: {
+          ...previous[device.id],
+          status: command.status,
+          error: command.last_error || "",
+          polling: !terminal && !previous[device.id]?.timedOut,
+        },
+      }));
+      if (terminal) {
+        setNotice(command.status === "completed"
+          ? "ESP32 restart completed and the device acknowledged its return."
+          : command.status === "failed"
+            ? "ESP32 reported a restart failure."
+            : "Restart request was cancelled.");
+        loadDevices(true);
+      } else {
+        setNotice("Latest status: " + command.status + ". The command is still non-terminal; do not queue another restart unless you have reviewed the audit history.");
+      }
+    } catch (error) {
+      setNotice(error.message || "Could not check restart status");
+    } finally {
+      setBusy((previous) => ({ ...previous, [device.id]: "" }));
     }
   };
 
@@ -330,7 +380,14 @@ export default function DeviceFleet() {
                     {restart.status === "completed" ? <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-emerald-500" /> : <Activity size={15} className="mt-0.5 shrink-0 text-accent" />}
                     <div className="min-w-0">
                       <p className="font-black">Restart: {restart.status || "pending"}</p>
-                      <p className="break-words text-text-muted">{restart.error || (restart.status === "completed" ? "Device restarted and checked in." : "Waiting for the ESP32 acknowledgement.")}</p>
+                      <p className="break-words text-text-muted">{restart.error || (restart.status === "completed" ? "Device restarted and checked in." : restart.timedOut ? "No acknowledgement received yet. The latest command remains visible in the audit history." : "Waiting for the ESP32 acknowledgement.")}</p>
+                      {restart.timedOut && (
+                        <button type="button" onClick={() => checkRestartStatus(device)} disabled={Boolean(busyAction)}
+                          className="mt-2 inline-flex min-h-9 items-center gap-1 rounded-lg border border-border px-3 text-[10px] font-black disabled:opacity-50">
+                          {busyAction === "check-restart" ? <LoaderCircle size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                          Check restart status
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -349,7 +406,7 @@ export default function DeviceFleet() {
                         <Settings2 size={14} /> Update configuration
                       </button>
                       <button type="button" onClick={() => restartDevice(device)}
-                        disabled={!device.config.online || Boolean(busyAction) || restart?.polling}
+                        disabled={!device.config.online || Boolean(busyAction) || restart?.polling || (restart && ["pending", "accepted"].includes(restart.status))}
                         className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border px-3 py-2.5 text-xs font-black hover:border-red-400/60 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40">
                         {busyAction === "restart" || restart?.polling ? <LoaderCircle size={14} className="animate-spin" /> : <Power size={14} />}
                         {busyAction === "restart" ? "Queueing…" : restart?.polling ? "Restart pending…" : "Restart this ESP32"}
