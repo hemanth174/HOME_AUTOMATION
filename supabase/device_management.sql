@@ -251,7 +251,8 @@ begin
     'board_identifier', b.board_identifier,
     'command_type', command_row.command_type,
     'requested_at', command_row.requested_at,
-    'expires_at', command_row.expires_at
+    'expires_at', command_row.expires_at,
+    'expires_at_epoch', extract(epoch from command_row.expires_at)::bigint
   ) order by command_row.requested_at), '[]'::jsonb)
   into v_commands
   from (
