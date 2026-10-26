@@ -69,6 +69,7 @@ export async function POST(request) {
     board_id: board.id,
     user_id: userId,
     device_token_hash: hashProvisioningToken(deviceToken),
+    encrypted_device_token: encryptedDeviceToken,
     wifi_ssid: '',
     wifi_security: 'wpa2_psk',
     encrypted_wifi_password: null,
