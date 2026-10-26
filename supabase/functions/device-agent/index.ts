@@ -172,6 +172,138 @@ async function poll(request: Request, body: Record<string, unknown>) {
   });
 }
 
+async function linkedDevices(device: { config: Record<string, unknown> }) {
+  return await rest(
+    \`devices?board_id=eq.\${encodeURIComponent(String(device.config.board_id))}&user_id=eq.\${encodeURIComponent(String(device.config.user_id))}&select=id,name,relay_index,is_on,last_changed\`,
+  );
+}
+
+function deviceIdFilter(devices: Array<Record<string, unknown>>) {
+  const ids = devices.map((item) => String(item.id || "")).filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+  return ids.length ? \`in.(\${ids.join(",")})\` : "";
+}
+
+async function handleDeviceDataAction(device: { config: Record<string, unknown>; board: Record<string, unknown> }, body: Record<string, unknown>) {
+  const action = String(body.action || "");
+  const boardId = String(device.config.board_id);
+  const userId = String(device.config.user_id);
+
+  if (action === "heartbeat") {
+    const now = new Date().toISOString();
+    await rest(\`boards?id=eq.\${encodeURIComponent(boardId)}&user_id=eq.\${encodeURIComponent(userId)}\`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ last_seen: now }),
+    });
+    return json({ ok: true, server_time: now });
+  }
+
+  if (action === "read_relay" || action === "set_relay" || action === "set_feedback") {
+    const relayIndex = Number(body.relay_index);
+    if (!Number.isInteger(relayIndex) || relayIndex < 0 || relayIndex > 3) {
+      return json({ error: "Invalid relay index" }, 400);
+    }
+    const rows = await rest(
+      \`devices?board_id=eq.\${encodeURIComponent(boardId)}&user_id=eq.\${encodeURIComponent(userId)}&relay_index=eq.\${relayIndex}&select=id,name,relay_index,is_on,last_changed,feedback_on\`,
+    );
+    const target = Array.isArray(rows) ? rows[0] : null;
+    if (!target) return json({ error: "Relay is not registered on this board" }, 404);
+
+    if (action === "read_relay") {
+      return json({ ok: true, id: target.id, relay_index: relayIndex, is_on: target.is_on, last_changed: target.last_changed });
+    }
+
+    if (action === "set_relay") {
+      if (typeof body.state !== "boolean") return json({ error: "state must be boolean" }, 400);
+      const lastChanged = new Date().toISOString();
+      const updated = await rest(
+        \`devices?id=eq.\${encodeURIComponent(String(target.id))}&board_id=eq.\${encodeURIComponent(boardId)}&user_id=eq.\${encodeURIComponent(userId)}\`,
+        {
+          method: "PATCH",
+          headers: { Prefer: "return=representation" },
+          body: JSON.stringify({ is_on: body.state, last_changed: lastChanged }),
+        },
+      );
+      if (!Array.isArray(updated) || updated.length === 0) return json({ error: "Relay state update was not applied" }, 409);
+      return json({ ok: true, id: target.id, relay_index: relayIndex, state: body.state, last_changed: lastChanged });
+    }
+
+    if (typeof body.state !== "boolean") return json({ error: "state must be boolean" }, 400);
+    const updated = await rest(
+      \`devices?id=eq.\${encodeURIComponent(String(target.id))}&board_id=eq.\${encodeURIComponent(boardId)}&user_id=eq.\${encodeURIComponent(userId)}\`,
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ feedback_on: body.state }),
+      },
+    );
+    if (!Array.isArray(updated) || updated.length === 0) return json({ error: "Feedback update was not applied" }, 409);
+    return json({ ok: true, id: target.id, relay_index: relayIndex, feedback_on: body.state });
+  }
+
+  if (action === "poll_alarms" || action === "poll_schedules" || action === "claim_alarm") {
+    const devices = await linkedDevices(device);
+    const filter = deviceIdFilter(Array.isArray(devices) ? devices : []);
+    if (!filter) {
+      if (action === "poll_alarms") return json({ ok: true, alarms: [] });
+      if (action === "poll_schedules") return json({ ok: true, schedules: [] });
+      return json({ ok: false, claimed: false, reason: "board_has_no_devices" });
+    }
+
+    if (action === "poll_alarms") {
+      const alarms = await rest(
+        \`alarms?user_id=eq.\${encodeURIComponent(userId)}&device_id=\${filter}&fired=eq.false&select=id,device_id,trigger_at,action,fired&order=trigger_at.asc&limit=20\`,
+      );
+      return json({ ok: true, alarms: Array.isArray(alarms) ? alarms : [] });
+    }
+
+    if (action === "poll_schedules") {
+      const schedules = await rest(
+        \`schedules?user_id=eq.\${encodeURIComponent(userId)}&device_id=\${filter}&enabled=eq.true&select=id,device_id,time,days,action,enabled&order=time.asc&limit=32\`,
+      );
+      return json({ ok: true, schedules: Array.isArray(schedules) ? schedules : [] });
+    }
+
+    const alarmId = String(body.alarm_id || "");
+    if (!/^[0-9a-f-]{36}$/i.test(alarmId)) return json({ error: "Invalid alarm ID" }, 400);
+    const claimed = await rest(
+      \`alarms?id=eq.\${encodeURIComponent(alarmId)}&user_id=eq.\${encodeURIComponent(userId)}&device_id=\${filter}&fired=eq.false&select=id\`,
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ fired: true }),
+      },
+    );
+    return json({ ok: true, claimed: Array.isArray(claimed) && claimed.length > 0 });
+  }
+
+  if (action === "log_activity") {
+    const relayIndex = Number(body.relay_index);
+    const state = body.state;
+    const triggeredBy = String(body.triggered_by || "ESP32").slice(0, 100);
+    if (!Number.isInteger(relayIndex) || relayIndex < 0 || relayIndex > 3 || typeof state !== "boolean") {
+      return json({ error: "Invalid activity log fields" }, 400);
+    }
+    const devices = await linkedDevices(device);
+    const target = (Array.isArray(devices) ? devices : []).find((item) => Number(item.relay_index) === relayIndex);
+    if (!target) return json({ error: "Relay is not registered on this board" }, 404);
+    await rest("activity_logs", {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        user_id: userId,
+        device_id: target.id,
+        device_name: target.name,
+        action: state ? "turned ON" : "turned OFF",
+        triggered_by: triggeredBy,
+      }),
+    });
+    return json({ ok: true });
+  }
+
+  return null;
+}
+
 async function updateConfigStatus(device: { config: Record<string, unknown> }, body: Record<string, unknown>) {
   const version = Number(body.version);
   const status = String(body.status || "");
@@ -245,6 +377,8 @@ Deno.serve(async (request) => {
 
     if (action === "config_status") return await updateConfigStatus(device, body);
     if (action === "ack") return await acknowledgeCommand(device, body);
+    const dataAction = await handleDeviceDataAction(device, body);
+    if (dataAction) return dataAction;
     return json({ error: "Unsupported device action" }, 400);
   } catch (error) {
     console.error("device-agent failed", error);
