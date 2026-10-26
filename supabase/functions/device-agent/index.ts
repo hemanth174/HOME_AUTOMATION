@@ -282,7 +282,6 @@ async function poll(request: Request, body: Record<string, unknown>) {
     if (uniqueLiveIds.length) {
       const idFilter = "in.(" + uniqueLiveIds.map((id) => encodeURIComponent(id)).join(",") + ")";
       const now = new Date().toISOString();
-      const idList = uniqueLiveIds.join(",");
       await rest(
         "device_runtime_configs?board_id=" + idFilter + "&user_id=eq." + encodeURIComponent(userId),
         {
