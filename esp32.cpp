@@ -152,8 +152,9 @@ void loadHomeWifiCredentials();
 void applyPendingWifiConfiguration();
 bool sendDeviceHeartbeat();
 bool pollRemoteCommands();
-bool pollRemoteConfiguration(bool forceFetch = false);
-bool applyRemoteWifiConfiguration(const String& ssid, const String& security, const String& password, uint32_t configVersion);
+bool postDeviceCommandResult(const String& commandId, const String& status, const String& message);
+bool pollRemoteConfiguration(bool forceFetch = false, const String& commandId = "");
+bool applyRemoteWifiConfiguration(const String& ssid, const String& security, const String& password, uint32_t configVersion, const String& commandId = "");
 void logResetReason();
 bool cloudStateSupersedesQueue(const PendingUpdate& queued, const String& cloudChangedAt);
 bool getPendingRelayUpdate(int index, PendingUpdate& result);
@@ -1398,7 +1399,7 @@ bool logActivityInDB(int index, bool state, const String& triggeredBy) {
   Serial.printf("Activity log insert failed for device %d (HTTP %d).\n", index, code);
   return false;
 }
-bool applyRemoteWifiConfiguration(const String& ssid, const String& security, const String& password, uint32_t configVersion) {
+bool applyRemoteWifiConfiguration(const String& ssid, const String& security, const String& password, uint32_t configVersion, const String& commandId) {
   if (ssid.length() == 0 || ssid.length() > 32 ||
       (security != "open" && security != "wpa2_psk") ||
       (security == "wpa2_psk" && (password.length() < 8 || password.length() > 63)) ||
@@ -1408,6 +1409,9 @@ bool applyRemoteWifiConfiguration(const String& ssid, const String& security, co
   }
 
   if (ssid == homeWifiSSID && security == homeWifiSecurity && password == homeWifiPassword) {
+    if (commandId.length()) {
+      postDeviceCommandResult(commandId, "accepted", "Wi-Fi settings already match; confirming the current connection and cache.");
+    }
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     deviceConfigVersion = configVersion;
     preferences.putUInt("cfg_ver", deviceConfigVersion);
@@ -1436,6 +1440,9 @@ bool applyRemoteWifiConfiguration(const String& ssid, const String& security, co
   }
 
   if (WiFi.status() == WL_CONNECTED && WiFi.SSID() == ssid) {
+    if (commandId.length()) {
+      postDeviceCommandResult(commandId, "accepted", "The ESP32 connected to the requested Wi-Fi network; saving the verified configuration.");
+    }
     homeWifiSSID = ssid;
     homeWifiPassword = password;
     homeWifiSecurity = security;
@@ -1480,7 +1487,7 @@ bool applyRemoteWifiConfiguration(const String& ssid, const String& security, co
   return false;
 }
 
-bool pollRemoteConfiguration(bool forceFetch) {
+bool pollRemoteConfiguration(bool forceFetch, const String& commandId) {
   if (!deviceAuthToken.length() || !isHomeWifiConnected()) return false;
   HTTPClient http;
   String url = String(DEVICE_API_BASE) + "/api/esp32/config?version=" + String(deviceConfigVersion);
@@ -1506,7 +1513,7 @@ bool pollRemoteConfiguration(bool forceFetch) {
   String password = cfg["wifiPassword"] | "";
   uint32_t version = cfg["configVersion"] | 0;
   if (version <= deviceConfigVersion) return true;
-  const bool applied = applyRemoteWifiConfiguration(ssid, security, password, version);
+  const bool applied = applyRemoteWifiConfiguration(ssid, security, password, version, commandId);
   if (!applied) Serial.println("-> Remote Wi-Fi config retained as pending; previous network remains configured.");
   return applied;
 }
@@ -1604,8 +1611,9 @@ bool pollRemoteCommands() {
     JsonObject payload = command["payload"].as<JsonObject>();
     const uint32_t requestedVersion = payload["config_version"] | 0;
     bool applied = false;
+    postDeviceCommandResult(commandId, "accepted", "Configuration command received by the selected ESP32. Checking the new Wi-Fi settings.");
     if (requestedVersion > currentVersion) {
-      applied = pollRemoteConfiguration(true);
+      applied = pollRemoteConfiguration(true, commandId);
     } else {
       applied = true; // Already applied: idempotently finish a redelivered command.
     }
