@@ -257,9 +257,9 @@ export default function DeviceFleet() {
   const copySetupDetails = async (device) => {
     const info = provisioningInfoByBoard[device.id];
     if (!info) return;
-    const text = "VikaTech ESP32 initial setup\\nWi-Fi network: " + info.meshSsid +
-      "\\nWi-Fi password: " + info.meshPassword +
-      "\\nOpen: " + info.setupUrl;
+    const text = "VikaTech ESP32 initial setup\nWi-Fi network: " + info.meshSsid +
+      "\nWi-Fi password: " + info.meshPassword +
+      "\nOpen: " + info.setupUrl;
     try {
       await navigator.clipboard.writeText(text);
       setNotice("Initial setup details copied.");
