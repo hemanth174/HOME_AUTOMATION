@@ -356,6 +356,7 @@ async function poll(request: Request, body: Record<string, unknown>) {
           status: String(assigned.status || "pending"),
           requested_at: assigned.requested_at,
           expires_at: assigned.expires_at,
+          expires_at_epoch: Math.floor(Date.parse(String(assigned.expires_at)) / 1000),
           forwarded_via_board_id: boardId,
         });
       }
