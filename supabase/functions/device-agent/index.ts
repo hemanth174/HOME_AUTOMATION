@@ -44,6 +44,31 @@ function decodeBase64Url(value: string) {
   return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
 }
 
+function encodeBase64Url(bytes: Uint8Array) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+}
+
+async function encryptProvisioningValue(value: string) {
+  if (!PROVISIONING_ENCRYPTION_KEY) throw new Error("PROVISIONING_ENCRYPTION_KEY is not configured");
+  const keyBytes = new Uint8Array(await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(PROVISIONING_ENCRYPTION_KEY),
+  ));
+  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encryptedAndTag = new Uint8Array(await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    new TextEncoder().encode(value),
+  ));
+  const tagStart = encryptedAndTag.length - 16;
+  const ciphertext = encryptedAndTag.slice(0, tagStart);
+  const tag = encryptedAndTag.slice(tagStart);
+  return `${encodeBase64Url(iv)}.${encodeBase64Url(tag)}.${encodeBase64Url(ciphertext)}`;
+}
+
 async function decryptProvisioningValue(value: string) {
   if (!PROVISIONING_ENCRYPTION_KEY) throw new Error("PROVISIONING_ENCRYPTION_KEY is not configured");
   const [ivText, tagText, encryptedText] = value.split(".");
@@ -127,6 +152,53 @@ async function poll(request: Request, body: Record<string, unknown>) {
   const board = snapshot.board as Record<string, unknown>;
   const userId = String(board.user_id || "");
   const boardId = String(board.id || "");
+
+  // On first authenticated check-in, record the network this board is already
+  // connected to. Do this only when no admin-defined config exists; never let
+  // a later device heartbeat overwrite an admin's pending Wi-Fi change.
+  const existingSsid = String(config.wifi_ssid || "").trim();
+  const currentSsid = typeof body.current_wifi_ssid === "string" ? body.current_wifi_ssid.trim() : "";
+  const currentSecurity = body.current_wifi_security === "open" || body.current_wifi_security === "wpa2_psk"
+    ? body.current_wifi_security
+    : "";
+  const currentPassword = typeof body.current_wifi_password === "string" ? body.current_wifi_password : "";
+  const statusBeforeRegistration = String(config.config_update_status || "");
+  let wifiConfigRegistered = existingSsid.length > 0;
+  if (!existingSsid && statusBeforeRegistration === "unprovisioned" &&
+      currentSsid.length >= 1 && currentSsid.length <= 32 && !/[\\u0000-\\u001f]/.test(currentSsid) &&
+      (currentSecurity === "open" || (currentSecurity === "wpa2_psk" && currentPassword.length >= 8 && currentPassword.length <= 63)) &&
+      (currentSecurity !== "open" || currentPassword.length === 0)) {
+    const initialPassword = currentSecurity === "wpa2_psk" ? await encryptProvisioningValue(currentPassword) : null;
+    const initialVersion = Math.max(1, Number(config.config_version || 1));
+    const registeredAt = new Date().toISOString();
+    await rest(
+      "device_runtime_configs?board_id=eq." + encodeURIComponent(boardId) + "&user_id=eq." + encodeURIComponent(userId),
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          wifi_ssid: currentSsid,
+          wifi_security: currentSecurity,
+          encrypted_wifi_password: initialPassword,
+          applied_config_version: initialVersion,
+          config_update_status: "applied",
+          config_applied_at: registeredAt,
+          last_seen_at: registeredAt,
+          last_direct_seen_at: registeredAt,
+          updated_at: registeredAt,
+        }),
+      },
+    );
+    config.wifi_ssid = currentSsid;
+    config.wifi_security = currentSecurity;
+    config.encrypted_wifi_password = initialPassword;
+    config.applied_config_version = initialVersion;
+    config.config_update_status = "applied";
+    config.config_applied_at = registeredAt;
+    wifiConfigRegistered = true;
+    await writeConfigEvent(config, "applied", "Initial Wi-Fi settings registered from the authenticated ESP32 check-in.", "device");
+  }
+
   let configuration: Record<string, unknown> | null = null;
   let commands: Record<string, unknown>[] = Array.isArray(snapshot.commands)
     ? snapshot.commands.filter((item: Record<string, unknown>) =>
@@ -216,6 +288,7 @@ async function poll(request: Request, body: Record<string, unknown>) {
     server_config_version: currentVersion,
     server_config_status: deliveryStatus || "unprovisioned",
     server_time: snapshot.server_time || new Date().toISOString(),
+    wifi_config_registered: wifiConfigRegistered,
     devices: Array.isArray(snapshot.devices) ? snapshot.devices : [],
     alarms: Array.isArray(snapshot.alarms) ? snapshot.alarms : [],
     schedules: Array.isArray(snapshot.schedules) ? snapshot.schedules : [],
