@@ -1980,6 +1980,7 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
   preferences.putString("wifi_pass", homeWifiPassword);
   preferences.putString("wifi_sec", homeWifiSecurity);
   preferences.putInt("cfg_ver", newVersion);
+  preferences.putBool("wifi_registered", true);
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
 
   Serial.printf("-> Wi-Fi connected; configuration version %d saved to NVS.\\n", newVersion);
@@ -2083,6 +2084,20 @@ bool requestDeviceAgentSnapshot(DynamicJsonDocument& response) {
   DynamicJsonDocument requestDoc(1536);
   requestDoc["action"] = "poll";
   requestDoc["board_identifier"] = BOARD_IDENTIFIER;
+
+  // One-time bootstrap: let the server cache the network already used by this
+  // ESP32. The device-agent encrypts the passphrase before storing it. Never
+  // include this field again after the server confirms registration.
+  bool wifiRegistered = false;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  wifiRegistered = preferences.getBool("wifi_registered", false);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  if (!wifiRegistered && homeWifiSSID.length()) {
+    requestDoc["current_wifi_ssid"] = homeWifiSSID;
+    requestDoc["current_wifi_security"] = homeWifiSecurity;
+    if (homeWifiSecurity == "wpa2_psk") requestDoc["current_wifi_password"] = homeWifiPassword;
+  }
+
   int appliedVersion = 0;
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   appliedVersion = preferences.getInt("cfg_ver", 0);
@@ -2104,7 +2119,13 @@ bool requestDeviceAgentSnapshot(DynamicJsonDocument& response) {
 
   String payload;
   serializeJson(requestDoc, payload);
-  return deviceAgentPost(payload, response) && (response["ok"] | false);
+  const bool ok = deviceAgentPost(payload, response) && (response["ok"] | false);
+  if (ok && (response["wifi_config_registered"] | false)) {
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    preferences.putBool("wifi_registered", true);
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  }
+  return ok;
 }
 
 void applyDeviceSnapshot(JsonDocument& response, bool applyRelayStates) {
