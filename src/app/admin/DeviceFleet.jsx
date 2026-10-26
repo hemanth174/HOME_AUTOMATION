@@ -142,8 +142,10 @@ export default function DeviceFleet() {
       setNotice("Prepare and flash the device-agent firmware once before requesting a remote restart.");
       return;
     }
-    if (!device.config.online) {
-      setNotice("This ESP32 is offline. Reconnect it before sending a restart request.");
+    if (!device.config.directOnline) {
+      setNotice(device.config.meshOnline
+        ? "This board is visible through the local mesh but has no recent direct device-agent check-in. Remote restart is disabled so another ESP32 cannot be restarted by mistake."
+        : "This ESP32 is offline or has no recent direct device-agent check-in. Reconnect it before sending a restart request.");
       return;
     }
     const approved = window.confirm(
@@ -343,6 +345,8 @@ export default function DeviceFleet() {
             const restart = restartByBoard[device.id];
             const busyAction = busy[device.id];
             const needsEnrollment = !device.provisioned;
+            const canManageDirectly = Boolean(device.config.directOnline);
+            const meshOnly = Boolean(device.config.online && !device.config.directOnline && device.config.meshOnline);
             const setupInfo = provisioningInfoByBoard[device.id];
             const versionText = device.config.version == null
               ? "Not enrolled"
@@ -356,9 +360,9 @@ export default function DeviceFleet() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="break-words text-base font-black">{device.name || "ESP32 board"}</h3>
-                      <span className={"inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[9px] font-black uppercase " + (device.config.online ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-500" : "border-slate-500/30 bg-slate-500/10 text-text-muted")}>
-                        {device.config.online ? <Wifi size={11} /> : <WifiOff size={11} />}
-                        {device.config.online ? "Online" : "Offline"}
+                      <span className={"inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[9px] font-black uppercase " + (canManageDirectly ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-500" : meshOnly ? "border-amber-400/40 bg-amber-400/10 text-amber-600" : "border-slate-500/30 bg-slate-500/10 text-text-muted")}>
+                        {canManageDirectly ? <Wifi size={11} /> : <WifiOff size={11} />}
+                        {canManageDirectly ? "Online" : meshOnly ? "Mesh reachable" : "Offline"}
                       </span>
                     </div>
                     <p className="mt-1 break-all font-mono text-[10px] text-text-muted">{device.boardIdentifier}</p>
@@ -386,6 +390,11 @@ export default function DeviceFleet() {
                   <span>{device.devices?.length || 0} relay channels</span>
                 </div>
 
+                {meshOnly && (
+                  <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/5 p-3 text-[11px] leading-5 text-amber-600 break-words">
+                    This board is visible through the local mesh, but it has not checked in directly with the device agent. Remote Wi-Fi changes and restart are paused for this board until its own secure heartbeat is fresh.
+                  </div>
+                )}
                 {device.config.lastError && (
                   <div className="mt-3 rounded-lg border border-red-400/30 bg-red-400/5 p-3 text-[11px] leading-5 text-red-500 break-words">
                     {device.config.lastError}
@@ -418,11 +427,13 @@ export default function DeviceFleet() {
                   ) : (
                     <>
                       <button type="button" onClick={() => router.push("/admin/devices/" + device.id + "/update")}
-                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-accent px-3 py-2.5 text-xs font-black text-[var(--btn-text)] hover:brightness-105">
+                        disabled={!canManageDirectly || Boolean(busyAction)}
+                        title={!canManageDirectly ? "A fresh direct device-agent check-in is required" : "Update Wi-Fi configuration"}
+                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-accent px-3 py-2.5 text-xs font-black text-[var(--btn-text)] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40">
                         <Settings2 size={14} /> Update configuration
                       </button>
                       <button type="button" onClick={() => restartDevice(device)}
-                        disabled={!device.config.online || Boolean(busyAction) || restart?.polling || (restart && ["pending", "accepted"].includes(restart.status))}
+                        disabled={!canManageDirectly || Boolean(busyAction) || restart?.polling || (restart && ["pending", "accepted"].includes(restart.status))}
                         className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border px-3 py-2.5 text-xs font-black hover:border-red-400/60 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40">
                         {busyAction === "restart" || restart?.polling ? <LoaderCircle size={14} className="animate-spin" /> : <Power size={14} />}
                         {busyAction === "restart" ? "Queueing…" : restart?.polling ? "Restart pending…" : "Restart this ESP32"}
