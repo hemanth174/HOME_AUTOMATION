@@ -1831,6 +1831,7 @@ void applyScheduleSnapshot(JsonDocument& response) {
 
   Schedule updated[MAX_SCHEDULES];
   int count = 0;
+  bool changed = false;
   for (JsonObject row : rows) {
     if (count >= MAX_SCHEDULES) break;
     const String scheduleId = row["id"] | "";
@@ -1858,16 +1859,40 @@ void applyScheduleSnapshot(JsonDocument& response) {
     for (int d = 0; d < NUM_DEVICES; ++d) {
       if (deviceUUIDs[d] == item.deviceId) { item.deviceIndex = d; break; }
     }
+
+    bool matchedExisting = false;
     for (int old = 0; old < scheduleCount; ++old) {
-      if (schedules[old].id == item.id) { item.lastRunDate = schedules[old].lastRunDate; break; }
+      if (schedules[old].id != item.id) continue;
+      matchedExisting = true;
+      item.lastRunDate = schedules[old].lastRunDate;
+      if (schedules[old].deviceId != item.deviceId ||
+          schedules[old].time != item.time ||
+          schedules[old].days != item.days ||
+          schedules[old].action != item.action ||
+          schedules[old].enabled != item.enabled ||
+          schedules[old].deviceIndex != item.deviceIndex) {
+        changed = true;
+      }
+      break;
     }
+    if (!matchedExisting) changed = true;
+  }
+
+  if (count != scheduleCount) changed = true;
+  for (int old = 0; old < scheduleCount; ++old) {
+    bool stillExists = false;
+    for (int i = 0; i < count; ++i) {
+      if (updated[i].id == schedules[old].id) { stillExists = true; break; }
+    }
+    if (!stillExists) { changed = true; break; }
   }
 
   scheduleCount = count;
   for (int i = 0; i < count; ++i) schedules[i] = updated[i];
-  saveScheduleCache();
+  // Device snapshots arrive every 10 seconds; write NVS only if the schedule
+  // definition actually changed to avoid unnecessary flash wear.
+  if (changed) saveScheduleCache();
 }
-
 void deviceAgentTask(void* parameter) {
   (void)parameter;
   unsigned long lastAttempt = 0;
