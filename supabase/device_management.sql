@@ -261,6 +261,8 @@ begin
       and user_id = v_config.user_id
       and status = 'pending'
       and expires_at > v_now
+      -- A mesh member must not also consume a restart already assigned to its leader.
+      and gateway_board_id is null
     order by requested_at
     limit 5
   ) command_row
