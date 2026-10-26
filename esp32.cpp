@@ -144,6 +144,13 @@ void cloudSyncTask(void* parameter);
 void cloudPollTask(void* parameter);
 void configureHttp(HTTPClient& http, uint16_t connectTimeout = 2500, uint16_t requestTimeout = 4000);
 bool isCloudConfigured();
+bool isDirectCloudConfigured();
+bool isDeviceAgentConfigured();
+bool requestDeviceAgentSnapshot(DynamicJsonDocument& response);
+bool sendDeviceAgentAction(DynamicJsonDocument& requestDoc, DynamicJsonDocument& response);
+void applyDeviceSnapshot(JsonDocument& response, bool applyRelayStates);
+void applyAlarmSnapshot(JsonDocument& response);
+void applyScheduleSnapshot(JsonDocument& response);
 void loadHomeWifiCredentials();
 void applyPendingWifiConfiguration();
 void logResetReason();
@@ -160,8 +167,17 @@ bool isHomeWifiConnected() {
   return homeWifiSSID.length() > 0 && WiFi.status() == WL_CONNECTED &&
          WiFi.SSID() == homeWifiSSID;
 }
-bool isCloudConfigured() {
+bool isDirectCloudConfigured() {
   return strlen(SUPABASE_BASE) > 0 && strlen(SUPABASE_SERVICE_KEY) > 0;
+}
+bool isDeviceAgentConfigured() {
+  return strlen(DEVICE_AGENT_URL) > 0 && strlen(DEVICE_TOKEN) >= 32 &&
+         String(BOARD_IDENTIFIER) != "esp32-unconfigured";
+}
+bool isCloudConfigured() {
+  // New generic firmware uses a per-device token through the Edge Function.
+  // Legacy builds may still use the old direct REST settings during migration.
+  return isDirectCloudConfigured() || isDeviceAgentConfigured();
 }
 void logResetReason() {
   const esp_reset_reason_t reason = esp_reset_reason();
@@ -1564,6 +1580,9 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
 }
 
 void processDeviceAgentResponse(JsonDocument& response) {
+  applyDeviceSnapshot(response, true);
+  applyAlarmSnapshot(response);
+  applyScheduleSnapshot(response);
   // A restart requested before the previous reboot is acknowledged only after boot.
   String pendingRestart = "";
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
@@ -1604,6 +1623,155 @@ void processDeviceAgentResponse(JsonDocument& response) {
   }
 }
 
+
+bool sendDeviceAgentAction(DynamicJsonDocument& requestDoc, DynamicJsonDocument& response) {
+  if (!isDeviceAgentConfigured()) return false;
+  requestDoc["board_identifier"] = BOARD_IDENTIFIER;
+  String payload;
+  serializeJson(requestDoc, payload);
+  return deviceAgentPost(payload, response) && (response["ok"] | false);
+}
+
+bool requestDeviceAgentSnapshot(DynamicJsonDocument& response) {
+  DynamicJsonDocument requestDoc(512);
+  requestDoc["action"] = "poll";
+  requestDoc["board_identifier"] = BOARD_IDENTIFIER;
+  int appliedVersion = 0;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  appliedVersion = preferences.getInt("cfg_ver", 0);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  requestDoc["applied_config_version"] = appliedVersion;
+  String payload;
+  serializeJson(requestDoc, payload);
+  return deviceAgentPost(payload, response) && (response["ok"] | false);
+}
+
+void applyDeviceSnapshot(JsonDocument& response, bool applyRelayStates) {
+  const String incomingBoardId = response["board_id"] | "";
+  const String incomingUserId = response["user_id"] | "";
+  if (incomingBoardId.length()) boardUUID = incomingBoardId;
+  if (incomingUserId.length()) boardUserUUID = incomingUserId;
+
+  JsonArray rows = response["devices"].as<JsonArray>();
+  if (rows.isNull()) return;
+
+  String nextIds[NUM_DEVICES] = {"", "", "", ""};
+  String nextNames[NUM_DEVICES] = {"Device 1", "Device 2", "Device 3", "Device 4"};
+  bool nextStates[NUM_DEVICES] = {false, false, false, false};
+  String changedAt[NUM_DEVICES] = {"", "", "", ""};
+
+  for (JsonObject row : rows) {
+    const int relayIndex = row["relay_index"] | -1;
+    const String id = row["id"] | "";
+    if (relayIndex < 0 || relayIndex >= NUM_DEVICES || id.length() == 0) continue;
+    nextIds[relayIndex] = id;
+    const String name = row["name"] | "";
+    nextNames[relayIndex] = name.length() ? name : "Device " + String(relayIndex + 1);
+    nextStates[relayIndex] = row["is_on"] | false;
+    changedAt[relayIndex] = row["last_changed"] | "";
+  }
+
+  bool foundAny = false;
+  for (int i = 0; i < NUM_DEVICES; ++i) {
+    deviceUUIDs[i] = nextIds[i];
+    deviceNames[i] = nextNames[i];
+    if (deviceUUIDs[i].length()) foundAny = true;
+  }
+  if (!boardUUID.length() || !foundAny) {
+    cloudDevicesReady = false;
+    return;
+  }
+
+  if (applyRelayStates) {
+    for (int i = 0; i < NUM_DEVICES; ++i) {
+      if (deviceUUIDs[i].length() == 0) continue;
+      PendingUpdate queued;
+      bool updatePending = getPendingRelayUpdate(i, queued);
+      if (updatePending && nextStates[i] != queued.state &&
+          cloudStateSupersedesQueue(queued, changedAt[i])) {
+        if (discardPendingRelayUpdate(queued)) {
+          Serial.printf("Discarded obsolete queued relay state for device %d; server state is newer.\\n", i);
+        }
+        updatePending = getPendingRelayUpdate(i, queued);
+      }
+      const bool targetState = updatePending ? queued.state : nextStates[i];
+      if (targetState != isRelayOn[i]) {
+        Serial.printf("Device-agent desired state [%d] -> %s\\n", i, targetState ? "ON" : "OFF");
+        setRelay(i, targetState);
+      }
+    }
+  }
+  cloudDevicesReady = true;
+}
+
+void applyAlarmSnapshot(JsonDocument& response) {
+  JsonArray rows = response["alarms"].as<JsonArray>();
+  if (rows.isNull()) return;
+  for (int i = 0; i < MAX_ALARMS; ++i) alarms[i].active = false;
+  int count = 0;
+  for (JsonObject row : rows) {
+    if (count >= MAX_ALARMS) break;
+    const String alarmId = row["id"] | "";
+    const String deviceId = row["device_id"] | "";
+    const String trigger = row["trigger_at"] | "";
+    if (!alarmId.length() || !deviceId.length() || trigger.length() < 19) continue;
+    int deviceIndex = -1;
+    for (int d = 0; d < NUM_DEVICES; ++d) {
+      if (deviceUUIDs[d] == deviceId) { deviceIndex = d; break; }
+    }
+    if (deviceIndex < 0) continue;
+    alarms[count].id = alarmId;
+    alarms[count].triggerAt = trigger.substring(0, 19);
+    alarms[count].action = row["action"] | false;
+    alarms[count].deviceIndex = deviceIndex;
+    alarms[count].active = !(row["fired"] | false);
+    ++count;
+  }
+}
+
+void applyScheduleSnapshot(JsonDocument& response) {
+  JsonArray rows = response["schedules"].as<JsonArray>();
+  if (rows.isNull()) return;
+
+  Schedule updated[MAX_SCHEDULES];
+  int count = 0;
+  for (JsonObject row : rows) {
+    if (count >= MAX_SCHEDULES) break;
+    const String scheduleId = row["id"] | "";
+    const String deviceId = row["device_id"] | "";
+    if (!scheduleId.length() || !deviceId.length()) continue;
+
+    Schedule& item = updated[count++];
+    item.id = scheduleId;
+    item.deviceId = deviceId;
+    item.time = row["time"] | "00:00:00";
+    item.action = row["action"] | false;
+    item.enabled = row["enabled"] | true;
+    item.days = "";
+    item.lastRunDate = "";
+    item.deviceIndex = -1;
+    if (row["days"].is<JsonArray>()) {
+      for (JsonVariant day : row["days"].as<JsonArray>()) {
+        if (item.days.length()) item.days += ",";
+        item.days += day.as<String>();
+      }
+    } else {
+      item.days = row["days"] | "";
+    }
+
+    for (int d = 0; d < NUM_DEVICES; ++d) {
+      if (deviceUUIDs[d] == item.deviceId) { item.deviceIndex = d; break; }
+    }
+    for (int old = 0; old < scheduleCount; ++old) {
+      if (schedules[old].id == item.id) { item.lastRunDate = schedules[old].lastRunDate; break; }
+    }
+  }
+
+  scheduleCount = count;
+  for (int i = 0; i < count; ++i) schedules[i] = updated[i];
+  saveScheduleCache();
+}
+
 void deviceAgentTask(void* parameter) {
   (void)parameter;
   unsigned long lastAttempt = 0;
@@ -1613,20 +1781,10 @@ void deviceAgentTask(void* parameter) {
       vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
     }
-    if (millis() - lastAttempt >= 5000) {
+    if (millis() - lastAttempt >= 10000) {
       lastAttempt = millis();
-      int appliedVersion = 0;
-      if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
-      appliedVersion = preferences.getInt("cfg_ver", 0);
-      if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-      DynamicJsonDocument requestDoc(512);
-      requestDoc["action"] = "poll";
-      requestDoc["board_identifier"] = BOARD_IDENTIFIER;
-      requestDoc["applied_config_version"] = appliedVersion;
-      String payload;
-      serializeJson(requestDoc, payload);
-      DynamicJsonDocument response(4096);
-      if (deviceAgentPost(payload, response) && (response["ok"] | false)) {
+      DynamicJsonDocument response(16384);
+      if (requestDeviceAgentSnapshot(response)) {
         processDeviceAgentResponse(response);
       }
     }
