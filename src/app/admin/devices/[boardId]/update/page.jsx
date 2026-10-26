@@ -119,11 +119,13 @@ export default function DeviceUpdatePage() {
     return () => clearInterval(timer);
   }, [tracking, accessToken, boardId, loadStatus]);
 
-  const isComplete = config?.status === "applied" &&
+  const isDirectOnline = Boolean(config?.directOnline);
+  const isMeshOnly = Boolean(config?.meshOnline && !config?.directOnline);
+  const isComplete = isDirectOnline && config?.status === "applied" &&
     Number(config?.appliedVersion) >= Number(config?.version) && Number(config?.version) > 0;
   const isFailed = config?.status === "failed";
   const currentStep = stageFor(config?.status);
-  const isOnline = Boolean(config?.lastSeenAt) && Date.now() - new Date(config.lastSeenAt).getTime() < 120000;
+  const isOnline = Boolean(config?.online);
   const progressPercent = isComplete ? 100 : isFailed ? Math.max(14, currentStep * 20) : Math.max(8, currentStep * 20 + (tracking ? 8 : 0));
   const newestEvents = useMemo(() => events.slice(0, 12), [events]);
 
@@ -142,6 +144,12 @@ export default function DeviceUpdatePage() {
     }
     if (!config || !config.version && !config.status) {
       setError("This device needs enrollment firmware before a remote configuration can be sent.");
+      return;
+    }
+    if (!isDirectOnline) {
+      setError(isMeshOnly
+        ? "This ESP32 is visible through the local mesh but has no recent direct device-agent check-in. Reconnect this board directly before changing its Wi-Fi settings."
+        : "This ESP32 has no recent direct device-agent check-in. Reconnect it before starting a Wi-Fi update.");
       return;
     }
 
@@ -227,9 +235,9 @@ export default function DeviceUpdatePage() {
             <p className="mt-2 break-all font-mono text-[11px] text-text-muted">{board.name} · {board.boardIdentifier}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2 self-start">
-            <span className={"inline-flex items-center gap-1 rounded-full border px-3 py-2 text-[10px] font-black " + (isOnline ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-500" : "border-slate-500/30 bg-slate-500/10 text-text-muted")}>
-              {isOnline ? <Wifi size={13} /> : <WifiOff size={13} />}
-              {isOnline ? "Device online" : "Waiting for device"}
+            <span className={"inline-flex items-center gap-1 rounded-full border px-3 py-2 text-[10px] font-black " + (isDirectOnline ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-500" : isMeshOnly ? "border-amber-400/40 bg-amber-400/10 text-amber-600" : "border-slate-500/30 bg-slate-500/10 text-text-muted")}>
+              {isDirectOnline ? <Wifi size={13} /> : <WifiOff size={13} />}
+              {isDirectOnline ? "Direct device online" : isMeshOnly ? "Mesh reachable only" : isOnline ? "No direct control link" : "Waiting for device"}
             </span>
             <button type="button" onClick={() => loadStatus(true)} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border px-3 text-xs font-black">
               <RefreshCw size={13} /> Refresh
@@ -239,6 +247,13 @@ export default function DeviceUpdatePage() {
 
         {error && <div role="alert" className="rounded-xl border border-red-400/30 bg-red-400/5 p-3 text-sm font-semibold text-red-500">{error}</div>}
         {notice && <div role="status" className="rounded-xl border border-accent/30 bg-accent/5 p-3 text-sm font-semibold">{notice}</div>}
+        {!isDirectOnline && (
+          <div role="status" className={"rounded-xl border p-3 text-xs leading-5 " + (isMeshOnly ? "border-amber-400/30 bg-amber-400/5 text-amber-600" : "border-border bg-card text-text-muted")}>
+            {isMeshOnly
+              ? "This ESP32 is visible to the local mesh, but has no current direct connection to the secure device agent. Wi-Fi updates are paused until this exact board checks in. This avoids sending a configuration to a different ESP32."
+              : "The ESP32 must make a fresh direct secure check-in before the app can scan the requested Wi-Fi network or start an update."}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
           <section className="min-w-0 rounded-2xl border border-border bg-card p-4 sm:p-6">
@@ -299,7 +314,7 @@ export default function DeviceUpdatePage() {
                 The server stores the password encrypted. The ESP32 tests the network and retains the last known-good settings if the new connection fails. A board that is offline cannot receive this update until it reconnects.
               </div>
 
-              <button type="submit" disabled={submitting || !accessToken}
+              <button type="submit" disabled={submitting || !accessToken || !isDirectOnline}
                 className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 text-sm font-black text-[var(--btn-text)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50">
                 {submitting ? <LoaderCircle size={16} className="animate-spin" /> : <Cloud size={16} />}
                 {submitting ? "Saving securely…" : "Save & start device update"}
@@ -369,7 +384,7 @@ export default function DeviceUpdatePage() {
                 <div className="flex items-center gap-2 font-black text-text"><RadioTower size={14} /> Device communication</div>
                 <p className="mt-1">{tracking ? "Waiting for firmware status updates…" : "No update is running. Save settings to start a tracked update."}</p>
                 <p className="mt-1 text-[10px]">Last status refresh: {formatTime(lastFetchedAt)}</p>
-                {!isOnline && tracking && <p className="mt-2 inline-flex items-center gap-1 font-bold text-amber-500"><WifiOff size={12} /> Device is offline; the update remains pending.</p>}
+                {!isDirectOnline && tracking && <p className="mt-2 inline-flex items-center gap-1 font-bold text-amber-500"><WifiOff size={12} /> {isMeshOnly ? "Device is mesh-visible but not directly connected to the device agent." : "Device is offline; wait for a direct secure check-in before retrying."}</p>}
               </div>
             )}
 
