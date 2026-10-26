@@ -100,15 +100,22 @@ export default function DeviceFleet() {
           ) || (data.commands || [])[0];
           if (!command || !active) return;
           const terminal = ["completed", "failed", "cancelled"].includes(command.status);
-          setRestartByBoard((previous) => ({
-            ...previous,
-            [boardId]: {
-              ...previous[boardId],
-              status: command.status,
-              error: command.last_error || "",
-              polling: !terminal,
-            },
-          }));
+          setRestartByBoard((previous) => {
+            const current = previous[boardId];
+            const error = command.last_error || "";
+            if (current && current.status === command.status && current.error === error && current.polling === !terminal) {
+              return previous;
+            }
+            return {
+              ...previous,
+              [boardId]: {
+                ...current,
+                status: command.status,
+                error,
+                polling: !terminal,
+              },
+            };
+          });
           if (terminal) {
             setNotice(command.status === "completed"
               ? "ESP32 restarted and checked in successfully."
