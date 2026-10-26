@@ -16,6 +16,7 @@ String homeWifiSSID = "";
 String homeWifiPassword = "";
 String homeWifiSecurity = "wpa2_psk";
 volatile bool wifiConfigPending = false;
+volatile bool remoteWifiUpdateInProgress = false;
 const char* BOARD_IDENTIFIER = "esp32-unconfigured";
 const char* SUPABASE_BASE = "";
 const char* SUPABASE_SERVICE_KEY = "";
@@ -986,7 +987,7 @@ void applyPendingWifiConfiguration() {
 }
 void loop() {
   server.handleClient();
-  applyPendingWifiConfiguration();
+  if (!remoteWifiUpdateInProgress) applyPendingWifiConfiguration();
   for (int i = 0; i < NUM_DEVICES; i++) {
     bool currentRead = digitalRead(INPUT_PINS[i]);
     if (currentRead != lastInputRead[i]) {
@@ -1014,8 +1015,8 @@ void loop() {
     }
     lastInputRead[i] = currentRead;
   }
-  evaluateLocalRole();
-  if (!isHomeWifiConnected()) {
+  if (!remoteWifiUpdateInProgress) evaluateLocalRole();
+  if (!remoteWifiUpdateInProgress && !isHomeWifiConnected()) {
     if (localRole == ROLE_LEADER) {
       if (homeWifiSSID.length() > 0 && WiFi.status() != WL_CONNECTED &&
           millis() - lastLeaderWifiTry >= LEADER_WIFI_RETRY_INTERVAL) {
@@ -1471,7 +1472,10 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
   String newPassword = configuration["wifi_password"] | "";
   newSSID.trim();
 
-  const int appliedVersion = preferences.getInt("cfg_ver", 0);
+  int appliedVersion = 0;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  appliedVersion = preferences.getInt("cfg_ver", 0);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   if (newVersion <= appliedVersion) return true;
   if (newVersion <= 0 || newSSID.length() == 0 || newSSID.length() > 32 ||
       (newSecurity != "open" && newSecurity != "wpa2_psk") ||
@@ -1481,6 +1485,7 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
     return false;
   }
 
+  remoteWifiUpdateInProgress = true;
   reportDeviceConfigStatus(newVersion, "checking_wifi");
   Serial.printf("-> Checking configured network '%s' before applying version %d.\\n",
                 newSSID.c_str(), newVersion);
@@ -1495,6 +1500,7 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
   WiFi.scanDelete();
   if (!ssidFound) {
     reportDeviceConfigStatus(newVersion, "failed", "Requested Wi-Fi network was not found by the ESP32 scan.");
+    remoteWifiUpdateInProgress = false;
     return false;
   }
 
@@ -1537,6 +1543,7 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
     } else {
       Serial.println("!! Could not restore Wi-Fi. Previous settings remain cached; local AP recovery may be required.");
     }
+    remoteWifiUpdateInProgress = false;
     return false;
   }
 
@@ -1552,12 +1559,16 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
 
   Serial.printf("-> Wi-Fi connected; configuration version %d saved to NVS.\\n", newVersion);
   reportDeviceConfigStatus(newVersion, "applied");
+  remoteWifiUpdateInProgress = false;
   return true;
 }
 
 void processDeviceAgentResponse(JsonDocument& response) {
   // A restart requested before the previous reboot is acknowledged only after boot.
-  String pendingRestart = preferences.getString("pending_restart", "");
+  String pendingRestart = "";
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  pendingRestart = preferences.getString("pending_restart", "");
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   if (pendingRestart.length() && acknowledgeDeviceCommand(pendingRestart, "completed")) {
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     preferences.remove("pending_restart");
@@ -1604,10 +1615,14 @@ void deviceAgentTask(void* parameter) {
     }
     if (millis() - lastAttempt >= 5000) {
       lastAttempt = millis();
+      int appliedVersion = 0;
+      if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+      appliedVersion = preferences.getInt("cfg_ver", 0);
+      if (preferencesMutex) xSemaphoreGive(preferencesMutex);
       DynamicJsonDocument requestDoc(512);
       requestDoc["action"] = "poll";
       requestDoc["board_identifier"] = BOARD_IDENTIFIER;
-      requestDoc["applied_config_version"] = preferences.getInt("cfg_ver", 0);
+      requestDoc["applied_config_version"] = appliedVersion;
       String payload;
       serializeJson(requestDoc, payload);
       DynamicJsonDocument response(4096);
