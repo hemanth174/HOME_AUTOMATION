@@ -1066,6 +1066,13 @@ void loop() {
 }
 void pollDatabase() {
   if (!isCloudConfigured() || boardUUID == "") return;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument response(16384);
+    if (requestDeviceAgentSnapshot(response)) applyDeviceSnapshot(response, true);
+    return;
+  }
+
+  if (!isDirectCloudConfigured()) return;
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=id,relay_index,is_on,last_changed");
   configureHttp(http, 2000, 2000);
@@ -1090,9 +1097,8 @@ void pollDatabase() {
           }
           updatePending = getPendingRelayUpdate(rIndex, queued);
         }
-        bool relayState = isRelayOn[rIndex];
-        if (!updatePending && dbState != relayState) {
-          Serial.printf("Cloud Toggle Dev [%d] -> %s\n", rIndex, dbState ? "ON" : "OFF");
+        if (!updatePending && dbState != isRelayOn[rIndex]) {
+          Serial.printf("Cloud desired state [%d] -> %s\n", rIndex, dbState ? "ON" : "OFF");
           setRelay(rIndex, dbState);
         }
       }
@@ -1102,6 +1108,15 @@ void pollDatabase() {
 }
 bool updateDeviceInDB(int index, bool state) {
   if (!isCloudConfigured() || index < 0 || index >= NUM_DEVICES || deviceUUIDs[index] == "") return false;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument requestDoc(512), response(512);
+    requestDoc["action"] = "set_relay";
+    requestDoc["relay_index"] = index;
+    requestDoc["state"] = state;
+    return sendDeviceAgentAction(requestDoc, response) && (response["ok"] | false);
+  }
+  if (!isDirectCloudConfigured()) return false;
+
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUIDs[index]);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
@@ -1117,6 +1132,15 @@ bool updateDeviceInDB(int index, bool state) {
 }
 bool updateFeedbackInDB(int index, bool feedback) {
   if (!isCloudConfigured() || index < 0 || index >= NUM_DEVICES || deviceUUIDs[index] == "") return false;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument requestDoc(512), response(512);
+    requestDoc["action"] = "set_feedback";
+    requestDoc["relay_index"] = index;
+    requestDoc["state"] = feedback;
+    return sendDeviceAgentAction(requestDoc, response) && (response["ok"] | false);
+  }
+  if (!isDirectCloudConfigured()) return false;
+
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUIDs[index]);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
@@ -1130,13 +1154,25 @@ bool updateFeedbackInDB(int index, bool feedback) {
 bool resolveBoardAndDevices() {
   if (!isCloudConfigured() || strlen(BOARD_IDENTIFIER) == 0 ||
       String(BOARD_IDENTIFIER) == "esp32-unconfigured") return false;
+
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument response(16384);
+    if (!requestDeviceAgentSnapshot(response)) return false;
+    applyDeviceSnapshot(response, true);
+    bool foundAny = false;
+    for (int i = 0; i < NUM_DEVICES; ++i) if (deviceUUIDs[i].length()) foundAny = true;
+    return boardUUID.length() > 0 && foundAny;
+  }
+  if (!isDirectCloudConfigured()) return false;
+
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/boards?board_identifier=eq." + BOARD_IDENTIFIER + "&select=id,user_id");
   configureHttp(http);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   if (http.GET() == 200) {
-    DynamicJsonDocument doc(512); deserializeJson(doc, http.getString());
+    DynamicJsonDocument doc(512);
+    deserializeJson(doc, http.getString());
     if (doc.size() > 0) {
       boardUUID = doc[0]["id"].as<String>();
       boardUserUUID = doc[0]["user_id"].as<String>();
@@ -1144,6 +1180,7 @@ bool resolveBoardAndDevices() {
     }
   }
   http.end();
+
   bool foundAny = false;
   if (boardUUID != "") {
     http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=id,relay_index,name");
@@ -1151,14 +1188,14 @@ bool resolveBoardAndDevices() {
     http.addHeader("apikey", SUPABASE_SERVICE_KEY);
     http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
     if (http.GET() == 200) {
-      DynamicJsonDocument doc(2048); deserializeJson(doc, http.getString());
+      DynamicJsonDocument doc(2048);
+      deserializeJson(doc, http.getString());
       for (int i = 0; i < doc.size(); i++) {
         int rIndex = doc[i]["relay_index"];
         if (rIndex >= 0 && rIndex < NUM_DEVICES) {
           deviceUUIDs[rIndex] = doc[i]["id"].as<String>();
           String resolvedName = doc[i]["name"].as<String>();
           deviceNames[rIndex] = resolvedName.length() ? resolvedName : "Device " + String(rIndex + 1);
-          Serial.printf("  -> Linked Device [%d]\n", rIndex);
           foundAny = true;
         }
       }
@@ -1172,10 +1209,24 @@ bool resolveBoardAndDevices() {
   return foundAny;
 }
 bool syncAllStatesToDB() {
-  if (!isCloudConfigured() || boardUUID == "") return false;
+  if (!isCloudConfigured()) return false;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument response(16384);
+    if (!requestDeviceAgentSnapshot(response)) return false;
+    applyDeviceSnapshot(response, true);
+    int count = 0;
+    for (int i = 0; i < NUM_DEVICES; ++i) if (deviceUUIDs[i].length()) count++;
+    if (count == 0 || boardUUID.length() == 0) {
+      Serial.println("-> Initial device-agent reconciliation returned no linked relay rows.");
+      return false;
+    }
+    Serial.printf("-> Device-agent reconciled %d relay channels.\\n", count);
+    return true;
+  }
+  if (!isDirectCloudConfigured() || boardUUID == "") return false;
+
   HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID +
-             "&select=id,relay_index,is_on,last_changed");
+  http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=id,relay_index,is_on,last_changed");
   configureHttp(http);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
@@ -1188,10 +1239,10 @@ bool syncAllStatesToDB() {
     Serial.println("-> Initial relay-state read failed; cloud polling remains paused.");
     return false;
   }
+
   for (int i = 0; i < NUM_DEVICES; i++) {
     if (deviceUUIDs[i] == "") continue;
-    bool rowFound = false;
-    bool cloudState = false;
+    bool rowFound = false, cloudState = false;
     String cloudChangedAt;
     for (JsonObject row : doc.as<JsonArray>()) {
       if (row["id"].as<String>() == deviceUUIDs[i]) {
@@ -1201,30 +1252,19 @@ bool syncAllStatesToDB() {
         break;
       }
     }
-    if (!rowFound) {
-      allSynced = false;
-      Serial.printf("-> Initial relay-state row missing for device %d.\n", i);
-      continue;
-    }
+    if (!rowFound) { allSynced = false; continue; }
+
     PendingUpdate queued;
     bool updatePending = getPendingRelayUpdate(i, queued);
-    if (updatePending && cloudState != queued.state &&
-        cloudStateSupersedesQueue(queued, cloudChangedAt)) {
-      if (discardPendingRelayUpdate(queued)) {
-        Serial.printf("Discarded stale queued state for device %d during reconciliation.\n", i);
-      }
+    if (updatePending && cloudState != queued.state && cloudStateSupersedesQueue(queued, cloudChangedAt)) {
+      if (discardPendingRelayUpdate(queued)) Serial.printf("Discarded stale queued state for device %d during reconciliation.\\n", i);
       updatePending = getPendingRelayUpdate(i, queued);
     }
     const bool targetState = updatePending ? queued.state : cloudState;
     if (targetState != isRelayOn[i]) setRelay(i, targetState);
     reconciledDevices++;
   }
-  if (reconciledDevices == 0 || !allSynced) {
-    Serial.println("-> Initial relay-state reconciliation incomplete; cloud polling remains paused.");
-    return false;
-  }
-  Serial.println("-> Relay states reconciled before cloud polling.");
-  return true;
+  return reconciledDevices > 0 && allSynced;
 }
 void pollAlarms() {
   if (!isCloudConfigured() || boardUUID == "") return;
