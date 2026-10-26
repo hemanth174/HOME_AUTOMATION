@@ -234,6 +234,24 @@ void loadHomeWifiCredentials() {
   uint32_t bootCount = preferences.getUInt("boot_count", 0) + 1;
   preferences.putUInt("boot_count", bootCount);
   deviceBootId = String(BOARD_IDENTIFIER) + "-" + String(bootCount);
+
+  // Make an accepted mesh restart survive power loss during the short window
+  // between the signed HTTP acknowledgement and ESP.restart().
+  String savedMeshRestart = preferences.getString("mesh_rst_pending", "");
+  uint32_t requestedOnBoot = preferences.getUInt("mesh_rst_boot", bootCount);
+  if (savedMeshRestart.length() > 0) {
+    if (bootCount > requestedOnBoot) {
+      // A reboot occurred after acceptance; do not reboot again if the leader retries.
+      preferences.remove("mesh_rst_pending");
+      preferences.remove("mesh_rst_boot");
+      pendingMeshRestart = false;
+      pendingMeshRestartCommand = "";
+    } else {
+      pendingMeshRestartCommand = savedMeshRestart;
+      pendingMeshRestartAt = millis();
+      pendingMeshRestart = true;
+    }
+  }
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   Serial.printf("-> Home Wi-Fi credentials: %s\n",
                 homeWifiSSID.length() ? "saved" : "not configured");
@@ -711,14 +729,29 @@ void setupWebServer() {
     }
 
     String lastCommand;
+    String pendingCommand;
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     lastCommand = preferences.getString("mesh_rst_last", "");
-    if (lastCommand != commandId) preferences.putString("mesh_rst_last", commandId);
-    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+    pendingCommand = preferences.getString("mesh_rst_pending", "");
+    if (pendingCommand == commandId) {
+      // The same accepted request is still queued in this boot; resume execution.
+      pendingMeshRestartCommand = commandId;
+      pendingMeshRestartAt = millis() - 650;
+      pendingMeshRestart = true;
+      if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+      server.send(202, "application/json", "{\"success\":true,\"duplicate\":true,\"pending\":true}");
+      return;
+    }
     if (lastCommand == commandId) {
+      if (preferencesMutex) xSemaphoreGive(preferencesMutex);
       server.send(202, "application/json", "{\"success\":true,\"duplicate\":true}");
       return;
     }
+    const uint32_t currentBoot = preferences.getUInt("boot_count", 0);
+    preferences.putString("mesh_rst_last", commandId);
+    preferences.putString("mesh_rst_pending", commandId);
+    preferences.putUInt("mesh_rst_boot", currentBoot);
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
 
     pendingMeshRestartCommand = commandId;
     pendingMeshRestartAt = millis();
