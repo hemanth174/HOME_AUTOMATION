@@ -1589,7 +1589,14 @@ bool deviceAgentPost(const String& payload, DynamicJsonDocument& response) {
 }
 
 bool reportDeviceConfigStatus(int version, const String& status, const String& error) {
-  DynamicJsonDocument requestDoc(512);
+  if (status == "failed") {
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    preferences.putInt("failed_cfg_ver", version);
+    preferences.putString("failed_cfg_msg", error);
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  }
+
+  DynamicJsonDocument requestDoc(768);
   requestDoc["action"] = "config_status";
   requestDoc["board_identifier"] = BOARD_IDENTIFIER;
   requestDoc["version"] = version;
@@ -1598,7 +1605,19 @@ bool reportDeviceConfigStatus(int version, const String& status, const String& e
   String payload;
   serializeJson(requestDoc, payload);
   DynamicJsonDocument response(512);
-  return deviceAgentPost(payload, response) && (response["ok"] | false);
+  const bool reported = deviceAgentPost(payload, response) && (response["ok"] | false);
+
+  // Preserve failed status locally when Wi-Fi is lost during a rollback. Retry
+  // the report after the board regains connectivity, unless a newer config won.
+  if (reported && status == "failed") {
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    if (preferences.getInt("failed_cfg_ver", 0) == version) {
+      preferences.remove("failed_cfg_ver");
+      preferences.remove("failed_cfg_msg");
+    }
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  }
+  return reported;
 }
 
 bool acknowledgeDeviceCommand(const String& commandId, const String& status, const String& error) {
@@ -1714,6 +1733,27 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
 }
 
 void processDeviceAgentResponse(JsonDocument& response) {
+  // Report a configuration failure saved locally during an outage/failed rollback.
+  // A newer server version supersedes the old failure marker.
+  int failedVersion = 0;
+  String failedMessage;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  failedVersion = preferences.getInt("failed_cfg_ver", 0);
+  failedMessage = preferences.getString("failed_cfg_msg", "The ESP32 could not apply the Wi-Fi configuration.");
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  const int serverConfigVersion = response["server_config_version"] | 0;
+  const int localConfigVersion = preferences.getInt("cfg_ver", 0);
+  if (failedVersion > 0 && serverConfigVersion > failedVersion) {
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    preferences.remove("failed_cfg_ver");
+    preferences.remove("failed_cfg_msg");
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+    failedVersion = 0;
+  }
+  if (failedVersion > 0 && failedVersion == serverConfigVersion) {
+    reportDeviceConfigStatus(failedVersion, "failed", failedMessage);
+  }
+
   applyDeviceSnapshot(response, true);
   applyAlarmSnapshot(response);
   applyScheduleSnapshot(response);
@@ -1732,6 +1772,17 @@ void processDeviceAgentResponse(JsonDocument& response) {
 
   JsonObject config = response["config"].as<JsonObject>();
   if (!config.isNull()) applyRemoteWifiConfiguration(config);
+
+  int cachedConfigVersion = 0;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  cachedConfigVersion = preferences.getInt("cfg_ver", 0);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  const String serverConfigStatus = response["server_config_status"] | "";
+  if (serverConfigVersion > 0 && cachedConfigVersion == serverConfigVersion &&
+      (serverConfigStatus == "pending" || serverConfigStatus == "sending" ||
+       serverConfigStatus == "checking_wifi" || serverConfigStatus == "applying")) {
+    reportDeviceConfigStatus(serverConfigVersion, "applied", "");
+  }
 
   JsonArray commands = response["commands"].as<JsonArray>();
   for (JsonObject command : commands) {
