@@ -55,6 +55,14 @@ create table if not exists public.device_commands (
   result jsonb not null default '{}'::jsonb
 );
 
+-- If a command is delivered through a leader, bind that handoff to the
+-- authenticated gateway so a different board cannot acknowledge it.
+alter table public.device_commands
+  add column if not exists gateway_board_id uuid references public.boards(id) on delete set null;
+create index if not exists device_commands_gateway_board_idx
+  on public.device_commands(gateway_board_id, status, requested_at)
+  where gateway_board_id is not null;
+
 alter table public.device_runtime_configs
   add column if not exists encrypted_device_token text,
   add column if not exists mesh_ssid text not null default 'HOME-AUTO-LEADER',
