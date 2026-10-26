@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { isAdminEmail } from "@/lib/admin";
 import {
@@ -46,6 +47,9 @@ export default function AdminHardwarePage() {
   const [tracking, setTracking] = useState(null);
   const [trackState, setTrackState] = useState({ status: "idle", step: 0, message: "" });
   const [lastRefresh, setLastRefresh] = useState(null);
+  const [meshSSID, setMeshSSID] = useState("");
+  const [meshPassword, setMeshPassword] = useState("");
+  const router = useRouter();
   const refreshRef = useRef(false);
 
   const load = useCallback(async (silent = false) => {
@@ -200,14 +204,70 @@ export default function AdminHardwarePage() {
       });
       const json = await response.json();
       if (!response.ok) throw new Error(json.error || "Could not queue configuration update.");
-      setTracking({ commandId: json.commandId, commandType: "apply_config", expectedVersion: json.configVersion });
-      setTrackState({ status: "running", step: 1, message: "Configuration version " + json.configVersion + " saved. Waiting for the ESP32." });
+      router.push("/admin/hardware/track/" + json.commandId + "?type=config&version=" + json.configVersion);
       void load(true);
     } catch (err) {
       setTrackState({ status: "failed", step: 0, message: err.message || "Configuration update failed." });
     } finally {
       setBusy(false);
     }
+  };
+
+  const downloadFirmware = (firmware, fileName) => {
+    const blob = new Blob([firmware], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName || "vikatech-esp32.cpp";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+  };
+
+  const requestProvisioning = async (board, suppliedMesh = null) => {
+    setSelected(board);
+    setBusy(true);
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Your session expired. Please sign in again.");
+      const response = await fetch(API + "/" + board.id + "/provision", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + session.access_token,
+        },
+        body: JSON.stringify(suppliedMesh || {}),
+      });
+      const json = await response.json();
+      if (response.status === 409 && json.code === "MESH_SETTINGS_REQUIRED" && !suppliedMesh) {
+        setMeshSSID("");
+        setMeshPassword("");
+        setMode("provisionSettings");
+        setNotice(json.error || "Enter the current mesh network details to preserve the installed mesh.");
+        return;
+      }
+      if (!response.ok || !json.firmware) throw new Error(json.error || "Could not generate secure firmware.");
+      downloadFirmware(json.firmware, json.fileName);
+      setMode(null);
+      setSelected(null);
+      setNotice("Secure provisioning firmware downloaded. Compile and flash it once to this ESP32; remote updates and restarts will enable after its next authenticated heartbeat.");
+    } catch (err) {
+      setError(err.message || "Could not generate secure firmware.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitProvisioningSettings = async (event) => {
+    event.preventDefault();
+    if (!selected) return;
+    if (!meshSSID.trim() || meshSSID.trim().length > 32 || meshPassword.length < 8 || meshPassword.length > 63) {
+      setNotice("Enter the current mesh SSID (1–32 characters) and mesh password (8–63 characters).");
+      return;
+    }
+    await requestProvisioning(selected, { meshSSID: meshSSID.trim(), meshPassword });
   };
 
   const requestRestart = async () => {
@@ -224,8 +284,8 @@ export default function AdminHardwarePage() {
       });
       const json = await response.json();
       if (!response.ok) throw new Error(json.error || "Could not queue ESP32 restart.");
-      setTracking({ commandId: json.commandId, commandType: "restart", expectedVersion: 0 });
-      setTrackState({ status: "running", step: 1, message: "Restart command queued for " + json.boardIdentifier + "." });
+      router.push("/admin/hardware/track/" + json.commandId + "?type=restart");
+
     } catch (err) {
       setTrackState({ status: "failed", step: 0, message: err.message || "Restart request failed." });
     } finally {
@@ -293,7 +353,8 @@ export default function AdminHardwarePage() {
                 </div>
                 {!board.provisioned ? <div className="p-4 sm:p-5">
                   <div className="flex items-start gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-xs leading-5 text-amber-600"><LockKeyhole size={16} className="mt-0.5 shrink-0" /><p><b>One-time firmware setup required.</b> This board has not authenticated to the secure device API. Install the new provisioning firmware once; future Wi-Fi changes and restarts will not require reflashing.</p></div>
-                  <Link href="/admin" className="mt-3 inline-flex items-center gap-2 text-xs font-black text-accent hover:underline">Open provisioning / admin center <ExternalLink size={12} /></Link>
+                  <button disabled={busy} onClick={() => requestProvisioning(board)} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-3 py-3 text-xs font-black text-[var(--btn-text)] disabled:opacity-50"><LockKeyhole size={14} /> {busy && selected?.id === board.id ? "Preparing secure firmware…" : "Generate one-time secure firmware"}</button>
+                  <p className="mt-2 text-[10px] leading-4 text-text-muted">This is a one-time migration. Confirm the existing mesh SSID/password if the server has no matching provisioning record. Do not guess these values.</p>
                 </div> : <div className="grid grid-cols-1 gap-2 p-4 sm:grid-cols-2 sm:p-5">
                   <button onClick={() => openConfig(board)} className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-border px-3 py-3 text-xs font-black hover:border-accent/50"><Wifi size={14} /> Update Wi-Fi</button>
                   <button disabled={!board.online} onClick={() => { setSelected(board); setMode("restartConfirm"); setTracking(null); setTrackState({ status: "idle", step: 0, message: "" }); }} className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl bg-red-500/10 px-3 py-3 text-xs font-black text-red-500 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-40"><RotateCcw size={14} /> Restart ESP32</button>
@@ -309,9 +370,16 @@ export default function AdminHardwarePage() {
       {mode && <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={closeModal}>
         <section className="max-h-[94dvh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-border bg-card p-4 shadow-2xl sm:rounded-3xl sm:p-6 lg:p-8" onClick={(event) => event.stopPropagation()}>
           <header className="mb-5 flex items-start justify-between gap-3">
-            <div className="min-w-0"><p className="text-[10px] font-black uppercase tracking-[.18em] text-accent">ESP32 remote management</p><h2 className="mt-2 break-words text-xl font-black sm:text-2xl">{mode === "config" ? "Update device configuration" : mode === "restartConfirm" ? "Restart this ESP32?" : tracking?.commandType === "restart" ? "Restart progress" : "Configuration update progress"}</h2><p className="mt-1 break-all text-[10px] text-text-muted">{selected?.name} · {selected?.board_identifier}</p></div>
+            <div className="min-w-0"><p className="text-[10px] font-black uppercase tracking-[.18em] text-accent">ESP32 remote management</p><h2 className="mt-2 break-words text-xl font-black sm:text-2xl">{mode === "config" ? "Update device configuration" : mode === "provisionSettings" ? "Preserve mesh settings" : mode === "restartConfirm" ? "Restart this ESP32?" : "ESP32 remote management"}</h2><p className="mt-1 break-all text-[10px] text-text-muted">{selected?.name} · {selected?.board_identifier}</p></div>
             <button onClick={closeModal} aria-label="Close dialog" className="shrink-0 rounded-lg border border-border p-2 text-text-muted hover:text-text"><X size={16} /></button>
           </header>
+
+          {mode === "provisionSettings" && <form onSubmit={submitProvisioningSettings} className="space-y-4">
+            <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-xs leading-5 text-amber-600">These must match the currently installed leader mesh network exactly. Changing them here may disconnect existing mesh members. This is only to preserve the network during the one-time security firmware update.</div>
+            <div><label htmlFor="mesh-ssid" className="mb-1.5 block text-xs font-black">Current mesh Wi-Fi name (SSID) <span className="text-red-500">*</span></label><input id="mesh-ssid" value={meshSSID} onChange={(event) => setMeshSSID(event.target.value)} maxLength={32} required className="w-full rounded-xl border border-border bg-background px-3 py-3 text-sm outline-none focus:border-accent" placeholder="Read from the currently installed firmware" /></div>
+            <div><label htmlFor="mesh-password" className="mb-1.5 block text-xs font-black">Current mesh password <span className="text-red-500">*</span></label><input id="mesh-password" value={meshPassword} onChange={(event) => setMeshPassword(event.target.value)} type="password" minLength={8} maxLength={63} required autoComplete="new-password" className="w-full rounded-xl border border-border bg-background px-3 py-3 text-sm outline-none focus:border-accent" placeholder="Exact current mesh passphrase" /></div>
+            <div className="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:justify-end"><button type="button" onClick={closeModal} className="rounded-xl border border-border px-4 py-3 text-xs font-black">Cancel</button><button type="submit" disabled={busy} className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-xs font-black text-[var(--btn-text)] disabled:opacity-50"><Cpu size={14} /> {busy ? "Generating…" : "Generate firmware"}</button></div>
+          </form>}
 
           {mode === "config" && <form onSubmit={startUpdate} className="space-y-4">
             <div><label htmlFor="wifi-ssid" className="mb-1.5 block text-xs font-black">Wi-Fi network name (SSID) <span className="text-red-500">*</span></label><input id="wifi-ssid" value={wifiSSID} onChange={(event) => setWifiSSID(event.target.value)} maxLength={32} required autoComplete="off" className="w-full rounded-xl border border-border bg-background px-3 py-3 text-sm outline-none focus:border-accent" placeholder="Customer Wi-Fi name" /><p className="mt-1 text-[10px] text-text-muted">Required · 1–32 characters</p></div>

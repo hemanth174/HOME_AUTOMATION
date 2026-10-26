@@ -36,14 +36,17 @@ export async function POST(request) {
   if (typeof body.commandId !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.commandId)) {
     return NextResponse.json({ error: 'A valid commandId is required' }, { status: 400 });
   }
-  if (!['completed', 'failed'].includes(body.status)) {
-    return NextResponse.json({ error: 'Status must be completed or failed' }, { status: 400 });
+  if (!['accepted', 'completed', 'failed'].includes(body.status)) {
+    return NextResponse.json({ error: 'Status must be accepted, completed or failed' }, { status: 400 });
   }
-  const { data: updated, error } = await auth.admin.from('esp32_commands').update({
+  const patch = {
     status: body.status,
     result: { message: String(body.message || '').slice(0, 300) },
-    completed_at: new Date().toISOString(),
-  }).eq('id', body.commandId).eq('board_id', auth.board.id).in('status', ['queued', 'accepted'])
+  };
+  if (body.status === 'completed' || body.status === 'failed') patch.completed_at = new Date().toISOString();
+  else patch.completed_at = null;
+  const { data: updated, error } = await auth.admin.from('esp32_commands').update(patch)
+    .eq('id', body.commandId).eq('board_id', auth.board.id).in('status', ['queued', 'accepted'])
     .select('id, status').maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!updated) return NextResponse.json({ error: 'Command not found or already finalized' }, { status: 409 });
