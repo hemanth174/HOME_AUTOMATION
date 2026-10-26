@@ -692,8 +692,14 @@ void setupWebServer() {
     const String commandId = req["command_id"] | "";
     const String targetBoardIdentifier = req["board_identifier"] | "";
     const String suppliedSignature = req["signature"] | "";
-    const bool validCommandId = commandId.length() == 36 &&
-      commandId.indexOf('-') > 0 && commandId.indexOf(' ') < 0;
+    bool validCommandId = commandId.length() == 36;
+    for (int i = 0; i < 36 && validCommandId; ++i) {
+      const char ch = commandId[i];
+      const bool dashPosition = (i == 8 || i == 13 || i == 18 || i == 23);
+      const bool isHex = (ch >= '0' && ch <= '9') ||
+        (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
+      if (dashPosition ? ch != '-' : !isHex) validCommandId = false;
+    }
     if (!validCommandId || targetBoardIdentifier != String(BOARD_IDENTIFIER)) {
       server.send(403, "application/json", "{\"success\":false,\"error\":\"Command target does not match this board\"}");
       return;
@@ -2132,7 +2138,10 @@ bool acknowledgeDeviceCommand(const String& commandId, const String& status, con
   requestDoc["board_identifier"] = BOARD_IDENTIFIER;
   requestDoc["command_id"] = commandId;
   requestDoc["status"] = status;
-  if (error.length()) requestDoc["message"] = error;
+  if (error.length()) {
+    requestDoc["error"] = error;
+    requestDoc["message"] = error;
+  }
   if (targetBoardIdentifier.length()) requestDoc["target_board_identifier"] = targetBoardIdentifier;
   String payload;
   serializeJson(requestDoc, payload);
