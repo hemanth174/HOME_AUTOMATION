@@ -631,7 +631,7 @@ void becomeLeader() {
   Serial.print("-> SoftAP active. IP: ");
   Serial.println(WiFi.softAPIP());
   if (homeWifiSSID.length() > 0) {
-    WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+    if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str()); else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
     lastLeaderWifiTry = millis();
     Serial.println("-> Attempting home Wi-Fi in background; local AP remains enabled.");
   }
@@ -689,7 +689,7 @@ void evaluateLocalRole() {
       lastHomeWifiProbe = millis();
       WiFi.disconnect(false);
       delay(100);
-      WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+      if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str()); else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
       unsigned long start = millis();
       while (WiFi.status() != WL_CONNECTED && millis() - start < 4000) { delay(50); server.handleClient(); }
       if (WiFi.status() != WL_CONNECTED) {
@@ -940,11 +940,14 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setTxPower(WIFI_POWER_15dBm);
   if (homeWifiSSID.length() > 0) {
-    wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
     Serial.print("-> Connecting to Home Wi-Fi: ");
     Serial.println(homeWifiSSID);
+    if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str());
+    else wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+
     unsigned long wifiStart = millis();
-    while (wifiMulti.run() != WL_CONNECTED && millis() - wifiStart < 8000) {
+    while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 8000) {
+      if (homeWifiSecurity != "open") wifiMulti.run();
       delay(250);
     }
     if (WiFi.status() == WL_CONNECTED) {
@@ -1020,7 +1023,7 @@ void applyPendingWifiConfiguration() {
   }
   if (homeWifiSSID.length() > 0) {
     WiFi.setAutoReconnect(localRole != ROLE_LEADER);
-    WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+    if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str()); else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
     Serial.println("-> Home Wi-Fi connection started; local IP REST API remains enabled.");
   }
 }
@@ -1061,7 +1064,7 @@ void loop() {
           millis() - lastLeaderWifiTry >= LEADER_WIFI_RETRY_INTERVAL) {
         lastLeaderWifiTry = millis();
         Serial.println("-> Retrying home Wi-Fi while preserving local AP...");
-        WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+        if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str()); else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
       }
     } else if (localRole == ROLE_IDLE && homeWifiSSID.length() > 0 &&
                millis() - lastWifiRetry >= WIFI_RETRY_INTERVAL) {
