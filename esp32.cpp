@@ -462,6 +462,41 @@ void setupWebServer() {
     serializeJson(arr, res);
     server.send(200, "application/json", res);
   });
+  server.on("/setup", HTTP_GET, []() {
+    handleCORS();
+    const char* setupPage = R"rawliteral(
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VikaTech Device Setup</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#090d12;color:#eef4f8}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:18px;background:radial-gradient(circle at top,#143529 0,#090d12 56%)}
+main{width:min(100%,520px);border:1px solid #293843;border-radius:24px;padding:24px;background:#111920;box-shadow:0 24px 70px #0008}
+.brand{color:#45d483;font-size:11px;font-weight:900;letter-spacing:.2em;text-transform:uppercase}
+h1{font-size:26px;line-height:1.15;margin:10px 0}p{color:#aebcc6;font-size:13px;line-height:1.6}
+label{display:block;margin-top:16px;font-size:12px;font-weight:800}input,select{width:100%;min-height:48px;margin-top:7px;border-radius:12px;border:1px solid #34434e;background:#0a1016;color:#f8fafc;padding:0 13px;font:inherit;font-size:14px;outline:none}
+input:focus,select:focus{border-color:#43d483}.passwordRow{display:flex;gap:8px}.passwordRow input{flex:1;min-width:0}.passwordRow button{margin-top:7px;border-radius:12px;border:1px solid #34434e;background:#17242c;color:#fff;padding:0 12px}
+button.submit{width:100%;min-height:50px;margin-top:22px;border:0;border-radius:13px;background:#38cd79;color:#06130b;font-size:13px;font-weight:900}
+.message{margin-top:16px;padding:12px;border:1px solid #34434e;border-radius:12px;font-size:12px;line-height:1.6;overflow-wrap:anywhere}.good{border-color:#238754;color:#9ff2bd}.bad{border-color:#ac4747;color:#ffb6b6}.muted{font-size:11px}
+</style></head><body><main><div class="brand">VikaTech · Device Commissioning</div><h1>Connect this ESP32 to home Wi-Fi</h1>
+<p>This setup page is served by the device locally. The SSID is required. Select Open Network only when the router has no password.</p>
+<form id="wifiForm">
+<label for="ssid">Wi-Fi name (SSID) *</label><input id="ssid" name="ssid" maxlength="32" required autocomplete="off" placeholder="Enter the router or hotspot name">
+<label for="security">Wi-Fi security *</label><select id="security" name="security"><option value="wpa2_psk">WPA2-PSK · Password protected</option><option value="open">None · Open network</option></select>
+<div id="passwordWrap"><label for="password">Wi-Fi password *</label><div class="passwordRow"><input id="password" name="password" type="password" minlength="8" maxlength="63" autocomplete="new-password" placeholder="8–63 characters"><button type="button" id="showPassword">Show</button></div></div>
+<button class="submit" id="submit" type="submit">Save and connect</button></form>
+<div id="message" class="message" role="status">Connect your phone to the VikaTech ESP32 setup network, then open <b>http://192.168.4.1/setup</b>.</div>
+<p class="muted">Your router password is sent only to this local ESP32 setup endpoint. After the device connects, future changes can be managed securely from the VikaTech Admin Panel.</p>
+<script>
+const form=document.getElementById('wifiForm'),security=document.getElementById('security'),password=document.getElementById('password'),wrap=document.getElementById('passwordWrap'),message=document.getElementById('message'),submit=document.getElementById('submit');
+function updateSecurity(){const open=security.value==='open';wrap.hidden=open;password.required=!open;if(open)password.value=''}
+security.addEventListener('change',updateSecurity);updateSecurity();
+document.getElementById('showPassword').addEventListener('click',()=>{password.type=password.type==='password'?'text':'password';document.getElementById('showPassword').textContent=password.type==='password'?'Show':'Hide'});
+async function checkConnection(){try{const r=await fetch('/api/status',{cache:'no-store'});const d=await r.json();if(d.stationConnected){message.className='message good';message.textContent='Connected to home Wi-Fi. You can now return to the Admin Panel and refresh the hardware list.';submit.disabled=false;submit.textContent='Save and connect';return true}}catch(e){}return false}
+form.addEventListener('submit',async(event)=>{event.preventDefault();message.className='message';message.textContent='Saving settings on the ESP32 and starting Wi-Fi connection…';submit.disabled=true;submit.textContent='Connecting…';
+try{const response=await fetch('/api/wifi/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:document.getElementById('ssid').value,security:security.value,password:security.value==='open'?'':password.value})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not save Wi-Fi configuration');message.textContent='Settings saved. Checking the actual Wi-Fi connection…';let n=0;const timer=setInterval(async()=>{n++;if(await checkConnection()){clearInterval(timer);return}if(n>=20){clearInterval(timer);message.className='message bad';message.textContent='The ESP32 has not confirmed a home Wi-Fi connection yet. Keep this page open and check the SSID/password, then retry. Previously saved settings remain available for recovery.';submit.disabled=false;submit.textContent='Retry connection'}},1500)}catch(error){message.className='message bad';message.textContent=error.message||'Setup failed';submit.disabled=false;submit.textContent='Retry connection'}});
+</script></main></body></html>
+)rawliteral";
+    server.send(200, "text/html; charset=utf-8", setupPage);
+  });
   server.on("/api/wifi/config", HTTP_POST, []() {
     handleCORS();
     if (!server.hasArg("plain")) {
