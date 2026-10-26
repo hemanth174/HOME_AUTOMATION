@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { requireAdmin } from '@/lib/adminServer';
-import { hashProvisioningToken } from '@/lib/provisioningServer';
+import { decryptProvisioningValue, encryptProvisioningValue, hashProvisioningToken } from '@/lib/provisioningServer';
 
 export const dynamic = 'force-dynamic';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -16,11 +16,24 @@ export async function POST(request, { params }) {
     .select('id, user_id, name, board_identifier').eq('id', boardId).maybeSingle();
   if (boardError || !board) return NextResponse.json({ error: boardError?.message || 'Board not found' }, { status: 404 });
   const { data: existing, error: configError } = await auth.admin.from('device_runtime_configs')
-    .select('board_id, user_id, device_token_hash, wifi_ssid, wifi_security, encrypted_wifi_password, config_version, applied_config_version')
+    .select('board_id, user_id, device_token_hash, encrypted_device_token, last_seen_at, wifi_ssid, wifi_security, encrypted_wifi_password, config_version, applied_config_version')
     .eq('board_id', boardId).maybeSingle();
   if (configError) return NextResponse.json({ error: configError.message }, { status: 503 });
+  let deviceToken = '';
   if (existing?.device_token_hash) {
-    return NextResponse.json({ error: 'This board already has a device credential. Credential rotation requires a separate controlled workflow.' }, { status: 409 });
+    if (existing.last_seen_at) {
+      return NextResponse.json({ error: 'This board has already checked in with its device credential. Use the controlled credential-rotation workflow instead of re-enrolling it.' }, { status: 409 });
+    }
+    if (!existing.encrypted_device_token) {
+      return NextResponse.json({ error: 'This board has a legacy device token that cannot be recovered. It needs a controlled credential reset before provisioning.' }, { status: 409 });
+    }
+    try {
+      deviceToken = decryptProvisioningValue(existing.encrypted_device_token);
+    } catch {
+      return NextResponse.json({ error: 'The stored enrollment token cannot be decrypted. Check PROVISIONING_ENCRYPTION_KEY before retrying.' }, { status: 503 });
+    }
+  } else {
+    deviceToken = crypto.randomBytes(32).toString('base64url');
   }
 
   const templateUrl = process.env.ESP32_FIRMWARE_TEMPLATE_URL ||
@@ -45,7 +58,6 @@ export async function POST(request, { params }) {
     }, { status: 503 });
   }
 
-  const deviceToken = crypto.randomBytes(32).toString('base64url');
   const tokenHash = hashProvisioningToken(deviceToken);
   const agentUrl = `${(process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/$/, '')}/functions/v1/device-agent`;
   if (!agentUrl.startsWith('https://')) {
@@ -72,6 +84,7 @@ export async function POST(request, { params }) {
     board_id: board.id,
     user_id: board.user_id,
     device_token_hash: tokenHash,
+    encrypted_device_token: existing?.encrypted_device_token || encryptProvisioningValue(deviceToken),
     config_update_status: existing?.wifi_ssid ? 'pending' : 'unprovisioned',
     updated_at: now,
   };
