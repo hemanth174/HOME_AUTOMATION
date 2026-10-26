@@ -26,9 +26,16 @@ export async function GET(request, { params }) {
   const result = await loadBoardConfig(auth.admin, boardId);
   if (result.error) return NextResponse.json({ error: result.error }, { status: result.status });
   const { board, config } = result;
+  const { data: events, error: eventsError } = await auth.admin.from('device_config_events')
+    .select('id, config_version, status, message, created_by, created_at')
+    .eq('board_id', boardId)
+    .order('created_at', { ascending: false })
+    .limit(30);
+  if (eventsError) return NextResponse.json({ error: eventsError.message }, { status: 503 });
   return NextResponse.json({
     board: { id: board.id, name: board.name, boardIdentifier: board.board_identifier },
     provisioned: Boolean(config?.device_token_hash),
+    events: events || [],
     config: config ? {
       wifiSsid: config.wifi_ssid,
       wifiSecurity: config.wifi_security,
@@ -113,6 +120,14 @@ export async function POST(request, { params }) {
     .single();
   if (error || !saved) return NextResponse.json({ error: error?.message || 'Could not save configuration' }, { status: 500 });
 
+  await auth.admin.from('device_config_events').insert({
+    board_id: boardId,
+    user_id: loaded.board.user_id,
+    config_version: nextVersion,
+    status: 'pending',
+    message: 'Administrator saved a new Wi-Fi configuration; waiting for the ESP32 to pick it up.',
+    created_by: auth.user.email,
+  });
   await auth.admin.from('approval_audit_log').insert({
     user_id: loaded.board.user_id,
     actor_email: auth.user.email,
