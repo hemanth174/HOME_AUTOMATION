@@ -7,8 +7,10 @@ This migration adds authenticated per-board configuration and remote software-re
 1. Confirm the base VikaTech schema exists, including boards, devices, alarms, schedules, activity_logs, provisioning_records, account_approval_requests, and approval_audit_log.
 2. Apply supabase/device_management.sql in the VikaTech Supabase SQL Editor. It adds configuration, command and event tables, the service-role-only snapshot RPC, and first-seen enrollment tracking.
 3. Configure the exact same PROVISIONING_ENCRYPTION_KEY in Vercel (server environment) and Supabase Edge Function secrets. Use a randomly generated value of at least 32 characters. Do not use a fallback/default key.
-4. Make sure the Vercel server has NEXT_PUBLIC_SUPABASE_URL set to the VikaTech Supabase project URL. This variable is the public project URL, not a service-role key.
-5. Deploy the device-agent function without Supabase JWT verification because the ESP32 presents a unique random device token in its Bearer header; the function authenticates and scopes that token itself.
+4. Apply the latest version of the migration before deploying the latest Edge Function; it adds separate direct and mesh timestamps plus an expiry time for restart commands. The migration is idempotent and backfills existing direct check-ins.
+5. Remote configuration and restart are enabled only when the target ESP32 itself has a recent authenticated device-agent check-in. A gateway's local mesh report is not sufficient to authorize a command to another board.
+6. Make sure the Vercel server has NEXT_PUBLIC_SUPABASE_URL set to the VikaTech Supabase project URL. This variable is the public project URL, not a service-role key.
+7. Deploy the device-agent function without Supabase JWT verification because the ESP32 presents a unique random device token in its Bearer header; the function authenticates and scopes that token itself.
 
 Example commands:
 
@@ -47,7 +49,9 @@ After that one-time flash and enrollment, supported Wi-Fi configuration updates 
 
 ## Remote restart
 
-The admin API queues a row in device_commands. The board receives only commands for its own board ID, acknowledges acceptance, restarts using ESP.restart(), then reports completion after it reconnects. This is a software restart, not electrical control of the board's EN/reset button. Relay outputs and connected loads can be affected by reboot/startup behavior; test safely before using it on a live installation.
+The admin API queues a row in device_commands with a five-minute expiry. The device-agent only returns an unexpired command to the authenticated board. The board checks the returned board identifier, acknowledges acceptance, restarts using ESP.restart(), then reports completion after it reconnects. A duplicate active restart request is rejected. This is a software restart, not electrical control of the board's EN/reset button. Relay outputs and connected loads can be affected by reboot/startup behavior; test safely before using it on a live installation.
+
+Boards that are visible only through the local mesh are explicitly shown as mesh-reachable, but remote configuration and restart stay disabled. The current firmware does not yet implement authenticated cross-board mesh command forwarding, so this guard prevents a gateway from acting on a different board's command.
 
 ## Important security notes
 
