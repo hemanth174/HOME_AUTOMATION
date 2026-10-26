@@ -1817,7 +1817,7 @@ bool sendDeviceAgentAction(DynamicJsonDocument& requestDoc, DynamicJsonDocument&
 }
 
 bool requestDeviceAgentSnapshot(DynamicJsonDocument& response) {
-  DynamicJsonDocument requestDoc(512);
+  DynamicJsonDocument requestDoc(1536);
   requestDoc["action"] = "poll";
   requestDoc["board_identifier"] = BOARD_IDENTIFIER;
   int appliedVersion = 0;
@@ -1825,6 +1825,20 @@ bool requestDeviceAgentSnapshot(DynamicJsonDocument& response) {
   appliedVersion = preferences.getInt("cfg_ver", 0);
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   requestDoc["applied_config_version"] = appliedVersion;
+  requestDoc["mesh_gateway"] = localRole == ROLE_LEADER;
+
+  if (localRole == ROLE_LEADER) {
+    JsonArray nodes = requestDoc.createNestedArray("mesh_nodes");
+    for (int i = 0; i < MAX_MESH_NODES; ++i) {
+      if (!meshNodes[i].active) continue;
+      const unsigned long lastSeenMs = millis() - meshNodes[i].lastSeen;
+      if (lastSeenMs > 45000) continue;
+      JsonObject node = nodes.createNestedObject();
+      node["node_id"] = meshNodes[i].nodeId;
+      node["last_seen_ms"] = lastSeenMs;
+    }
+  }
+
   String payload;
   serializeJson(requestDoc, payload);
   return deviceAgentPost(payload, response) && (response["ok"] | false);
