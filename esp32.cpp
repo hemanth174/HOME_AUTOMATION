@@ -1742,7 +1742,6 @@ void processDeviceAgentResponse(JsonDocument& response) {
   failedMessage = preferences.getString("failed_cfg_msg", "The ESP32 could not apply the Wi-Fi configuration.");
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   const int serverConfigVersion = response["server_config_version"] | 0;
-  const int localConfigVersion = preferences.getInt("cfg_ver", 0);
   if (failedVersion > 0 && serverConfigVersion > failedVersion) {
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     preferences.remove("failed_cfg_ver");
