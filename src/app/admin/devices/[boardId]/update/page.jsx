@@ -24,6 +24,7 @@ function formatTime(value) {
 }
 
 function stageFor(status) {
+  if (status === "pending") return 1;
   if (status === "checking_wifi") return 1;
   if (status === "sending") return 2;
   if (status === "applying") return 3;
@@ -326,7 +327,7 @@ export default function DeviceUpdatePage() {
                     <div className="min-w-0 flex-1">
                       <p className={"text-xs font-black " + (completed ? "text-emerald-500" : active ? "text-accent" : "text-text-muted")}>{step.label}</p>
                       <p className="mt-0.5 text-[11px] leading-5 text-text-muted">
-                        {active && config.status === "pending" && index === 0 ? "Saved on server. Waiting for the ESP32 to check in." :
+                        {active && config.status === "pending" && index === 1 ? "Saved on the server. Waiting for the ESP32 to pick up the update before Wi-Fi testing starts." :
                          active && config.status === "checking_wifi" ? "Scanning for the selected network and testing connection settings." :
                          active && config.status === "sending" ? "The device has checked in and received the updated configuration." :
                          active && config.status === "applying" ? "The ESP32 is connecting, verifying, and saving the accepted settings." :
