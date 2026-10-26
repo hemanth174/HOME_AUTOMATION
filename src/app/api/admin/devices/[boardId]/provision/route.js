@@ -115,6 +115,15 @@ export async function POST(request, { params }) {
     }, { status: 503 });
   }
 
+  let encryptedDeviceToken = existing?.encrypted_device_token || null;
+  if (!encryptedDeviceToken) {
+    try {
+      encryptedDeviceToken = encryptProvisioningValue(deviceToken);
+    } catch (error) {
+      console.error('Device token encryption configuration error:', error);
+      return NextResponse.json({ error: 'Provisioning encryption is not configured securely on the server.' }, { status: 503 });
+    }
+  }
   const tokenHash = hashProvisioningToken(deviceToken);
   const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/$/, '');
   const agentUrl = supabaseUrl + '/functions/v1/device-agent';
@@ -148,7 +157,7 @@ export async function POST(request, { params }) {
     board_id: board.id,
     user_id: board.user_id,
     device_token_hash: tokenHash,
-    encrypted_device_token: existing?.encrypted_device_token || encryptProvisioningValue(deviceToken),
+    encrypted_device_token: encryptedDeviceToken,
     mesh_ssid: meshSsid,
     encrypted_mesh_password: encryptedMeshPassword,
     config_update_status: existing?.wifi_ssid ? 'pending' : 'unprovisioned',
