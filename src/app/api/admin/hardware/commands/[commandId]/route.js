@@ -19,9 +19,14 @@ export async function GET(request, { params }) {
   const now = Date.now();
   const lastSeenMs = config?.last_seen_at ? now - new Date(config.last_seen_at).getTime() : Infinity;
   const deviceOnline = Boolean(config?.device_online && lastSeenMs >= 0 && lastSeenMs < 90000);
-  if (command.status === 'queued' && new Date(command.expires_at).getTime() < now) {
-    await auth.admin.from('esp32_commands').update({ status: 'expired' }).eq('id', command.id).eq('status', 'queued');
-    command.status = 'expired';
+  if (['queued', 'accepted'].includes(command.status) && new Date(command.expires_at).getTime() < now) {
+    const { error: expireError } = await auth.admin.from('esp32_commands')
+      .update({ status: 'expired', completed_at: new Date().toISOString(), result: { message: 'Command expired before device confirmation.' } })
+      .eq('id', command.id).in('status', ['queued', 'accepted']);
+    if (!expireError) {
+      command.status = 'expired';
+      command.result = { message: 'Command expired before device confirmation.' };
+    }
   }
   return NextResponse.json({
     command,
