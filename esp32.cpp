@@ -779,7 +779,7 @@ void setupWebServer() {
     if (pendingCommand == commandId) {
       // The same accepted request is still queued in this boot; resume execution.
       pendingMeshRestartCommand = commandId;
-      pendingMeshRestartAt = millis() - 650;
+      pendingMeshRestartAt = millis();
       pendingMeshRestart = true;
       if (preferencesMutex) xSemaphoreGive(preferencesMutex);
       server.send(202, "application/json", "{\"success\":true,\"duplicate\":true,\"pending\":true}");
