@@ -61,7 +61,7 @@ export async function GET(request, { params }) {
     boardIdentifier: record.board_identifier,
     password,
     firmware,
-    fileName: record.board_identifier + '.cpp',
+    fileName: record.board_identifier + '.ino',
   }, { headers: { 'Cache-Control': 'no-store' } });
 }
 
