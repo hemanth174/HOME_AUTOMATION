@@ -25,8 +25,15 @@ const char* SUPABASE_SERVICE_KEY = "";
 // The per-board token is injected by the one-time provisioning download.
 // It authenticates only this device to the VikaTech device-management API;
 // it is NOT a Supabase service-role key.
+// Legacy PR #7 API credentials remain for already-provisioned boards only.
 const char* DEVICE_API_BASE = "https://home-automation-mauve-one.vercel.app";
 const char* DEVICE_AUTH_TOKEN = "";
+
+// Current secure device-agent values are injected during one-time enrollment.
+// These identifiers must exist in the generic source template so provisioning
+// can replace them; never put a Supabase service-role key in this firmware.
+const char* DEVICE_AGENT_URL = "";
+const char* DEVICE_TOKEN = "";
 String deviceAuthToken = "";
 String deviceBootId = "";
 String lastDeviceError = "";
@@ -2036,6 +2043,13 @@ void processDeviceAgentResponse(JsonDocument& response) {
   for (JsonObject command : commands) {
     String commandId = command["id"] | "";
     String type = command["command_type"] | "";
+    String targetBoard = command["board_identifier"] | "";
+    // Fail closed if a gateway ever receives a command for another mesh node.
+    // Cross-board forwarding is not implemented in this firmware path.
+    if (targetBoard.length() == 0 || targetBoard != String(BOARD_IDENTIFIER)) {
+      Serial.println("-> Ignoring remote command without an exact board identity match.");
+      continue;
+    }
     if (type != "restart" || commandId.length() == 0 || commandId == pendingRestart) continue;
 
     Serial.println("-> Remote restart command received; confirming before reboot.");
@@ -2282,7 +2296,10 @@ void cloudSyncTask(void* parameter) {
 
     // Secure device-management APIs use a per-board credential and do not
     // require the legacy Supabase service-role key embedded by older builds.
-    if (isHomeWifiConnected() && deviceAuthToken.length()) {
+    // Run the older PR #7 API path only on legacy firmware. Newly enrolled
+    // boards use the device-agent path above and must not execute two command
+    // pipelines in parallel.
+    if (!isDeviceAgentConfigured() && isHomeWifiConnected() && deviceAuthToken.length()) {
       if (millis() - lastDeviceHeartbeatAttempt >= 15000) {
         lastDeviceHeartbeatAttempt = millis();
         sendDeviceHeartbeat();
