@@ -123,8 +123,8 @@ export default function DeviceFleet() {
             setNotice(command.status === "completed"
               ? "ESP32 restarted and checked in successfully."
               : command.status === "failed"
-                ? "The ESP32 reported a restart failure."
-                : "Restart request was cancelled.");
+                ? (command.last_error || "The ESP32 reported a restart failure.")
+                : (command.last_error || "Restart request expired or was cancelled."));
             loadDevices(true);
           }
         } catch {
@@ -206,8 +206,8 @@ export default function DeviceFleet() {
         setNotice(command.status === "completed"
           ? "ESP32 restart completed and the device acknowledged its return."
           : command.status === "failed"
-            ? "ESP32 reported a restart failure."
-            : "Restart request was cancelled.");
+            ? (command.last_error || "ESP32 reported a restart failure.")
+            : (command.last_error || "Restart request expired or was cancelled."));
         loadDevices(true);
       } else {
         setNotice("Latest status: " + command.status + ". The command is still non-terminal; do not queue another restart unless you have reviewed the audit history.");
