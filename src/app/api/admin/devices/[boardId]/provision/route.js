@@ -176,7 +176,7 @@ export async function POST(request, { params }) {
 
   return NextResponse.json({
     firmware: source,
-    fileName: board.board_identifier + '-vikatech.ino.cpp',
+    fileName: board.board_identifier + '-vikatech.ino',
     board: { id: board.id, name: board.name, boardIdentifier: board.board_identifier },
     meshSsid,
     meshPassword,
