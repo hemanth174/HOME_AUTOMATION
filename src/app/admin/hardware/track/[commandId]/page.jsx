@@ -10,7 +10,7 @@ import {
   RadioTower, RotateCcw, ShieldAlert, Wifi, XCircle,
 } from "lucide-react";
 
-const UPDATE_STEPS = ["Validate", "Check Wi-Fi", "Send configuration", "Apply on ESP32", "Verify online"];
+const UPDATE_STEPS = ["Validate", "Check device link", "Send configuration", "Test new Wi-Fi", "Verify online"];
 const RESTART_STEPS = ["Validate board", "Send restart", "Restarting", "Verify reconnect"];
 
 function stamp(value) {
@@ -109,18 +109,30 @@ export default function Esp32CommandTrackerPage() {
           return;
         }
 
+        const deviceProgress = command.result?.message || "";
         if (!json.deviceOnline) {
-          setState({ status: "running", step: 1, message: "The ESP32 is offline. The configuration stays saved and will wait for the device to reconnect." });
-          addEvent("wifi-wait", "Checking device connectivity", "No fresh heartbeat yet. The command remains queued.");
+          setState({ status: "running", step: 1, message: "The ESP32 is not reporting a fresh heartbeat. The new configuration remains on the server; the device must reconnect before it can be applied." });
+          addEvent("wifi-wait", "Checking device connectivity", "No fresh heartbeat yet. Delivery has not been confirmed.");
         } else if (command.status === "queued") {
-          setState({ status: "running", step: 2, message: "Wi-Fi and device heartbeat are available. Waiting for the ESP32 to fetch the configuration." });
+          setState({ status: "running", step: 2, message: "The admin request is validated and saved. The ESP32 is online; waiting for it to retrieve this configuration." });
           addEvent("config-queued", "Configuration saved securely", "Waiting for delivery to the selected ESP32.");
         } else if (command.status === "accepted") {
-          setState({ status: "running", step: 3, message: "The ESP32 received the command and is testing the new Wi-Fi settings before saving them." });
-          addEvent("config-accepted", "Configuration received", "The device is validating connectivity and applying its staged settings.");
+          const targetWifiConnected =
+            deviceProgress.includes("connected to the requested Wi-Fi network") ||
+            deviceProgress.includes("Wi-Fi settings already match");
+          setState({
+            status: "running",
+            step: targetWifiConnected ? 4 : 3,
+            message: deviceProgress || "The ESP32 accepted the command and is validating the configuration.",
+          });
+          addEvent(
+            targetWifiConnected ? "target-wifi-connected" : "config-accepted-" + deviceProgress,
+            targetWifiConnected ? "Wi-Fi connection verified" : "Configuration received by ESP32",
+            deviceProgress || "The device is validating connectivity and applying its staged settings.",
+          );
         } else {
-          setState({ status: "running", step: 4, message: "The command is being verified against the ESP32's next heartbeat and applied configuration version." });
-          addEvent("config-verifying", "Verifying applied version", "Waiting for version " + expectedVersion + " to be reported by the device.");
+          setState({ status: "running", step: 4, message: deviceProgress || "The command is being verified against the ESP32's next heartbeat and applied configuration version." });
+          addEvent("config-verifying-" + (deviceProgress || "pending"), "Verifying applied version", deviceProgress || ("Waiting for version " + expectedVersion + " to be reported by the device."));
         }
       } catch (err) {
         if (!cancelled) {
