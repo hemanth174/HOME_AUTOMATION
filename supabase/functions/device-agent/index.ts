@@ -163,6 +163,8 @@ async function poll(request: Request, body: Record<string, unknown>) {
     board_identifier: board.board_identifier,
     board_id: board.id,
     user_id: board.user_id,
+    server_config_version: Number(config.config_version || 0),
+    server_config_status: String(config.config_update_status || "unprovisioned"),
     server_time: snapshot.server_time || new Date().toISOString(),
     devices: Array.isArray(snapshot.devices) ? snapshot.devices : [],
     alarms: Array.isArray(snapshot.alarms) ? snapshot.alarms : [],
@@ -312,7 +314,21 @@ async function updateConfigStatus(device: { config: Record<string, unknown> }, b
     return json({ error: "Invalid configuration acknowledgement" }, 400);
   }
   const currentVersion = Number(device.config.config_version);
-  if (version > currentVersion) return json({ error: "Configuration version is newer than the server" }, 409);
+  if (version !== currentVersion) {
+    return json({ error: "This acknowledgement refers to an obsolete configuration version" }, 409);
+  }
+
+  const currentStatus = String(device.config.config_update_status || "pending");
+  const terminalStatus = currentStatus === "applied" || currentStatus === "failed";
+  if (terminalStatus && status !== currentStatus) {
+    return json({ error: "The configuration version already has a terminal result" }, 409);
+  }
+  const rank: Record<string, number> = {
+    pending: 0, sending: 1, checking_wifi: 2, applying: 3, applied: 4, failed: 4,
+  };
+  if ((rank[status] ?? -1) < (rank[currentStatus] ?? -1)) {
+    return json({ ok: true, ignored: true, reason: "stale_status_transition" });
+  }
 
   const patch: Record<string, unknown> = {
     config_update_status: status,
