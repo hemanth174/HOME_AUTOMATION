@@ -1,7 +1,11 @@
 import crypto from 'crypto';
 
 function key() {
-  return crypto.createHash('sha256').update(process.env.PROVISIONING_ENCRYPTION_KEY || 'change-this-provisioning-key').digest();
+  const configuredKey = process.env.PROVISIONING_ENCRYPTION_KEY;
+  if (!configuredKey || configuredKey.length < 32) {
+    throw new Error('PROVISIONING_ENCRYPTION_KEY must be configured with at least 32 characters.');
+  }
+  return crypto.createHash('sha256').update(configuredKey).digest();
 }
 
 export function encryptProvisioningValue(value) {
