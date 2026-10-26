@@ -3,6 +3,12 @@ import { requireAdmin } from '@/lib/adminServer';
 import { encryptProvisioningValue } from '@/lib/provisioningServer';
 
 export const dynamic = 'force-dynamic';
+function isOnline(value) {
+  if (!value) return false;
+  const timestamp = new Date(value).getTime();
+  const age = Date.now() - timestamp;
+  return Number.isFinite(timestamp) && age >= 0 && age < 120_000;
+}
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 async function loadBoardConfig(admin, boardId) {
@@ -11,7 +17,7 @@ async function loadBoardConfig(admin, boardId) {
     .eq('id', boardId).maybeSingle();
   if (boardError || !board) return { error: boardError?.message || 'Board not found', status: 404 };
   const { data: config, error } = await admin.from('device_runtime_configs')
-    .select('board_id, user_id, device_token_hash, first_seen_at, wifi_ssid, wifi_security, config_version, applied_config_version, config_update_status, last_seen_at, last_error, encrypted_wifi_password, config_requested_at, config_applied_at')
+    .select('board_id, user_id, device_token_hash, first_seen_at, wifi_ssid, wifi_security, config_version, applied_config_version, config_update_status, last_seen_at, last_direct_seen_at, last_mesh_seen_at, last_error, encrypted_wifi_password, config_requested_at, config_applied_at')
     .eq('board_id', boardId).maybeSingle();
   if (error) return { error: error.message, status: 503 };
   return { board, config: config || null };
@@ -44,6 +50,9 @@ export async function GET(request, { params }) {
       appliedVersion: config.applied_config_version,
       status: config.config_update_status,
       lastSeenAt: config.last_seen_at || board.last_seen || null,
+      directOnline: isOnline(config.last_direct_seen_at),
+      meshOnline: isOnline(config.last_mesh_seen_at),
+      online: isOnline(config.last_direct_seen_at) || isOnline(config.last_mesh_seen_at) || isOnline(config.last_seen_at || board.last_seen),
       lastError: config.last_error,
       requestedAt: config.config_requested_at,
       appliedAt: config.config_applied_at,
@@ -82,6 +91,12 @@ export async function POST(request, { params }) {
     return NextResponse.json({
       error: 'This board is not enrolled for remote configuration yet. Prepare and flash the generic device-agent firmware once from the Hardware Fleet tab.',
       requiresProvisioning: true,
+    }, { status: 409 });
+  }
+  if (!isOnline(loaded.config.last_direct_seen_at)) {
+    return NextResponse.json({
+      error: 'This ESP32 has no recent direct connection to the device agent. Reconnect it to its configured Wi-Fi and wait for a fresh device check-in before changing Wi-Fi settings.',
+      code: 'DEVICE_NOT_DIRECTLY_CONNECTED',
     }, { status: 409 });
   }
 
