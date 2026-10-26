@@ -6,7 +6,8 @@ export const dynamic = 'force-dynamic';
 function isOnline(lastSeenAt) {
   if (!lastSeenAt) return false;
   const timestamp = new Date(lastSeenAt).getTime();
-  return Number.isFinite(timestamp) && Date.now() - timestamp < 120_000;
+  const age = Date.now() - timestamp;
+  return Number.isFinite(timestamp) && age >= 0 && age < 120_000;
 }
 
 export async function GET(request) {
@@ -15,7 +16,7 @@ export async function GET(request) {
 
   const { data: boards, error } = await auth.admin
     .from('boards')
-    .select('id, name, board_identifier, user_id, created_at, last_seen, hardware_model, devices(id, name, relay_index, is_on), device_runtime_configs(board_id, config_version, applied_config_version, device_token_hash, first_seen_at, config_update_status, last_seen_at, last_error, wifi_ssid, wifi_security, config_requested_at, config_applied_at)')
+    .select('id, name, board_identifier, user_id, created_at, last_seen, hardware_model, devices(id, name, relay_index, is_on), device_runtime_configs(board_id, config_version, applied_config_version, device_token_hash, first_seen_at, config_update_status, last_seen_at, last_direct_seen_at, last_mesh_seen_at, last_error, wifi_ssid, wifi_security, config_requested_at, config_applied_at)')
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -34,6 +35,8 @@ export async function GET(request) {
       ? board.device_runtime_configs[0] || null
       : board.device_runtime_configs || null;
     const lastSeenAt = config?.last_seen_at || board.last_seen || null;
+    const directOnline = isOnline(config?.last_direct_seen_at);
+    const meshOnline = isOnline(config?.last_mesh_seen_at);
     return {
       id: board.id,
       name: board.name,
@@ -51,13 +54,16 @@ export async function GET(request) {
         wifiSsid: config.wifi_ssid,
         wifiSecurity: config.wifi_security,
         lastSeenAt,
-        online: isOnline(lastSeenAt),
+        directOnline,
+        meshOnline,
+        online: directOnline || meshOnline || isOnline(lastSeenAt),
         lastError: config.last_error,
         configRequestedAt: config.config_requested_at,
         configAppliedAt: config.config_applied_at,
       } : {
         version: null, appliedVersion: null, status: 'unprovisioned',
-        wifiSsid: '', wifiSecurity: 'wpa2_psk', lastSeenAt, online: isOnline(lastSeenAt),
+        wifiSsid: '', wifiSecurity: 'wpa2_psk', lastSeenAt,
+        directOnline: false, meshOnline: false, online: isOnline(lastSeenAt),
         lastError: null, configRequestedAt: null, configAppliedAt: null,
       },
     };
