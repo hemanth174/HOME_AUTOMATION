@@ -1904,7 +1904,9 @@ void cloudSyncTask(void* parameter) {
     }
     if (boardUUID != "" && !cloudDevicesReady) {
       if (syncAllStatesToDB()) {
-        Serial.println("-> Cloud state reconciled; 1-second cloud polling enabled.");
+        Serial.println(isDeviceAgentConfigured()
+          ? "-> Device-agent snapshots active; legacy direct polling is disabled."
+          : "-> Cloud state reconciled; cloud polling enabled.");
         cloudDevicesReady = true;
       } else {
         Serial.println("-> Initial relay-state reconciliation failed; cloud polling paused.");
@@ -1913,7 +1915,7 @@ void cloudSyncTask(void* parameter) {
       }
     }
     if (boardUUID != "") {
-      if (millis() - lastSchedulePoll >= SCHEDULE_POLL_INTERVAL) {
+      if (!isDeviceAgentConfigured() && millis() - lastSchedulePoll >= SCHEDULE_POLL_INTERVAL) {
         lastSchedulePoll = millis();
         pollSchedules();
       }
@@ -1928,11 +1930,11 @@ void cloudSyncTask(void* parameter) {
       }
       currentNtpTime = time(nullptr);
       if (currentNtpTime >= 100000) {
-        if (millis() - lastCloudAlarmPoll >= ALARM_POLL_INTERVAL) {
+        if (!isDeviceAgentConfigured() && millis() - lastCloudAlarmPoll >= ALARM_POLL_INTERVAL) {
           lastCloudAlarmPoll = millis();
           pollAlarms();
         }
-        if (millis() - lastCloudHeartbeat >= HEARTBEAT_INTERVAL) {
+        if (!isDeviceAgentConfigured() && millis() - lastCloudHeartbeat >= HEARTBEAT_INTERVAL) {
           lastCloudHeartbeat = millis();
           sendHeartbeat();
         }
@@ -1963,7 +1965,7 @@ void cloudPollTask(void* parameter) {
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
     }
-    pollDatabase();
+    if (!isDeviceAgentConfigured()) pollDatabase();
     vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL));
   }
 }
