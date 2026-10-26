@@ -67,3 +67,21 @@ comment on column public.device_runtime_configs.device_token_hash is
   'SHA-256 hash of a unique per-board bearer token. Never store or return the plaintext token here.';
 comment on table public.device_commands is
   'Auditable server-to-board commands. Devices receive commands through the device-agent Edge Function.';
+
+
+create table if not exists public.device_config_events (
+  id bigint generated always as identity primary key,
+  board_id uuid not null references public.boards(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  config_version integer not null,
+  status text not null,
+  message text,
+  created_by text not null default 'device',
+  created_at timestamptz not null default now()
+);
+create index if not exists device_config_events_board_time_idx
+  on public.device_config_events(board_id, created_at desc);
+alter table public.device_config_events enable row level security;
+revoke all on public.device_config_events from anon, authenticated;
+comment on table public.device_config_events is
+  'Append-only status timeline for remote ESP32 configuration updates; read via the admin API only.';
