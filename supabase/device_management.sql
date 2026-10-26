@@ -46,6 +46,9 @@ create table if not exists public.device_commands (
   result jsonb not null default '{}'::jsonb
 );
 
+alter table public.device_runtime_configs
+  add column if not exists encrypted_device_token text;
+
 create index if not exists device_runtime_configs_user_id_idx
   on public.device_runtime_configs(user_id);
 create index if not exists device_runtime_configs_last_seen_idx
