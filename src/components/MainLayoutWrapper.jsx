@@ -18,7 +18,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
   const VALID_ROUTES = ['/', '/local', '/login', '/pending', '/denied', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/settings', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/admin'];
   const PUBLIC_ROUTES = ['/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales'];
   const isTrackPage = cleanPath.startsWith('/track/');
-  const isAdminDeviceRoute = /^\\/admin\\/devices\\/[^/]+\\/update$/.test(cleanPath);
+  const isAdminDeviceRoute = cleanPath.startsWith('/admin/devices/') && cleanPath.endsWith('/update') && cleanPath.split('/').length === 5;
   const isPublicPage = PUBLIC_ROUTES.includes(cleanPath) || isTrackPage;
   const is404Page = !VALID_ROUTES.includes(cleanPath) && !isTrackPage && !isAdminDeviceRoute;
   const isLoginPage = cleanPath === '/login';
