@@ -1268,6 +1268,14 @@ bool syncAllStatesToDB() {
 }
 void pollAlarms() {
   if (!isCloudConfigured() || boardUUID == "") return;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument requestDoc(512), response(8192);
+    requestDoc["action"] = "poll_alarms";
+    if (sendDeviceAgentAction(requestDoc, response)) applyAlarmSnapshot(response);
+    return;
+  }
+  if (!isDirectCloudConfigured()) return;
+
   String queryIds = "";
   for (int i = 0; i < NUM_DEVICES; i++) {
     if (deviceUUIDs[i] != "") {
@@ -1284,22 +1292,7 @@ void pollAlarms() {
   if (http.GET() == 200) {
     DynamicJsonDocument doc(2048);
     deserializeJson(doc, http.getString());
-    for (int i = 0; i < MAX_ALARMS; i++) alarms[i].active = false;
-    for (int i = 0; i < doc.size() && i < MAX_ALARMS; i++) {
-      alarms[i].id = doc[i]["id"].as<String>();
-      String t = doc[i]["trigger_at"].as<String>();
-      alarms[i].triggerAt = t.substring(0, 19);
-      alarms[i].action = doc[i]["action"].as<bool>();
-      String aDevId = doc[i]["device_id"].as<String>();
-      alarms[i].deviceIndex = -1;
-      for (int d = 0; d < NUM_DEVICES; d++) {
-        if (deviceUUIDs[d] == aDevId) {
-          alarms[i].deviceIndex = d;
-          break;
-        }
-      }
-      alarms[i].active = (alarms[i].deviceIndex != -1);
-    }
+    applyAlarmSnapshot(doc);
   }
   http.end();
 }
@@ -1345,6 +1338,14 @@ void loadScheduleCache() {
 
 void pollSchedules() {
   if (!isCloudConfigured() || boardUUID == "") return;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument requestDoc(512), response(8192);
+    requestDoc["action"] = "poll_schedules";
+    if (sendDeviceAgentAction(requestDoc, response)) applyScheduleSnapshot(response);
+    return;
+  }
+  if (!isDirectCloudConfigured()) return;
+
   String ids;
   for (int i = 0; i < NUM_DEVICES; ++i) if (deviceUUIDs[i].length()) {
     if (ids.length()) ids += ",";
@@ -1353,31 +1354,24 @@ void pollSchedules() {
   if (!ids.length()) return;
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/schedules?device_id=in.(" + ids + ")&enabled=eq.true&select=id,device_id,action,time,days,enabled");
-  configureHttp(http); http.addHeader("apikey", SUPABASE_SERVICE_KEY);
+  configureHttp(http);
+  http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
-  int code = http.GET(); String body = code == 200 ? http.getString() : ""; http.end();
-  if (code != 200) { Serial.printf("Schedule refresh failed (HTTP %d); using saved schedules.\\n", code); return; }
-  DynamicJsonDocument doc(8192);
-  if (deserializeJson(doc, body) || !doc.is<JsonArray>()) { Serial.println("Invalid schedules response; keeping saved cache."); return; }
-  Schedule updated[MAX_SCHEDULES]; int count = 0;
-  for (JsonObject o : doc.as<JsonArray>()) {
-    if (count >= MAX_SCHEDULES) break;
-    Schedule &s = updated[count++];
-    s.id = o["id"] | ""; s.deviceId = o["device_id"] | "";
-    s.time = o["time"] | "00:00:00"; s.action = o["action"] | false;
-    s.enabled = o["enabled"] | true; s.days = ""; s.lastRunDate = ""; s.deviceIndex = -1;
-    if (o["days"].is<JsonArray>()) {
-      for (JsonVariant d : o["days"].as<JsonArray>()) { if (s.days.length()) s.days += ","; s.days += d.as<String>(); }
-    }
-    for (int d = 0; d < NUM_DEVICES; ++d) if (deviceUUIDs[d] == s.deviceId) s.deviceIndex = d;
-    for (int old = 0; old < scheduleCount; ++old) if (schedules[old].id == s.id) s.lastRunDate = schedules[old].lastRunDate;
+  int code = http.GET();
+  String body = code == 200 ? http.getString() : "";
+  http.end();
+  if (code != 200) {
+    Serial.printf("Schedule refresh failed (HTTP %d); using saved schedules.\\n", code);
+    return;
   }
-  scheduleCount = count;
-  for (int i = 0; i < count; ++i) schedules[i] = updated[i];
-  saveScheduleCache();
+  DynamicJsonDocument doc(8192);
+  if (deserializeJson(doc, body) || !doc.is<JsonArray>()) {
+    Serial.println("Invalid schedules response; keeping saved cache.");
+    return;
+  }
+  applyScheduleSnapshot(doc);
   Serial.printf("Synced %d schedules; cached for offline execution.\\n", scheduleCount);
 }
-
 void runLocalSchedules() {
   if (time(nullptr) < 100000) return; // never fire against an unset clock
   loadScheduleCache();
@@ -1411,6 +1405,17 @@ void runLocalSchedules() {
 
 bool markAlarmFiredInDB(String alarmId) {
   if (!isCloudConfigured() || alarmId.length() == 0) return false;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument requestDoc(512), response(512);
+    requestDoc["action"] = "claim_alarm";
+    requestDoc["alarm_id"] = alarmId;
+    if (!sendDeviceAgentAction(requestDoc, response)) return false;
+    const bool claimed = response["claimed"] | false;
+    if (claimed) Serial.println("Alarm atomically claimed through device agent.");
+    return claimed;
+  }
+  if (!isDirectCloudConfigured()) return false;
+
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/alarms?id=eq." + alarmId + "&fired=eq.false&select=id");
   configureHttp(http);
@@ -1418,22 +1423,28 @@ bool markAlarmFiredInDB(String alarmId) {
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Prefer", "return=representation");
-  int code = http.PATCH("{\"fired\":true}");
+  int code = http.PATCH("{\\"fired\\":true}");
   String responseBody = code == 200 ? http.getString() : "";
   http.end();
   DynamicJsonDocument doc(256);
   DeserializationError parseError = deserializeJson(doc, responseBody);
   const bool claimed = code == 200 && !parseError && doc.is<JsonArray>() && doc.size() > 0;
-  if (claimed) {
-    Serial.println("Alarm atomically claimed in Supabase.");
-  } else {
-    Serial.printf("Alarm not claimed (HTTP %d); another executor may have claimed it or cloud is unavailable.\n", code);
-  }
+  if (!claimed) Serial.printf("Alarm not claimed (HTTP %d); another executor may have claimed it or cloud is unavailable.\\n", code);
   return claimed;
 }
 bool logActivityInDB(int index, bool state, const String& triggeredBy) {
   if (!isCloudConfigured() || index < 0 || index >= NUM_DEVICES ||
-      deviceUUIDs[index] == "" || boardUserUUID == "") return false;
+      deviceUUIDs[index] == "") return false;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument requestDoc(512), response(512);
+    requestDoc["action"] = "log_activity";
+    requestDoc["relay_index"] = index;
+    requestDoc["state"] = state;
+    requestDoc["triggered_by"] = triggeredBy;
+    return sendDeviceAgentAction(requestDoc, response) && (response["ok"] | false);
+  }
+  if (!isDirectCloudConfigured() || boardUserUUID == "") return false;
+
   DynamicJsonDocument doc(512);
   doc["user_id"] = boardUserUUID;
   doc["device_id"] = deviceUUIDs[index];
@@ -1451,11 +1462,21 @@ bool logActivityInDB(int index, bool state, const String& triggeredBy) {
   int code = http.POST(payload);
   http.end();
   if (code == 201 || code == 200 || code == 204) return true;
-  Serial.printf("Activity log insert failed for device %d (HTTP %d).\n", index, code);
+  Serial.printf("Activity log insert failed for device %d (HTTP %d).\\n", index, code);
   return false;
 }
 void sendHeartbeat() {
   if (!isCloudConfigured() || boardUUID == "") return;
+  if (isDeviceAgentConfigured()) {
+    // The agent snapshot refreshes last_seen automatically; this explicit action
+    // also supports installations whose snapshot task is temporarily paused.
+    DynamicJsonDocument requestDoc(256), response(512);
+    requestDoc["action"] = "heartbeat";
+    sendDeviceAgentAction(requestDoc, response);
+    return;
+  }
+  if (!isDirectCloudConfigured()) return;
+
   String nowIso = getIsoTime();
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/boards?id=eq." + boardUUID);
@@ -1463,14 +1484,11 @@ void sendHeartbeat() {
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");
-  String payload = "{\"last_seen\":\"" + nowIso + "\"}";
+  String payload = "{\\"last_seen\\":\\"" + nowIso + "\\"}";
   int httpCode = http.PATCH(payload);
-  if (httpCode == 200 || httpCode == 204) {
-    Serial.println("Heartbeat synced to Cloud.");
-  }
+  if (httpCode == 200 || httpCode == 204) Serial.println("Heartbeat synced to Cloud.");
   http.end();
 }
-
 bool deviceAgentPost(const String& payload, DynamicJsonDocument& response) {
   if (WiFi.status() != WL_CONNECTED || strlen(DEVICE_AGENT_URL) == 0 ||
       strlen(DEVICE_TOKEN) < 32 || String(BOARD_IDENTIFIER) == "esp32-unconfigured") return false;
