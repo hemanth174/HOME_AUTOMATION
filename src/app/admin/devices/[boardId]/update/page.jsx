@@ -93,8 +93,12 @@ export default function DeviceUpdatePage() {
       setLastFetchedAt(new Date().toISOString());
       if (data.config?.status === "applied" && Number(data.config.appliedVersion) >= Number(data.config.version)) {
         setTracking(false);
+      } else if (data.config?.status === "failed") {
+        setTracking(false);
+      } else if (["pending", "checking_wifi", "sending", "applying"].includes(data.config?.status)) {
+        // Resume the tracker after page refresh/navigation; status comes from device acknowledgements.
+        setTracking(true);
       }
-      if (data.config?.status === "failed") setTracking(false);
     } catch (err) {
       if (!silent) setError(err.message || "Could not load device configuration");
     } finally {
@@ -208,9 +212,14 @@ export default function DeviceUpdatePage() {
       <div className="mx-auto max-w-6xl space-y-4 sm:space-y-6">
         <header className="flex flex-col gap-3 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <button type="button" onClick={() => router.push("/admin")} className="mb-4 inline-flex min-h-10 items-center gap-2 rounded-xl border border-border px-3 text-xs font-black hover:border-accent">
-              <ArrowLeft size={14} /> Back to Hardware Fleet
-            </button>
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => router.push("/admin")} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border px-3 text-xs font-black hover:border-accent">
+                <ArrowLeft size={14} /> Back to Hardware Fleet
+              </button>
+              <a href="/" className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border px-3 text-xs font-black hover:border-accent">
+                <ArrowLeft size={14} /> Back to VikaTech site
+              </a>
+            </div>
             <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[.2em] text-accent">
               <ShieldCheck size={14} /> VikaTech secure configuration
             </div>
