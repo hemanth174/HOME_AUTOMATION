@@ -11,7 +11,7 @@ async function loadBoardConfig(admin, boardId) {
     .eq('id', boardId).maybeSingle();
   if (boardError || !board) return { error: boardError?.message || 'Board not found', status: 404 };
   const { data: config, error } = await admin.from('device_runtime_configs')
-    .select('board_id, user_id, device_token_hash, wifi_ssid, wifi_security, config_version, applied_config_version, config_update_status, last_seen_at, last_error, encrypted_wifi_password, config_requested_at, config_applied_at')
+    .select('board_id, user_id, device_token_hash, first_seen_at, wifi_ssid, wifi_security, config_version, applied_config_version, config_update_status, last_seen_at, last_error, encrypted_wifi_password, config_requested_at, config_applied_at')
     .eq('board_id', boardId).maybeSingle();
   if (error) return { error: error.message, status: 503 };
   return { board, config: config || null };
@@ -34,7 +34,7 @@ export async function GET(request, { params }) {
   if (eventsError) return NextResponse.json({ error: eventsError.message }, { status: 503 });
   return NextResponse.json({
     board: { id: board.id, name: board.name, boardIdentifier: board.board_identifier },
-    provisioned: Boolean(config?.device_token_hash),
+    provisioned: Boolean(config?.first_seen_at),
     events: events || [],
     config: config ? {
       wifiSsid: config.wifi_ssid,
