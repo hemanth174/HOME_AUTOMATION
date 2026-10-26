@@ -179,6 +179,8 @@ export async function POST(request, { params }) {
     fileName: board.board_identifier + '-vikatech.ino.cpp',
     board: { id: board.id, name: board.name, boardIdentifier: board.board_identifier },
     meshSsid,
+    meshPassword,
+    setupUrl: 'http://192.168.4.1/setup',
     requiresFlash: true,
     message: 'Flash this firmware once to enroll this board. Future Wi-Fi changes and restart requests can then be delivered remotely.',
   }, { headers: { 'Cache-Control': 'no-store' } });
