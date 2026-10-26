@@ -189,10 +189,12 @@ begin
   end if;
 
   select coalesce(jsonb_agg(jsonb_build_object(
-    'id', c.id,
-    'command_type', c.command_type,
-    'requested_at', c.requested_at
-  ) order by c.requested_at), '[]'::jsonb)
+    'id', command_row.id,
+    'board_id', command_row.board_id,
+    'board_identifier', b.board_identifier,
+    'command_type', command_row.command_type,
+    'requested_at', command_row.requested_at
+  ) order by command_row.requested_at), '[]'::jsonb)
   into v_commands
   from (
     select *
@@ -202,7 +204,8 @@ begin
       and status = 'pending'
     order by requested_at
     limit 5
-  ) c;
+  ) command_row
+  join public.boards b on b.id = command_row.board_id and b.user_id = command_row.user_id;
 
   return jsonb_build_object(
     'ok', true,
