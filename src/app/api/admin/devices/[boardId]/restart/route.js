@@ -44,7 +44,7 @@ export async function POST(request, { params }) {
     .update({
       status: 'cancelled',
       completed_at: nowIso,
-      last_error: 'Restart request expired before the ESP32 accepted it.',
+      last_error: 'Restart request expired before completion.',
     })
     .eq('board_id', boardId)
     .in('status', ['pending', 'accepted'])
@@ -113,7 +113,7 @@ export async function GET(request, { params }) {
     .update({
       status: 'cancelled',
       completed_at: nowIso,
-      last_error: 'Restart request expired before the ESP32 accepted it.',
+      last_error: 'Restart request expired before completion.',
     })
     .eq('board_id', boardId)
     .in('status', ['pending', 'accepted'])
