@@ -15,7 +15,7 @@ export async function GET(request) {
 
   const { data: boards, error } = await auth.admin
     .from('boards')
-    .select('id, name, board_identifier, user_id, created_at, last_seen, hardware_model, devices(id, name, relay_index, is_on), device_runtime_configs(board_id, config_version, applied_config_version, config_update_status, last_seen_at, last_error, wifi_ssid, wifi_security, config_requested_at, config_applied_at)')
+    .select('id, name, board_identifier, user_id, created_at, last_seen, hardware_model, devices(id, name, relay_index, is_on), device_runtime_configs(board_id, config_version, applied_config_version, device_token_hash, config_update_status, last_seen_at, last_error, wifi_ssid, wifi_security, config_requested_at, config_applied_at)')
     .order('created_at', { ascending: false });
 
   if (error) {
