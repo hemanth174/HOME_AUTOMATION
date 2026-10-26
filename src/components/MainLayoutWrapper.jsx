@@ -18,8 +18,9 @@ export default function MainLayoutWrapper({ children, className = "" }) {
   const VALID_ROUTES = ['/', '/local', '/login', '/pending', '/denied', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/profile', '/settings', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/admin'];
   const PUBLIC_ROUTES = ['/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales'];
   const isTrackPage = cleanPath.startsWith('/track/');
+  const isAdminDeviceRoute = /^\\/admin\\/devices\\/[^/]+\\/update$/.test(cleanPath);
   const isPublicPage = PUBLIC_ROUTES.includes(cleanPath) || isTrackPage;
-  const is404Page = !VALID_ROUTES.includes(cleanPath) && !isTrackPage;
+  const is404Page = !VALID_ROUTES.includes(cleanPath) && !isTrackPage && !isAdminDeviceRoute;
   const isLoginPage = cleanPath === '/login';
   const isPendingPage = cleanPath === '/pending';
   const isDeniedPage = cleanPath === '/denied';
@@ -29,7 +30,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const { isLocalConnected, localUrl } = useLocalConnection();
 
-  const fullWidthPage = isLoginPage || isPendingPage || isDeniedPage || cleanPath === '/admin' || is404Page || isPublicPage || (!user && cleanPath === '/');
+  const fullWidthPage = isLoginPage || isPendingPage || isDeniedPage || cleanPath === '/admin' || isAdminDeviceRoute || is404Page || isPublicPage || (!user && cleanPath === '/');
 
   useEffect(() => {
     const syncSidebar = (event) => {
@@ -55,7 +56,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
     // Admin and public tracking pages are cloud-only views. Do not run the
     // local-mode connectivity probe here; its timeout intentionally appears
     // as a cancelled generate_204 request in browser DevTools.
-    if (cleanPath === '/admin' || isPendingPage || isDeniedPage || isTrackPage) {
+    if (cleanPath === '/admin' || isAdminDeviceRoute || isPendingPage || isDeniedPage || isTrackPage) {
       setIsClientOnline(true);
       return undefined;
     }
@@ -143,7 +144,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
         const currentUser = session?.user || null;
         setUser(currentUser);
 
-        if (currentUser && !isPendingPage && !isDeniedPage && !isLoginPage && !isPublicPage && cleanPath !== '/admin') {
+        if (currentUser && !isPendingPage && !isDeniedPage && !isLoginPage && !isPublicPage && cleanPath !== '/admin' && !isAdminDeviceRoute) {
           const approvalResponse = await fetch('/api/account/status', { cache: 'no-store', headers: { Authorization: `Bearer ${session.access_token}` } });
           if (approvalResponse.ok) {
             const approvalData = await approvalResponse.json();
