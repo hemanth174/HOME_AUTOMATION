@@ -309,51 +309,55 @@ async function poll(request: Request, body: Record<string, unknown>) {
         const age = Date.now() - directAt;
         if (Number.isFinite(directAt) && age >= 0 && age < 120000) directRecentlySeen.add(String(row.board_id));
       }
-      const meshOnlyIds = uniqueLiveIds.filter((id) => !directRecentlySeen.has(id));
-      if (meshOnlyIds.length) {
-        const meshIdFilter = "in.(" + meshOnlyIds.map((id) => encodeURIComponent(id)).join(",") + ")";
-        const pendingRows = await rest(
-          "device_commands?board_id=" + meshIdFilter +
-            "&user_id=eq." + encodeURIComponent(userId) +
-            "&command_type=eq.restart&status=eq.pending&expires_at=gt." + encodeURIComponent(now) +
-            "&select=id,board_id,user_id,command_type,status,requested_at,expires_at,gateway_board_id",
-        );
-        for (const candidate of Array.isArray(pendingRows) ? pendingRows : []) {
-          const commandId = String(candidate.id || "");
-          const targetBoardId = String(candidate.board_id || "");
-          const existingGatewayId = candidate.gateway_board_id ? String(candidate.gateway_board_id) : "";
-          const targetIdentifier = knownIdentifierByBoardId[targetBoardId];
-          if (!/^[0-9a-f-]{36}$/i.test(commandId) || !targetIdentifier || !validBoardIdentifier(targetIdentifier)) continue;
-          if (existingGatewayId && existingGatewayId !== boardId) continue;
+      // Query all currently reachable mesh boards so a command already assigned
+      // to this gateway is still delivered if the member regains direct Wi-Fi
+      // connectivity before the gateway has forwarded the restart.
+      const liveIdFilter = "in.(" + uniqueLiveIds.map((id) => encodeURIComponent(id)).join(",") + ")";
+      const pendingRows = await rest(
+        "device_commands?board_id=" + liveIdFilter +
+          "&user_id=eq." + encodeURIComponent(userId) +
+          "&command_type=eq.restart&status=eq.pending&expires_at=gt." + encodeURIComponent(now) +
+          "&select=id,board_id,user_id,command_type,status,requested_at,expires_at,gateway_board_id",
+      );
+      for (const candidate of Array.isArray(pendingRows) ? pendingRows : []) {
+        const commandId = String(candidate.id || "");
+        const targetBoardId = String(candidate.board_id || "");
+        const existingGatewayId = candidate.gateway_board_id ? String(candidate.gateway_board_id) : "";
+        const targetIdentifier = knownIdentifierByBoardId[targetBoardId];
+        if (!/^[0-9a-f-]{36}$/i.test(commandId) || !targetIdentifier || !validBoardIdentifier(targetIdentifier)) continue;
+        if (existingGatewayId && existingGatewayId !== boardId) continue;
 
-          let assigned = candidate;
-          if (!existingGatewayId) {
-            const assignmentRows = await rest(
-              "device_commands?id=eq." + encodeURIComponent(commandId) +
-                "&board_id=eq." + encodeURIComponent(targetBoardId) +
-                "&user_id=eq." + encodeURIComponent(userId) +
-                "&status=eq.pending&expires_at=gt." + encodeURIComponent(now) +
-                "&or=(gateway_board_id.is.null,gateway_board_id.eq." + encodeURIComponent(boardId) + ")",
-              {
-                method: "PATCH",
-                headers: { Prefer: "return=representation" },
-                body: JSON.stringify({ gateway_board_id: boardId }),
-              },
-            );
-            if (!Array.isArray(assignmentRows) || assignmentRows.length === 0) continue;
-            assigned = assignmentRows[0];
-          }
-          commands.push({
-            id: commandId,
-            board_id: targetBoardId,
-            board_identifier: targetIdentifier,
-            command_type: "restart",
-            status: String(assigned.status || "pending"),
-            requested_at: assigned.requested_at,
-            expires_at: assigned.expires_at,
-            forwarded_via_board_id: boardId,
-          });
+        // A fresh direct connection owns only commands that have not been
+        // assigned to a gateway. Once assigned, finish the same gateway path.
+        if (!existingGatewayId && directRecentlySeen.has(targetBoardId)) continue;
+
+        let assigned = candidate;
+        if (!existingGatewayId) {
+          const assignmentRows = await rest(
+            "device_commands?id=eq." + encodeURIComponent(commandId) +
+              "&board_id=eq." + encodeURIComponent(targetBoardId) +
+              "&user_id=eq." + encodeURIComponent(userId) +
+              "&status=eq.pending&expires_at=gt." + encodeURIComponent(now) +
+              "&or=(gateway_board_id.is.null,gateway_board_id.eq." + encodeURIComponent(boardId) + ")",
+            {
+              method: "PATCH",
+              headers: { Prefer: "return=representation" },
+              body: JSON.stringify({ gateway_board_id: boardId }),
+            },
+          );
+          if (!Array.isArray(assignmentRows) || assignmentRows.length === 0) continue;
+          assigned = assignmentRows[0];
         }
+        commands.push({
+          id: commandId,
+          board_id: targetBoardId,
+          board_identifier: targetIdentifier,
+          command_type: "restart",
+          status: String(assigned.status || "pending"),
+          requested_at: assigned.requested_at,
+          expires_at: assigned.expires_at,
+          forwarded_via_board_id: boardId,
+        });
       }
     }
   }
