@@ -55,6 +55,14 @@ create table if not exists public.device_commands (
   result jsonb not null default '{}'::jsonb
 );
 
+-- If a command is delivered through a leader, bind that handoff to the
+-- authenticated gateway so a different board cannot acknowledge it.
+alter table public.device_commands
+  add column if not exists gateway_board_id uuid references public.boards(id) on delete set null;
+create index if not exists device_commands_gateway_board_idx
+  on public.device_commands(gateway_board_id, status, requested_at)
+  where gateway_board_id is not null;
+
 alter table public.device_runtime_configs
   add column if not exists encrypted_device_token text,
   add column if not exists mesh_ssid text not null default 'HOME-AUTO-LEADER',
@@ -243,7 +251,8 @@ begin
     'board_identifier', b.board_identifier,
     'command_type', command_row.command_type,
     'requested_at', command_row.requested_at,
-    'expires_at', command_row.expires_at
+    'expires_at', command_row.expires_at,
+    'expires_at_epoch', extract(epoch from command_row.expires_at)::bigint
   ) order by command_row.requested_at), '[]'::jsonb)
   into v_commands
   from (
@@ -253,6 +262,8 @@ begin
       and user_id = v_config.user_id
       and status = 'pending'
       and expires_at > v_now
+      -- A mesh member must not also consume a restart already assigned to its leader.
+      and gateway_board_id is null
     order by requested_at
     limit 5
   ) command_row

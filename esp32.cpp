@@ -8,6 +8,7 @@
 #include <Preferences.h>
 #include <time.h>
 #include <esp_system.h>
+#include <mbedtls/md.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
@@ -115,6 +116,9 @@ struct MeshDeviceCache {
 #define MAX_MESH_DEVICE_CACHE (MAX_MESH_NODES * NUM_DEVICES)
 MeshDeviceCache meshDeviceCache[MAX_MESH_DEVICE_CACHE];
 int meshCacheCount = 0;
+volatile bool pendingMeshRestart = false;
+unsigned long pendingMeshRestartAt = 0;
+String pendingMeshRestartCommand = "";
 unsigned long lastWifiRetry     = 0;  const unsigned long WIFI_RETRY_INTERVAL      = 3000;   // Station reconnect attempts (was: every loop!)
 unsigned long lastLeaderWifiTry = 0;  const unsigned long LEADER_WIFI_RETRY_INTERVAL = 30000; // Leader home-Wi-Fi probes (non-blocking begin)
 unsigned long lastRoleEval      = 0;  const unsigned long ROLE_EVAL_INTERVAL       = 5000;   // Role decision cadence
@@ -177,8 +181,18 @@ void logResetReason();
 void deviceAgentTask(void* parameter);
 bool deviceAgentPost(const String& payload, DynamicJsonDocument& response);
 bool reportDeviceConfigStatus(int version, const String& status, const String& error = "");
-bool acknowledgeDeviceCommand(const String& commandId, const String& status, const String& error = "");
+bool acknowledgeDeviceCommand(const String& commandId, const String& status, const String& error = "", const String& targetBoardIdentifier = "");
 bool applyRemoteWifiConfiguration(JsonObject configuration);
+String meshRestartSignature(const String& commandId, const String& targetBoardIdentifier);
+bool meshRestartSignatureMatches(const String& supplied, const String& expected);
+bool meshRestartQueued(const String& commandId);
+bool meshRestartForwarded(const String& commandId);
+bool markMeshRestartForwarded(const String& commandId);
+bool storePendingMeshRestart(const String& commandId, const String& targetBoardIdentifier, uint32_t expiresAtEpoch);
+bool setPendingMeshRestartAccepted(const String& commandId);
+bool removePendingMeshRestart(const String& commandId);
+void processPendingMeshRestartAcks();
+bool forwardMeshRestart(const String& commandId, const String& targetBoardIdentifier, uint32_t expiresAtEpoch = 0);
 void processDeviceAgentResponse(JsonDocument& response);
 bool cloudStateSupersedesQueue(const PendingUpdate& queued, const String& cloudChangedAt);
 bool getPendingRelayUpdate(int index, PendingUpdate& result);
@@ -230,6 +244,24 @@ void loadHomeWifiCredentials() {
   uint32_t bootCount = preferences.getUInt("boot_count", 0) + 1;
   preferences.putUInt("boot_count", bootCount);
   deviceBootId = String(BOARD_IDENTIFIER) + "-" + String(bootCount);
+
+  // Make an accepted mesh restart survive power loss during the short window
+  // between the signed HTTP acknowledgement and ESP.restart().
+  String savedMeshRestart = preferences.getString("mesh_rst_pending", "");
+  uint32_t requestedOnBoot = preferences.getUInt("mesh_rst_boot", bootCount);
+  if (savedMeshRestart.length() > 0) {
+    if (bootCount > requestedOnBoot) {
+      // A reboot occurred after acceptance; do not reboot again if the leader retries.
+      preferences.remove("mesh_rst_pending");
+      preferences.remove("mesh_rst_boot");
+      pendingMeshRestart = false;
+      pendingMeshRestartCommand = "";
+    } else {
+      pendingMeshRestartCommand = savedMeshRestart;
+      pendingMeshRestartAt = millis();
+      pendingMeshRestart = true;
+    }
+  }
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   Serial.printf("-> Home Wi-Fi credentials: %s\n",
                 homeWifiSSID.length() ? "saved" : "not configured");
@@ -366,6 +398,247 @@ void handleToggleAllMesh(bool on) {
   String out = "{\"success\":true,\"action\":\"all_" + String(on ? "on" : "off") + "\",\"membersReached\":" + String(reached) + "}";
   server.send(200, "application/json", out);
 }
+String meshRestartSignature(const String& commandId, const String& targetBoardIdentifier) {
+  if (strlen(MESH_PASS) < 8 || commandId.length() == 0 || targetBoardIdentifier.length() == 0) return "";
+  const String message = commandId + "|" + targetBoardIdentifier;
+  const mbedtls_md_info_t* mdInfo = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  if (!mdInfo) return "";
+  unsigned char digest[32];
+  if (mbedtls_md_hmac(mdInfo,
+      reinterpret_cast<const unsigned char*>(MESH_PASS), strlen(MESH_PASS),
+      reinterpret_cast<const unsigned char*>(message.c_str()), message.length(), digest) != 0) return "";
+  char hexDigest[65];
+  for (size_t i = 0; i < sizeof(digest); ++i) sprintf(hexDigest + (i * 2), "%02x", digest[i]);
+  hexDigest[64] = '\0';
+  return String(hexDigest);
+}
+
+bool meshRestartSignatureMatches(const String& supplied, const String& expected) {
+  if (supplied.length() != 64 || expected.length() != 64) return false;
+  unsigned char diff = 0;
+  for (size_t i = 0; i < 64; ++i) diff |= static_cast<unsigned char>(supplied[i] ^ expected[i]);
+  return diff == 0;
+}
+
+String readPendingMeshRestartQueue() {
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  String value = preferences.getString("mesh_rst_q", "[]");
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  return value;
+}
+
+bool meshRestartQueued(const String& commandId) {
+  DynamicJsonDocument doc(2048);
+  if (deserializeJson(doc, readPendingMeshRestartQueue()) || !doc.is<JsonArray>()) return false;
+  for (JsonObject item : doc.as<JsonArray>()) {
+    if (String(item["id"] | "") == commandId) return true;
+  }
+  return false;
+}
+
+bool meshRestartForwarded(const String& commandId) {
+  DynamicJsonDocument doc(2048);
+  if (deserializeJson(doc, readPendingMeshRestartQueue()) || !doc.is<JsonArray>()) return false;
+  for (JsonObject item : doc.as<JsonArray>()) {
+    if (String(item["id"] | "") == commandId) return item["forwarded"] | false;
+  }
+  return false;
+}
+
+bool markMeshRestartForwarded(const String& commandId) {
+  DynamicJsonDocument doc(2048);
+  if (deserializeJson(doc, readPendingMeshRestartQueue()) || !doc.is<JsonArray>()) return false;
+  bool found = false;
+  for (JsonObject item : doc.as<JsonArray>()) {
+    if (String(item["id"] | "") == commandId) {
+      item["forwarded"] = true;
+      found = true;
+    }
+  }
+  if (!found) return false;
+  String serialized;
+  if (serializeJson(doc, serialized) == 0) return false;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  size_t written = preferences.putString("mesh_rst_q", serialized);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  return written > 0;
+}
+
+bool storePendingMeshRestart(const String& commandId, const String& targetBoardIdentifier, uint32_t expiresAtEpoch) {
+  DynamicJsonDocument doc(2048);
+  String raw = readPendingMeshRestartQueue();
+  if (deserializeJson(doc, raw) || !doc.is<JsonArray>()) {
+    doc.clear();
+    doc.to<JsonArray>();
+  }
+  JsonArray rows = doc.as<JsonArray>();
+  for (JsonObject item : rows) {
+    if (String(item["id"] | "") == commandId) return true;
+  }
+  if (rows.size() >= MAX_MESH_NODES) return false;
+  JsonObject item = rows.createNestedObject();
+  item["id"] = commandId;
+  item["target_board_identifier"] = targetBoardIdentifier;
+  item["forwarded"] = false;
+  item["accepted_acknowledged"] = false;
+  item["expires_at_epoch"] = expiresAtEpoch;
+  String serialized;
+  if (serializeJson(doc, serialized) == 0) return false;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  size_t written = preferences.putString("mesh_rst_q", serialized);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  return written > 0;
+}
+
+bool setPendingMeshRestartAccepted(const String& commandId) {
+  DynamicJsonDocument doc(2048);
+  if (deserializeJson(doc, readPendingMeshRestartQueue()) || !doc.is<JsonArray>()) return false;
+  bool found = false;
+  for (JsonObject item : doc.as<JsonArray>()) {
+    if (String(item["id"] | "") == commandId) {
+      item["accepted_acknowledged"] = true;
+      found = true;
+    }
+  }
+  if (!found) return false;
+  String serialized;
+  if (serializeJson(doc, serialized) == 0) return false;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  size_t written = preferences.putString("mesh_rst_q", serialized);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  return written > 0;
+}
+
+bool removePendingMeshRestart(const String& commandId) {
+  DynamicJsonDocument source(2048);
+  if (deserializeJson(source, readPendingMeshRestartQueue()) || !source.is<JsonArray>()) return false;
+  DynamicJsonDocument next(2048);
+  JsonArray remaining = next.to<JsonArray>();
+  bool removed = false;
+  for (JsonObject item : source.as<JsonArray>()) {
+    if (String(item["id"] | "") == commandId) { removed = true; continue; }
+    JsonObject copy = remaining.createNestedObject();
+    copy.set(item);
+  }
+  if (!removed) return true;
+  String serialized;
+  if (serializeJson(next, serialized) == 0) return false;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  size_t written = preferences.putString("mesh_rst_q", serialized);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  return written > 0;
+}
+
+void processPendingMeshRestartAcks() {
+  DynamicJsonDocument doc(2048);
+  if (deserializeJson(doc, readPendingMeshRestartQueue()) || !doc.is<JsonArray>()) return;
+  struct PendingMeshItem { String id; String target; uint32_t expiresAtEpoch; bool forwarded; bool accepted; };
+  PendingMeshItem pending[MAX_MESH_NODES];
+  int count = 0;
+  for (JsonObject item : doc.as<JsonArray>()) {
+    if (count >= MAX_MESH_NODES) break;
+    pending[count].id = item["id"] | "";
+    pending[count].target = item["target_board_identifier"] | "";
+    pending[count].expiresAtEpoch = item["expires_at_epoch"] | 0;
+    pending[count].forwarded = item["forwarded"] | false;
+    pending[count].accepted = item["accepted_acknowledged"] | false;
+    if (pending[count].id.length() && pending[count].target.length()) count++;
+  }
+  const time_t nowEpoch = time(nullptr);
+  for (int i = 0; i < count; ++i) {
+    if (pending[i].expiresAtEpoch > 0 && nowEpoch > 100000 &&
+        static_cast<uint32_t>(nowEpoch) >= pending[i].expiresAtEpoch) {
+      Serial.println("-> Removing expired mesh restart from the durable queue: " + pending[i].id);
+      removePendingMeshRestart(pending[i].id);
+      continue;
+    }
+    if (!pending[i].forwarded) {
+      // A power cut may have happened after persisting but before dispatch.
+      // Try delivery again only for an entry not confirmed by the member.
+      forwardMeshRestart(pending[i].id, pending[i].target, pending[i].expiresAtEpoch);
+      continue;
+    }
+    if (!pending[i].accepted) {
+      if (acknowledgeDeviceCommand(pending[i].id, "accepted",
+            "Restart request was accepted by the authenticated mesh member.",
+            pending[i].target)) {
+        setPendingMeshRestartAccepted(pending[i].id);
+        pending[i].accepted = true;
+      }
+    }
+    // The forwarder marks the node inactive at acceptance. It becomes active
+    // again only after the member sends a fresh join/report after reboot.
+    if (pending[i].accepted && meshNodeActive(pending[i].target)) {
+      if (acknowledgeDeviceCommand(pending[i].id, "completed",
+            "The selected mesh member rejoined after its restart.",
+            pending[i].target)) {
+        removePendingMeshRestart(pending[i].id);
+        Serial.println("-> Mesh member restart completed: " + pending[i].target);
+      }
+    }
+  }
+}
+
+bool forwardMeshRestart(const String& commandId, const String& targetBoardIdentifier, uint32_t expiresAtEpoch) {
+  if (!commandId.length() || !targetBoardIdentifier.length() ||
+      targetBoardIdentifier == String(BOARD_IDENTIFIER) || localRole != ROLE_LEADER) return false;
+  const bool alreadyQueued = meshRestartQueued(commandId);
+  if (alreadyQueued && meshRestartForwarded(commandId)) return true;
+
+  const int slot = findMeshNode(targetBoardIdentifier);
+  if (slot < 0 || millis() - meshNodes[slot].lastSeen > 45000) return false;
+  if (!alreadyQueued && !storePendingMeshRestart(commandId, targetBoardIdentifier, expiresAtEpoch)) {
+    Serial.println("-> Could not persist mesh restart state; refusing to restart member.");
+    return false;
+  }
+
+  DynamicJsonDocument requestDoc(512);
+  requestDoc["command_id"] = commandId;
+  requestDoc["board_identifier"] = targetBoardIdentifier;
+  requestDoc["signature"] = meshRestartSignature(commandId, targetBoardIdentifier);
+  String payload;
+  serializeJson(requestDoc, payload);
+
+  HTTPClient http;
+  http.begin("http://" + meshNodes[slot].ip + "/api/mesh/restart");
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(1800);
+  const int code = http.POST(payload);
+  const String responseBody = code >= 200 && code < 300 ? http.getString() : "";
+  http.end();
+
+  DynamicJsonDocument result(256);
+  const bool accepted = (code == 202 || code == 200) &&
+    !deserializeJson(result, responseBody) && (result["success"] | false);
+  if (!accepted) {
+    removePendingMeshRestart(commandId);
+    Serial.printf("-> Mesh restart forward failed for %s (HTTP %d).\\n",
+                  targetBoardIdentifier.c_str(), code);
+    return false;
+  }
+
+  // Record successful HTTP acceptance before the cloud acknowledgement. If the
+  // gateway reboots now, it must not reissue a new restart to this member.
+  if (!markMeshRestartForwarded(commandId)) {
+    Serial.println("-> Member accepted the restart, but delivery state could not be persisted; duplicate-safe retry will continue.");
+  }
+
+  // Mark inactive before making the cloud acknowledgement call, so a member
+  // rejoin during that HTTPS call cannot be mistaken for pre-restart presence.
+  const int currentSlot = findMeshNode(targetBoardIdentifier);
+  if (currentSlot >= 0) {
+    meshNodes[currentSlot].active = false;
+    if (meshNodeCount > 0) meshNodeCount--;
+  }
+  if (acknowledgeDeviceCommand(commandId, "accepted",
+        "Restart request was forwarded to the exact mesh member.",
+        targetBoardIdentifier)) {
+    setPendingMeshRestartAccepted(commandId);
+  }
+  Serial.println("-> Signed restart command forwarded to mesh member " + targetBoardIdentifier);
+  return true;
+}
+
 void setupWebServer() {
   server.onNotFound([]() {
     if (server.method() == HTTP_OPTIONS) {
@@ -481,6 +754,69 @@ void setupWebServer() {
                             req["feedback_on"].is<bool>(), req["feedback_on"] | false);
     }
     server.send(200, "application/json", "{\"success\":true}");
+  });
+
+  server.on("/api/mesh/restart", HTTP_POST, []() {
+    handleCORS();
+    if (localRole != ROLE_MEMBER) {
+      server.send(409, "application/json", "{\"success\":false,\"error\":\"Target is not a mesh member\"}");
+      return;
+    }
+    DynamicJsonDocument req(512);
+    if (!server.hasArg("plain") || deserializeJson(req, server.arg("plain"))) {
+      server.send(400, "application/json", "{\"success\":false,\"error\":\"Invalid restart payload\"}");
+      return;
+    }
+    const String commandId = req["command_id"] | "";
+    const String targetBoardIdentifier = req["board_identifier"] | "";
+    const String suppliedSignature = req["signature"] | "";
+    bool validCommandId = commandId.length() == 36;
+    for (int i = 0; i < 36 && validCommandId; ++i) {
+      const char ch = commandId[i];
+      const bool dashPosition = (i == 8 || i == 13 || i == 18 || i == 23);
+      const bool isHex = (ch >= '0' && ch <= '9') ||
+        (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
+      if (dashPosition ? ch != '-' : !isHex) validCommandId = false;
+    }
+    if (!validCommandId || targetBoardIdentifier != String(BOARD_IDENTIFIER)) {
+      server.send(403, "application/json", "{\"success\":false,\"error\":\"Command target does not match this board\"}");
+      return;
+    }
+    const String expectedSignature = meshRestartSignature(commandId, targetBoardIdentifier);
+    if (!meshRestartSignatureMatches(suppliedSignature, expectedSignature)) {
+      server.send(401, "application/json", "{\"success\":false,\"error\":\"Invalid mesh command signature\"}");
+      return;
+    }
+
+    String lastCommand;
+    String pendingCommand;
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    lastCommand = preferences.getString("mesh_rst_last", "");
+    pendingCommand = preferences.getString("mesh_rst_pending", "");
+    if (pendingCommand == commandId) {
+      // The same accepted request is still queued in this boot; resume execution.
+      pendingMeshRestartCommand = commandId;
+      pendingMeshRestartAt = millis();
+      pendingMeshRestart = true;
+      if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+      server.send(202, "application/json", "{\"success\":true,\"duplicate\":true,\"pending\":true}");
+      return;
+    }
+    if (lastCommand == commandId) {
+      if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+      server.send(202, "application/json", "{\"success\":true,\"duplicate\":true}");
+      return;
+    }
+    const uint32_t currentBoot = preferences.getUInt("boot_count", 0);
+    preferences.putString("mesh_rst_last", commandId);
+    preferences.putString("mesh_rst_pending", commandId);
+    preferences.putUInt("mesh_rst_boot", currentBoot);
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+
+    pendingMeshRestartCommand = commandId;
+    pendingMeshRestartAt = millis();
+    pendingMeshRestart = true;
+    server.send(202, "application/json", "{\"success\":true,\"accepted\":true}");
   });
   server.on("/api/mesh/nodes", HTTP_GET, []() {
     handleCORS();
@@ -1106,6 +1442,10 @@ void applyPendingWifiConfiguration() {
 }
 void loop() {
   server.handleClient();
+  if (pendingMeshRestart && millis() - pendingMeshRestartAt >= 650) {
+    Serial.println("-> Signed remote mesh restart executing now.");
+    ESP.restart();
+  }
   if (!remoteWifiUpdateInProgress) applyPendingWifiConfiguration();
   for (int i = 0; i < NUM_DEVICES; i++) {
     bool currentRead = digitalRead(INPUT_PINS[i]);
@@ -1891,14 +2231,18 @@ bool reportDeviceConfigStatus(int version, const String& status, const String& e
   return reported;
 }
 
-bool acknowledgeDeviceCommand(const String& commandId, const String& status, const String& error) {
+bool acknowledgeDeviceCommand(const String& commandId, const String& status, const String& error, const String& targetBoardIdentifier) {
   if (!commandId.length()) return false;
-  DynamicJsonDocument requestDoc(512);
+  DynamicJsonDocument requestDoc(768);
   requestDoc["action"] = "ack";
   requestDoc["board_identifier"] = BOARD_IDENTIFIER;
   requestDoc["command_id"] = commandId;
   requestDoc["status"] = status;
-  if (error.length()) requestDoc["error"] = error;
+  if (error.length()) {
+    requestDoc["error"] = error;
+    requestDoc["message"] = error;
+  }
+  if (targetBoardIdentifier.length()) requestDoc["target_board_identifier"] = targetBoardIdentifier;
   String payload;
   serializeJson(requestDoc, payload);
   DynamicJsonDocument response(512);
@@ -2064,18 +2408,27 @@ void processDeviceAgentResponse(JsonDocument& response) {
     reportDeviceConfigStatus(serverConfigVersion, "applied", "");
   }
 
+  if (localRole == ROLE_LEADER) processPendingMeshRestartAcks();
+
   JsonArray commands = response["commands"].as<JsonArray>();
   for (JsonObject command : commands) {
     String commandId = command["id"] | "";
     String type = command["command_type"] | "";
     String targetBoard = command["board_identifier"] | "";
-    // Fail closed if a gateway ever receives a command for another mesh node.
-    // Cross-board forwarding is not implemented in this firmware path.
-    if (targetBoard.length() == 0 || targetBoard != String(BOARD_IDENTIFIER)) {
-      Serial.println("-> Ignoring remote command without an exact board identity match.");
+    if (targetBoard.length() == 0 || commandId.length() == 0 || type != "restart") {
+      Serial.println("-> Ignoring malformed remote command.");
       continue;
     }
-    if (type != "restart" || commandId.length() == 0 || commandId == pendingRestart) continue;
+    if (targetBoard != String(BOARD_IDENTIFIER)) {
+      if (localRole == ROLE_LEADER) {
+        const uint32_t expiresAtEpoch = command["expires_at_epoch"] | 0;
+        forwardMeshRestart(commandId, targetBoard, expiresAtEpoch);
+      } else {
+        Serial.println("-> Ignoring command addressed to another mesh board.");
+      }
+      continue;
+    }
+    if (commandId == pendingRestart) continue;
 
     Serial.println("-> Remote restart command received; confirming before reboot.");
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
