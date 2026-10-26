@@ -1,6 +1,8 @@
 #include <WiFi.h>
 #include <WiFiMulti.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <esp_arduino_version.h>
 #include <ArduinoJson.h>
 #include <WebServer.h>
 #include <Preferences.h>
@@ -1513,16 +1515,27 @@ void sendHeartbeat() {
 bool deviceAgentPost(const String& payload, DynamicJsonDocument& response) {
   if (WiFi.status() != WL_CONNECTED || strlen(DEVICE_AGENT_URL) == 0 ||
       strlen(DEVICE_TOKEN) < 32 || String(BOARD_IDENTIFIER) == "esp32-unconfigured") return false;
+
+  // Never use HTTPClient.begin(url) without a CA: Arduino-ESP32's convenience
+  // overload can create an insecure TLS client. Require the core's trusted CA bundle.
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  WiFiClientSecure secureClient;
+  secureClient.useBuiltinCACertBundle();
   HTTPClient http;
-  http.begin(String(DEVICE_AGENT_URL));
-  configureHttp(http, 2500, 5000);
+  if (!http.begin(secureClient, String(DEVICE_AGENT_URL))) {
+    Serial.println("Device-agent HTTPS setup failed.");
+    return false;
+  }
+  configureHttp(http, 3500, 6500);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Authorization", "Bearer " + String(DEVICE_TOKEN));
   int code = http.POST(payload);
   String body = (code >= 200 && code < 300) ? http.getString() : "";
   http.end();
+  secureClient.stop();
+
   if (code < 200 || code >= 300) {
-    Serial.printf("Device-agent request failed (HTTP %d).\\n", code);
+    Serial.printf("Device-agent HTTPS request failed (HTTP %d).\n", code);
     return false;
   }
   DeserializationError err = deserializeJson(response, body);
@@ -1531,6 +1544,10 @@ bool deviceAgentPost(const String& payload, DynamicJsonDocument& response) {
     return false;
   }
   return true;
+#else
+  Serial.println("Device-agent disabled: update to Arduino-ESP32 core 3.x for validated HTTPS CA-bundle support.");
+  return false;
+#endif
 }
 
 bool reportDeviceConfigStatus(int version, const String& status, const String& error) {
