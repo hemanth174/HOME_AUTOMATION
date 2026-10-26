@@ -27,6 +27,7 @@ export default function DeviceFleet() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState({});
   const [restartByBoard, setRestartByBoard] = useState({});
+  const [provisioningInfoByBoard, setProvisioningInfoByBoard] = useState({});
   const [filter, setFilter] = useState("all");
 
   useEffect(() => {
@@ -236,12 +237,34 @@ export default function DeviceFleet() {
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1500);
-      setNotice("Enrollment firmware downloaded. Flash it once; remote commands will stay unavailable until that firmware boots and authenticates.");
+      setProvisioningInfoByBoard((previous) => ({
+        ...previous,
+        [device.id]: {
+          meshSsid: data.meshSsid || "",
+          meshPassword: data.meshPassword || "",
+          setupUrl: data.setupUrl || "http://192.168.4.1/setup",
+        },
+      }));
+      setNotice("Enrollment firmware downloaded. Flash it once, connect your phone to the device setup Wi-Fi shown on this card, then open its local setup page.");
       await loadDevices(true);
     } catch (error) {
       setNotice(error.message || "Could not prepare enrollment firmware");
     } finally {
       setBusy((current) => ({ ...current, [device.id]: "" }));
+    }
+  };
+
+  const copySetupDetails = async (device) => {
+    const info = provisioningInfoByBoard[device.id];
+    if (!info) return;
+    const text = "VikaTech ESP32 initial setup\\nWi-Fi network: " + info.meshSsid +
+      "\\nWi-Fi password: " + info.meshPassword +
+      "\\nOpen: " + info.setupUrl;
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice("Initial setup details copied.");
+    } catch {
+      setNotice("Copy was blocked by the browser. Use the setup details shown on this card.");
     }
   };
 
@@ -320,6 +343,7 @@ export default function DeviceFleet() {
             const restart = restartByBoard[device.id];
             const busyAction = busy[device.id];
             const needsEnrollment = !device.provisioned;
+            const setupInfo = provisioningInfoByBoard[device.id];
             const versionText = device.config.version == null
               ? "Not enrolled"
               : "v" + device.config.appliedVersion + " applied / v" + device.config.version + " requested";
@@ -410,6 +434,30 @@ export default function DeviceFleet() {
                   <p className="mt-2 text-[10px] leading-4 text-text-muted">
                     Enrollment requires one initial USB flash. Remote restart and configuration are unavailable until this firmware checks in.
                   </p>
+                )}
+                {needsEnrollment && setupInfo && (
+                  <div className="mt-3 min-w-0 rounded-xl border border-accent/30 bg-accent/5 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="text-xs font-black">Initial local Wi-Fi setup</h4>
+                      <button type="button" onClick={() => copySetupDetails(device)}
+                        className="min-h-9 rounded-lg border border-border bg-background px-3 text-[10px] font-black">
+                        Copy setup details
+                      </button>
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <div className="min-w-0 rounded-lg border border-border bg-background p-2.5">
+                        <p className="text-[9px] font-black uppercase tracking-wide text-text-muted">Connect to Wi-Fi</p>
+                        <p className="mt-1 break-all text-xs font-bold">{setupInfo.meshSsid}</p>
+                      </div>
+                      <div className="min-w-0 rounded-lg border border-border bg-background p-2.5">
+                        <p className="text-[9px] font-black uppercase tracking-wide text-text-muted">Setup password</p>
+                        <p className="mt-1 break-all font-mono text-xs font-bold">{setupInfo.meshPassword}</p>
+                      </div>
+                    </div>
+                    <p className="mt-3 break-all text-[11px] leading-5 text-text-muted">
+                      1. Flash the downloaded firmware once over USB. 2. Connect your phone to the network above. 3. Open {setupInfo.setupUrl} and enter the customer's Wi-Fi name and security. 4. Return here and refresh until the board reports Online.
+                    </p>
+                  </div>
                 )}
               </article>
             );
