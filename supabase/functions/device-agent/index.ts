@@ -105,36 +105,37 @@ async function writeConfigEvent(
   });
 }
 
-async function poll(request: Request, device: { config: Record<string, unknown>; board: Record<string, unknown> }, body: Record<string, unknown>) {
-  const { config, board } = device;
-  const now = new Date().toISOString();
-  await rest(
-    `device_runtime_configs?board_id=eq.${encodeURIComponent(String(config.board_id))}`,
-    {
-      method: "PATCH",
-      headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({
-        last_seen_at: now,
-        last_ip: request.headers.get("cf-connecting-ip") || null,
-      }),
-    },
-  );
-  await rest(
-    `boards?id=eq.${encodeURIComponent(String(config.board_id))}`,
-    { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_seen: now }) },
-  );
+async function poll(request: Request, body: Record<string, unknown>) {
+  const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
+  const boardIdentifier = body.board_identifier;
+  if (bearer.length < 32 || !validBoardIdentifier(boardIdentifier)) {
+    return json({ error: "Device authentication failed" }, 401);
+  }
 
-  const commands = await rest(
-    `device_commands?board_id=eq.${encodeURIComponent(String(config.board_id))}&status=eq.pending&select=id,command_type,requested_at&order=requested_at.asc&limit=5`,
-  );
+  // A privileged SECURITY DEFINER RPC verifies the device token and returns
+  // the complete current snapshot without making one REST request per table.
+  const snapshot = await rest("rpc/device_agent_snapshot", {
+    method: "POST",
+    body: JSON.stringify({
+      p_device_token_hash: await sha256(bearer),
+      p_board_identifier: boardIdentifier,
+    }),
+  });
+  if (!snapshot?.ok || !snapshot?.config || !snapshot?.board) {
+    return json({ error: "Device authentication failed" }, 401);
+  }
 
+  const config = snapshot.config as Record<string, unknown>;
+  const board = snapshot.board as Record<string, unknown>;
   let configuration = null;
-  const appliedVersion = Number(body.applied_config_version ?? config.applied_config_version ?? 0);
+  const reportedVersion = Number(body.applied_config_version ?? config.applied_config_version ?? 0);
   const currentVersion = Number(config.config_version ?? 0);
   const ssid = String(config.wifi_ssid || "");
-  if (currentVersion > appliedVersion && ssid.length > 0 &&
-      config.config_update_status !== "failed" &&
-      config.config_update_status !== "unprovisioned") {
+  const deliveryStatus = String(config.config_update_status || "");
+
+  if (currentVersion > reportedVersion &&
+      ssid.length > 0 &&
+      ["pending", "sending"].includes(deliveryStatus)) {
     let password = "";
     if (config.wifi_security === "wpa2_psk") {
       if (!config.encrypted_wifi_password) {
@@ -148,9 +149,9 @@ async function poll(request: Request, device: { config: Record<string, unknown>;
       wifi_security: config.wifi_security,
       wifi_password: password,
     };
-    if (config.config_update_status !== "sending") {
+    if (deliveryStatus !== "sending") {
       await rest(
-        `device_runtime_configs?board_id=eq.${encodeURIComponent(String(config.board_id))}`,
+        \`device_runtime_configs?board_id=eq.\${encodeURIComponent(String(config.board_id))}\`,
         { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ config_update_status: "sending" }) },
       );
       await writeConfigEvent(config, "sending", "ESP32 checked in and received the pending configuration.", "device");
@@ -160,9 +161,14 @@ async function poll(request: Request, device: { config: Record<string, unknown>;
   return json({
     ok: true,
     board_identifier: board.board_identifier,
-    server_time: now,
+    board_id: board.id,
+    user_id: board.user_id,
+    server_time: snapshot.server_time || new Date().toISOString(),
+    devices: Array.isArray(snapshot.devices) ? snapshot.devices : [],
+    alarms: Array.isArray(snapshot.alarms) ? snapshot.alarms : [],
+    schedules: Array.isArray(snapshot.schedules) ? snapshot.schedules : [],
     config: configuration,
-    commands: Array.isArray(commands) ? commands : [],
+    commands: Array.isArray(snapshot.commands) ? snapshot.commands : [],
   });
 }
 
@@ -232,10 +238,11 @@ Deno.serve(async (request) => {
   try {
     const body = await request.json();
     const action = String(body.action || "poll");
+    if (action === "poll") return await poll(request, body);
+
     const device = await getDevice(request, body.board_identifier);
     if (!device) return json({ error: "Device authentication failed" }, 401);
 
-    if (action === "poll") return await poll(request, device, body);
     if (action === "config_status") return await updateConfigStatus(device, body);
     if (action === "ack") return await acknowledgeCommand(device, body);
     return json({ error: "Unsupported device action" }, 400);
