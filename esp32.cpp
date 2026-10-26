@@ -816,6 +816,7 @@ bool discardPendingRelayUpdate(const PendingUpdate& expected) {
 }
 bool flushOfflineQueue() {
   if (!isHomeWifiConnected() || boardUUID == "") return false;
+
   PendingUpdate work;
   bool found = false;
   if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
@@ -829,37 +830,57 @@ bool flushOfflineQueue() {
   }
   if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
   if (!found) return true;
+
   if (!work.isFeedback) {
-    HTTPClient stateHttp;
-    stateHttp.begin(String(SUPABASE_BASE) + "/devices?id=eq." +
-                    deviceUUIDs[work.deviceIndex] + "&select=is_on,last_changed");
-    configureHttp(stateHttp, 2000, 2000);
-    stateHttp.addHeader("apikey", SUPABASE_SERVICE_KEY);
-    stateHttp.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
-    if (stateHttp.GET() == 200) {
-      DynamicJsonDocument stateDoc(384);
-      if (!deserializeJson(stateDoc, stateHttp.getString()) && stateDoc.size() > 0) {
-        const bool cloudState = stateDoc[0]["is_on"] | false;
-        const String cloudChangedAt = stateDoc[0]["last_changed"].as<String>();
-        if (cloudState == work.state || cloudStateSupersedesQueue(work, cloudChangedAt)) {
-          if (cloudState != isRelayOn[work.deviceIndex]) setRelay(work.deviceIndex, cloudState);
-          if (discardPendingRelayUpdate(work)) {
-            Serial.printf("Skipped obsolete queued state for device %d.\n", work.deviceIndex);
-          }
-          stateHttp.end();
-          return true;
+    bool gotCloudState = false;
+    bool cloudState = false;
+    String cloudChangedAt;
+
+    if (isDeviceAgentConfigured()) {
+      DynamicJsonDocument requestDoc(512), response(512);
+      requestDoc["action"] = "read_relay";
+      requestDoc["relay_index"] = work.deviceIndex;
+      if (sendDeviceAgentAction(requestDoc, response)) {
+        gotCloudState = true;
+        cloudState = response["is_on"] | false;
+        cloudChangedAt = response["last_changed"] | "";
+      }
+    } else if (isDirectCloudConfigured()) {
+      HTTPClient stateHttp;
+      stateHttp.begin(String(SUPABASE_BASE) + "/devices?id=eq." +
+                      deviceUUIDs[work.deviceIndex] + "&select=is_on,last_changed");
+      configureHttp(stateHttp, 2000, 2000);
+      stateHttp.addHeader("apikey", SUPABASE_SERVICE_KEY);
+      stateHttp.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
+      if (stateHttp.GET() == 200) {
+        DynamicJsonDocument stateDoc(384);
+        if (!deserializeJson(stateDoc, stateHttp.getString()) && stateDoc.size() > 0) {
+          gotCloudState = true;
+          cloudState = stateDoc[0]["is_on"] | false;
+          cloudChangedAt = stateDoc[0]["last_changed"].as<String>();
         }
       }
+      stateHttp.end();
     }
-    stateHttp.end();
+
+    if (gotCloudState &&
+        (cloudState == work.state || cloudStateSupersedesQueue(work, cloudChangedAt))) {
+      if (cloudState != isRelayOn[work.deviceIndex]) setRelay(work.deviceIndex, cloudState);
+      if (discardPendingRelayUpdate(work)) {
+        Serial.printf("Skipped obsolete queued state for device %d.\\n", work.deviceIndex);
+      }
+      return true;
+    }
   }
-  bool delivered = work.isFeedback
+
+  const bool delivered = work.isFeedback
     ? updateFeedbackInDB(work.deviceIndex, work.state)
     : updateDeviceInDB(work.deviceIndex, work.state);
   if (!delivered) {
-    Serial.printf("Cloud update pending for device %d; will retry.\n", work.deviceIndex);
+    Serial.printf("Cloud update pending for device %d; will retry.\\n", work.deviceIndex);
     return false;
   }
+
   if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
   for (int i = 0; i < queueCount; i++) {
     if (offlineQueue[i].pending && offlineQueue[i].deviceIndex == work.deviceIndex &&
