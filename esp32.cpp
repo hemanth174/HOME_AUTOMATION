@@ -22,9 +22,15 @@ volatile bool remoteWifiUpdateInProgress = false;
 const char* BOARD_IDENTIFIER = "esp32-unconfigured";
 const char* SUPABASE_BASE = "";
 const char* SUPABASE_SERVICE_KEY = "";
-// This per-board bearer token is revocable. Never embed a Supabase service-role key here.
-const char* DEVICE_AGENT_URL = "";
-const char* DEVICE_TOKEN = "";
+// The per-board token is injected by the one-time provisioning download.
+// It authenticates only this device to the VikaTech device-management API;
+// it is NOT a Supabase service-role key.
+const char* DEVICE_API_BASE = "https://home-automation-mauve-one.vercel.app";
+const char* DEVICE_AUTH_TOKEN = "";
+String deviceAuthToken = "";
+String deviceBootId = "";
+String lastDeviceError = "";
+uint32_t deviceConfigVersion = 1;
 const char* MESH_SSID = "HOME-AUTO-LEADER";
 const char* MESH_PASS = "CHANGE_ME_123"; // Replace locally before flashing; min 8 chars for WPA2
 IPAddress AP_IP(192, 168, 4, 1);
@@ -155,6 +161,10 @@ void applyAlarmSnapshot(JsonDocument& response);
 void applyScheduleSnapshot(JsonDocument& response);
 void loadHomeWifiCredentials();
 void applyPendingWifiConfiguration();
+bool sendDeviceHeartbeat();
+bool pollRemoteCommands();
+bool pollRemoteConfiguration(bool forceFetch = false);
+bool applyRemoteWifiConfiguration(const String& ssid, const String& security, const String& password, uint32_t configVersion);
 void logResetReason();
 void deviceAgentTask(void* parameter);
 bool deviceAgentPost(const String& payload, DynamicJsonDocument& response);
@@ -192,12 +202,26 @@ void loadHomeWifiCredentials() {
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   homeWifiSSID = preferences.getString("wifi_ssid", "");
   homeWifiPassword = preferences.getString("wifi_pass", "");
-  homeWifiSecurity = preferences.getString("wifi_sec", homeWifiPassword.length() ? "wpa2_psk" : "open");
+  homeWifiSecurity = preferences.getString("wifi_sec", "");
+  if (homeWifiSecurity != "open" && homeWifiSecurity != "wpa2_psk") {
+    homeWifiSecurity = homeWifiPassword.length() ? "wpa2_psk" : "open";
+  }
+  deviceConfigVersion = max((uint32_t)1, preferences.getUInt("cfg_ver", 1));
+  deviceAuthToken = preferences.getString("device_token", "");
+  if (deviceAuthToken.length() == 0 && strlen(DEVICE_AUTH_TOKEN) > 0) {
+    deviceAuthToken = String(DEVICE_AUTH_TOKEN);
+    preferences.putString("device_token", deviceAuthToken);
+  }
+  uint32_t bootCount = preferences.getUInt("boot_count", 0) + 1;
+  preferences.putUInt("boot_count", bootCount);
+  deviceBootId = String(BOARD_IDENTIFIER) + "-" + String(bootCount);
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   Serial.printf("-> Home Wi-Fi credentials: %s\n",
                 homeWifiSSID.length() ? "saved" : "not configured");
+  Serial.printf("-> Device management API: %s\n",
+                deviceAuthToken.length() ? "configured" : "not provisioned (remote management disabled)");
   Serial.printf("-> Supabase cloud sync: %s\n",
-                isCloudConfigured() ? "configured" : "disabled (missing URL/key)");
+                isCloudConfigured() ? "configured" : "disabled (legacy cloud key not configured)");
 }
 String getSelfIp() {
   if (localRole == ROLE_LEADER) return WiFi.softAPIP().toString();
@@ -349,6 +373,9 @@ void setupWebServer() {
     doc["meshNodes"] = (localRole == ROLE_LEADER) ? meshNodeCount : 0;
     doc["stationConnected"] = isHomeWifiConnected();
     doc["wifiConfigured"] = homeWifiSSID.length() > 0;
+    doc["wifiSecurity"] = homeWifiSecurity;
+    doc["deviceManagementConfigured"] = deviceAuthToken.length() > 0;
+    doc["configVersion"] = deviceConfigVersion;
     doc["cloudConfigured"] = isCloudConfigured();
     doc["mode"] = isHomeWifiConnected() ? "online_wifi" :
                   (localRole == ROLE_LEADER ? "local_ap" : "offline_retrying");
@@ -516,13 +543,13 @@ try{const response=await fetch('/api/wifi/config',{method:'POST',headers:{'Conte
     if (newSSID.length() == 0 || newSSID.length() > 32 ||
         (newSecurity != "open" && newSecurity != "wpa2_psk") ||
         (newSecurity == "wpa2_psk" && (newPassword.length() < 8 || newPassword.length() > 63)) ||
-        (newSecurity == "open" && newPassword.length() > 0)) {
+        (newSecurity == "open" && newPassword.length() != 0)) {
       server.send(400, "application/json",
-        "{\"success\":false,\"error\":\"SSID is required; choose Open or WPA2-PSK and provide a valid password when required\"}");
+        "{\"success\":false,\"error\":\"SSID, security mode, or password is invalid\"}");
       return;
     }
     homeWifiSSID = newSSID;
-    homeWifiPassword = newSecurity == "open" ? "" : newPassword;
+    homeWifiPassword = newPassword;
     homeWifiSecurity = newSecurity;
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     preferences.putString("wifi_ssid", homeWifiSSID);
@@ -1526,6 +1553,228 @@ bool logActivityInDB(int index, bool state, const String& triggeredBy) {
   Serial.printf("Activity log insert failed for device %d (HTTP %d).\\n", index, code);
   return false;
 }
+bool applyRemoteWifiConfiguration(const String& ssid, const String& security, const String& password, uint32_t configVersion) {
+  if (ssid.length() == 0 || ssid.length() > 32 ||
+      (security != "open" && security != "wpa2_psk") ||
+      (security == "wpa2_psk" && (password.length() < 8 || password.length() > 63)) ||
+      (security == "open" && password.length() != 0)) {
+    lastDeviceError = "Received invalid Wi-Fi configuration";
+    return false;
+  }
+
+  if (ssid == homeWifiSSID && security == homeWifiSecurity && password == homeWifiPassword) {
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    deviceConfigVersion = configVersion;
+    preferences.putUInt("cfg_ver", deviceConfigVersion);
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+    lastDeviceError = "";
+    return true;
+  }
+
+  const String previousSSID = homeWifiSSID;
+  const String previousPassword = homeWifiPassword;
+  const String previousSecurity = homeWifiSecurity;
+
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  preferences.putString("p_ssid", ssid);
+  preferences.putString("p_pass", password);
+  preferences.putString("p_sec", security);
+  preferences.putUInt("p_ver", configVersion);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+
+  Serial.println("-> Testing staged Wi-Fi configuration before committing it.");
+  WiFi.begin(ssid.c_str(), password.c_str());
+  const unsigned long start = millis();
+  while (millis() - start < 15000) {
+    if (WiFi.status() == WL_CONNECTED && WiFi.SSID() == ssid) break;
+    delay(250);
+  }
+
+  if (WiFi.status() == WL_CONNECTED && WiFi.SSID() == ssid) {
+    homeWifiSSID = ssid;
+    homeWifiPassword = password;
+    homeWifiSecurity = security;
+    deviceConfigVersion = configVersion;
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    preferences.putString("wifi_ssid", homeWifiSSID);
+    preferences.putString("wifi_pass", homeWifiPassword);
+    preferences.putString("wifi_sec", homeWifiSecurity);
+    preferences.putUInt("cfg_ver", deviceConfigVersion);
+    preferences.remove("p_ssid");
+    preferences.remove("p_pass");
+    preferences.remove("p_sec");
+    preferences.remove("p_ver");
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+    wifiMulti.cleanAPlist();
+    wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+    wifiConfigPending = false;
+    lastDeviceError = "";
+    Serial.println("-> New Wi-Fi connection verified; configuration committed.");
+    return true;
+  }
+
+  Serial.println("-> New Wi-Fi configuration failed; restoring last known-good network.");
+  WiFi.begin(previousSSID.c_str(), previousPassword.c_str());
+  const unsigned long restoreStart = millis();
+  while (millis() - restoreStart < 10000) {
+    if (WiFi.status() == WL_CONNECTED && WiFi.SSID() == previousSSID) break;
+    delay(250);
+  }
+  homeWifiSSID = previousSSID;
+  homeWifiPassword = previousPassword;
+  homeWifiSecurity = previousSecurity;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  preferences.remove("p_ssid");
+  preferences.remove("p_pass");
+  preferences.remove("p_sec");
+  preferences.remove("p_ver");
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  wifiMulti.cleanAPlist();
+  if (homeWifiSSID.length()) wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+  lastDeviceError = "New Wi-Fi connection failed; previous configuration retained";
+  return false;
+}
+
+bool pollRemoteConfiguration(bool forceFetch) {
+  if (!deviceAuthToken.length() || !isHomeWifiConnected()) return false;
+  HTTPClient http;
+  String url = String(DEVICE_API_BASE) + "/api/esp32/config?version=" + String(deviceConfigVersion);
+  http.begin(url);
+  configureHttp(http, 3000, 7000);
+  http.addHeader("Authorization", "Bearer " + deviceAuthToken);
+  http.addHeader("Accept", "application/json");
+  const int code = http.GET();
+  String response = code == 200 ? http.getString() : "";
+  http.end();
+  if (code != 200) {
+    if (code != 409) Serial.printf("Device config check failed (HTTP %d).\n", code);
+    return false;
+  }
+
+  DynamicJsonDocument doc(2048);
+  if (deserializeJson(doc, response)) return false;
+  if (!(doc["changed"] | false)) return true;
+  JsonObject cfg = doc["configuration"].as<JsonObject>();
+  if (cfg.isNull()) return false;
+  String ssid = cfg["wifiSSID"] | "";
+  String security = cfg["wifiSecurity"] | "wpa2_psk";
+  String password = cfg["wifiPassword"] | "";
+  uint32_t version = cfg["configVersion"] | 0;
+  if (version <= deviceConfigVersion) return true;
+  const bool applied = applyRemoteWifiConfiguration(ssid, security, password, version);
+  if (!applied) Serial.println("-> Remote Wi-Fi config retained as pending; previous network remains configured.");
+  return applied;
+}
+
+bool sendDeviceHeartbeat() {
+  if (!deviceAuthToken.length() || !isHomeWifiConnected()) return false;
+  DynamicJsonDocument doc(1024);
+  doc["boardIdentifier"] = BOARD_IDENTIFIER;
+  doc["wifiSSID"] = homeWifiSSID;
+  doc["wifiSecurity"] = homeWifiSecurity;
+  doc["configVersion"] = deviceConfigVersion;
+  doc["bootId"] = deviceBootId;
+  doc["uptimeMs"] = millis();
+  doc["ip"] = WiFi.localIP().toString();
+  if (lastDeviceError.length()) doc["lastError"] = lastDeviceError;
+  // Only the initial authenticated registration sends the current passphrase.
+  // Subsequent heartbeats never retransmit the Wi-Fi secret.
+  bool registered = preferences.getBool("device_registered", false);
+  if (!registered && homeWifiSecurity == "wpa2_psk") doc["wifiPassword"] = homeWifiPassword;
+
+  String payload;
+  serializeJson(doc, payload);
+  HTTPClient http;
+  http.begin(String(DEVICE_API_BASE) + "/api/esp32/heartbeat");
+  configureHttp(http, 3000, 7000);
+  http.addHeader("Authorization", "Bearer " + deviceAuthToken);
+  http.addHeader("Content-Type", "application/json");
+  int code = http.POST(payload);
+  String response = code == 200 ? http.getString() : "";
+  http.end();
+  if (code != 200) {
+    Serial.printf("Device heartbeat failed (HTTP %d).\n", code);
+    return false;
+  }
+  DynamicJsonDocument res(512);
+  if (deserializeJson(res, response)) return false;
+  if (res["registered"] | false) preferences.putBool("device_registered", true);
+  if (res["configVersion"].is<uint32_t>()) {
+    uint32_t desiredVersion = res["configVersion"].as<uint32_t>();
+    if (desiredVersion > deviceConfigVersion) pollRemoteConfiguration(true);
+  }
+  return true;
+}
+
+bool postDeviceCommandResult(const String& commandId, const String& status, const String& message) {
+  if (!deviceAuthToken.length()) return false;
+  DynamicJsonDocument doc(512);
+  doc["commandId"] = commandId;
+  doc["status"] = status;
+  doc["message"] = message;
+  String payload;
+  serializeJson(doc, payload);
+  HTTPClient http;
+  http.begin(String(DEVICE_API_BASE) + "/api/esp32/commands");
+  configureHttp(http, 3000, 7000);
+  http.addHeader("Authorization", "Bearer " + deviceAuthToken);
+  http.addHeader("Content-Type", "application/json");
+  int code = http.POST(payload);
+  http.end();
+  return code == 200;
+}
+
+bool pollRemoteCommands() {
+  if (!deviceAuthToken.length() || !isHomeWifiConnected()) return false;
+  HTTPClient http;
+  http.begin(String(DEVICE_API_BASE) + "/api/esp32/commands");
+  configureHttp(http, 3000, 7000);
+  http.addHeader("Authorization", "Bearer " + deviceAuthToken);
+  http.addHeader("Accept", "application/json");
+  int code = http.GET();
+  String response = code == 200 ? http.getString() : "";
+  http.end();
+  if (code != 200) return false;
+
+  DynamicJsonDocument doc(2048);
+  if (deserializeJson(doc, response) || doc["command"].isNull()) return true;
+  JsonObject command = doc["command"].as<JsonObject>();
+  String commandId = command["id"] | "";
+  String commandType = command["command_type"] | "";
+  if (commandId.length() == 0) return false;
+
+  if (commandType == "restart") {
+    String previousRestartId = preferences.getString("last_restart_cmd", "");
+    if (previousRestartId == commandId) return true;
+    // Persist the ID before reboot so a delayed status update cannot create a reboot loop.
+    preferences.putString("last_restart_cmd", commandId);
+    Serial.println("-> Admin requested a remote ESP32 restart. Restarting this board only.");
+    delay(250);
+    ESP.restart();
+    return true;
+  }
+
+  if (commandType == "apply_config") {
+    const uint32_t currentVersion = preferences.getUInt("cfg_ver", 1);
+    JsonObject payload = command["payload"].as<JsonObject>();
+    const uint32_t requestedVersion = payload["config_version"] | 0;
+    bool applied = false;
+    if (requestedVersion > currentVersion) {
+      applied = pollRemoteConfiguration(true);
+    } else {
+      applied = true; // Already applied: idempotently finish a redelivered command.
+    }
+    if (!applied) {
+      postDeviceCommandResult(commandId, "failed", lastDeviceError.length() ? lastDeviceError : "Configuration update failed");
+      return false;
+    }
+    postDeviceCommandResult(commandId, "completed", "Configuration applied and verified");
+    sendDeviceHeartbeat();
+    return true;
+  }
+  return false;
+}
+
 void sendHeartbeat() {
   if (!isCloudConfigured() || boardUUID == "") return;
   if (isDeviceAgentConfigured()) {
@@ -2024,9 +2273,30 @@ void cloudSyncTask(void* parameter) {
   unsigned long lastCloudHeartbeat = 0;
   unsigned long nextQueueAttempt = 0;
   unsigned long queueRetryDelay = 2000;
+  unsigned long lastDeviceHeartbeatAttempt = 0;
+  unsigned long lastDeviceCommandPoll = 0;
+  unsigned long lastDeviceConfigPoll = 0;
   loadScheduleCache();
   for (;;) {
     runLocalSchedules();
+
+    // Secure device-management APIs use a per-board credential and do not
+    // require the legacy Supabase service-role key embedded by older builds.
+    if (isHomeWifiConnected() && deviceAuthToken.length()) {
+      if (millis() - lastDeviceHeartbeatAttempt >= 15000) {
+        lastDeviceHeartbeatAttempt = millis();
+        sendDeviceHeartbeat();
+      }
+      if (millis() - lastDeviceCommandPoll >= 5000) {
+        lastDeviceCommandPoll = millis();
+        pollRemoteCommands();
+      }
+      if (millis() - lastDeviceConfigPoll >= 30000) {
+        lastDeviceConfigPoll = millis();
+        pollRemoteConfiguration(false);
+      }
+    }
+
     if (!isHomeWifiConnected() || !isCloudConfigured()) {
       cloudDevicesReady = false;
       vTaskDelay(pdMS_TO_TICKS(1000));
