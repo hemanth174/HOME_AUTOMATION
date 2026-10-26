@@ -1963,9 +1963,18 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
       }
     }
 
-    if (oldSSID.length() && WiFi.status() == WL_CONNECTED && WiFi.SSID() == oldSSID) {
-      reportDeviceConfigStatus(newVersion, "failed", "New Wi-Fi failed; previous network restored.");
-    } else {
+    const bool oldNetworkRestored =
+      oldSSID.length() && WiFi.status() == WL_CONNECTED && WiFi.SSID() == oldSSID;
+    const String failureMessage = oldNetworkRestored
+      ? "New Wi-Fi failed; previous network restored."
+      : "New Wi-Fi failed and the previous network could not be restored; local setup recovery may be required.";
+
+    // reportDeviceConfigStatus stores the failure in NVS before attempting the
+    // HTTPS report. If rollback also failed, this marker survives until the
+    // device regains connectivity, preventing the admin tracker from remaining
+    // indefinitely at "applying".
+    reportDeviceConfigStatus(newVersion, "failed", failureMessage);
+    if (!oldNetworkRestored) {
       Serial.println("!! Could not restore Wi-Fi. Previous settings remain cached; local AP recovery may be required.");
     }
     remoteWifiUpdateInProgress = false;
