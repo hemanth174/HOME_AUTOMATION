@@ -97,6 +97,25 @@ create index if not exists device_commands_board_status_idx
 create index if not exists device_commands_expiry_idx
   on public.device_commands(expires_at) where status in ('pending','accepted');
 
+-- If earlier testing created duplicate active restart rows, retain the newest
+-- and cancel the older ones before enforcing one active restart per board.
+with ranked_active_commands as (
+  select id,
+         row_number() over (partition by board_id, command_type order by requested_at desc, id desc) as row_number
+  from public.device_commands
+  where command_type = 'restart' and status in ('pending', 'accepted')
+)
+update public.device_commands as command_row
+set status = 'cancelled',
+    completed_at = now(),
+    last_error = 'Superseded by a newer active restart request during migration.'
+from ranked_active_commands as ranked
+where command_row.id = ranked.id and ranked.row_number > 1;
+
+create unique index if not exists device_commands_one_active_restart_idx
+  on public.device_commands(board_id)
+  where command_type = 'restart' and status in ('pending', 'accepted');
+
 alter table public.device_runtime_configs enable row level security;
 alter table public.device_commands enable row level security;
 
