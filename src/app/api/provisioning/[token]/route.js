@@ -8,7 +8,14 @@ export async function GET(request, { params }) {
   const token = (await params).token;
   const admin = getAdminSupabase();
   if (!admin || !token) return NextResponse.json({ error: 'Setup link is unavailable' }, { status: 503 });
-  const { data: rows, error } = await admin.from('provisioning_records').select('*, order_trackings(full_name, email)').eq('setup_token_hash', hashProvisioningToken(token)).is('revoked_at', null).is('setup_token_used_at', null).gt('setup_token_expires_at', new Date().toISOString()).limit(1);
+
+  const { data: rows, error } = await admin.from('provisioning_records')
+    .select('*, order_trackings(full_name, email)')
+    .eq('setup_token_hash', hashProvisioningToken(token))
+    .is('revoked_at', null)
+    .is('setup_token_used_at', null)
+    .gt('setup_token_expires_at', new Date().toISOString())
+    .limit(1);
   const record = rows?.[0];
   if (error || !record) return NextResponse.json({ error: 'This setup link is invalid, expired, or already used' }, { status: 404 });
   const { data: approval } = await admin.from('account_approval_requests').select('account_status, admin_one_approved_at, admin_two_approved_at').eq('user_id', record.user_id).limit(1);

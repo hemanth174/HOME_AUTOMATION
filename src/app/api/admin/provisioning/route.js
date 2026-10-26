@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { requireAdmin } from '@/lib/adminServer';
 import { encryptProvisioningValue, createProvisioningToken, hashProvisioningToken } from '@/lib/provisioningServer';
 
@@ -7,7 +8,11 @@ export const dynamic = 'force-dynamic';
 export async function POST(request) {
   const auth = await requireAdmin(request);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
-  const { orderId, userId } = await request.json();
+
+  let body;
+  try { body = await request.json(); }
+  catch { return NextResponse.json({ error: 'Invalid request body' }, { status: 400 }); }
+  const { orderId, userId } = body || {};
   if (!orderId || !userId) return NextResponse.json({ error: 'Order and user are required' }, { status: 400 });
   const { data: approval } = await auth.admin.from('account_approval_requests').select('account_status, admin_one_approved_at, admin_two_approved_at').eq('user_id', userId).limit(1);
   const account = approval?.[0];

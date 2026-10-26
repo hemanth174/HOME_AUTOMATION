@@ -1,6 +1,8 @@
 #include <WiFi.h>
 #include <WiFiMulti.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <esp_arduino_version.h>
 #include <ArduinoJson.h>
 #include <WebServer.h>
 #include <Preferences.h>
@@ -16,14 +18,22 @@ String homeWifiSSID = "";
 String homeWifiPassword = "";
 String homeWifiSecurity = "wpa2_psk";
 volatile bool wifiConfigPending = false;
+volatile bool remoteWifiUpdateInProgress = false;
 const char* BOARD_IDENTIFIER = "esp32-unconfigured";
 const char* SUPABASE_BASE = "";
 const char* SUPABASE_SERVICE_KEY = "";
 // The per-board token is injected by the one-time provisioning download.
 // It authenticates only this device to the VikaTech device-management API;
 // it is NOT a Supabase service-role key.
+// Legacy PR #7 API credentials remain for already-provisioned boards only.
 const char* DEVICE_API_BASE = "https://home-automation-mauve-one.vercel.app";
 const char* DEVICE_AUTH_TOKEN = "";
+
+// Current secure device-agent values are injected during one-time enrollment.
+// These identifiers must exist in the generic source template so provisioning
+// can replace them; never put a Supabase service-role key in this firmware.
+const char* DEVICE_AGENT_URL = "";
+const char* DEVICE_TOKEN = "";
 String deviceAuthToken = "";
 String deviceBootId = "";
 String lastDeviceError = "";
@@ -52,6 +62,7 @@ SemaphoreHandle_t offlineQueueMutex = nullptr;
 SemaphoreHandle_t relayMutex = nullptr;
 TaskHandle_t cloudSyncTaskHandle = nullptr;
 TaskHandle_t cloudPollTaskHandle = nullptr;
+TaskHandle_t deviceAgentTaskHandle = nullptr;
 volatile bool cloudDevicesReady = false;
 // Cloud polling is a fallback for commands issued while the browser is not
 // connected to the local controller. Local REST commands remain immediate;
@@ -148,6 +159,13 @@ void cloudSyncTask(void* parameter);
 void cloudPollTask(void* parameter);
 void configureHttp(HTTPClient& http, uint16_t connectTimeout = 2500, uint16_t requestTimeout = 4000);
 bool isCloudConfigured();
+bool isDirectCloudConfigured();
+bool isDeviceAgentConfigured();
+bool requestDeviceAgentSnapshot(DynamicJsonDocument& response);
+bool sendDeviceAgentAction(DynamicJsonDocument& requestDoc, DynamicJsonDocument& response);
+void applyDeviceSnapshot(JsonDocument& response, bool applyRelayStates);
+void applyAlarmSnapshot(JsonDocument& response);
+void applyScheduleSnapshot(JsonDocument& response);
 void loadHomeWifiCredentials();
 void applyPendingWifiConfiguration();
 bool sendDeviceHeartbeat();
@@ -155,6 +173,12 @@ bool pollRemoteCommands();
 bool pollRemoteConfiguration(bool forceFetch = false);
 bool applyRemoteWifiConfiguration(const String& ssid, const String& security, const String& password, uint32_t configVersion);
 void logResetReason();
+void deviceAgentTask(void* parameter);
+bool deviceAgentPost(const String& payload, DynamicJsonDocument& response);
+bool reportDeviceConfigStatus(int version, const String& status, const String& error = "");
+bool acknowledgeDeviceCommand(const String& commandId, const String& status, const String& error = "");
+bool applyRemoteWifiConfiguration(JsonObject configuration);
+void processDeviceAgentResponse(JsonDocument& response);
 bool cloudStateSupersedesQueue(const PendingUpdate& queued, const String& cloudChangedAt);
 bool getPendingRelayUpdate(int index, PendingUpdate& result);
 bool discardPendingRelayUpdate(const PendingUpdate& expected);
@@ -162,8 +186,17 @@ bool isHomeWifiConnected() {
   return homeWifiSSID.length() > 0 && WiFi.status() == WL_CONNECTED &&
          WiFi.SSID() == homeWifiSSID;
 }
-bool isCloudConfigured() {
+bool isDirectCloudConfigured() {
   return strlen(SUPABASE_BASE) > 0 && strlen(SUPABASE_SERVICE_KEY) > 0;
+}
+bool isDeviceAgentConfigured() {
+  return strlen(DEVICE_AGENT_URL) > 0 && strlen(DEVICE_TOKEN) >= 32 &&
+         String(BOARD_IDENTIFIER) != "esp32-unconfigured";
+}
+bool isCloudConfigured() {
+  // New generic firmware uses a per-device token through the Edge Function.
+  // Legacy builds may still use the old direct REST settings during migration.
+  return isDirectCloudConfigured() || isDeviceAgentConfigured();
 }
 void logResetReason() {
   const esp_reset_reason_t reason = esp_reset_reason();
@@ -463,6 +496,41 @@ void setupWebServer() {
     serializeJson(arr, res);
     server.send(200, "application/json", res);
   });
+  server.on("/setup", HTTP_GET, []() {
+    handleCORS();
+    const char* setupPage = R"rawliteral(
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VikaTech Device Setup</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#090d12;color:#eef4f8}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:18px;background:radial-gradient(circle at top,#143529 0,#090d12 56%)}
+main{width:min(100%,520px);border:1px solid #293843;border-radius:24px;padding:24px;background:#111920;box-shadow:0 24px 70px #0008}
+.brand{color:#45d483;font-size:11px;font-weight:900;letter-spacing:.2em;text-transform:uppercase}
+h1{font-size:26px;line-height:1.15;margin:10px 0}p{color:#aebcc6;font-size:13px;line-height:1.6}
+label{display:block;margin-top:16px;font-size:12px;font-weight:800}input,select{width:100%;min-height:48px;margin-top:7px;border-radius:12px;border:1px solid #34434e;background:#0a1016;color:#f8fafc;padding:0 13px;font:inherit;font-size:14px;outline:none}
+input:focus,select:focus{border-color:#43d483}.passwordRow{display:flex;gap:8px}.passwordRow input{flex:1;min-width:0}.passwordRow button{margin-top:7px;border-radius:12px;border:1px solid #34434e;background:#17242c;color:#fff;padding:0 12px}
+button.submit{width:100%;min-height:50px;margin-top:22px;border:0;border-radius:13px;background:#38cd79;color:#06130b;font-size:13px;font-weight:900}
+.message{margin-top:16px;padding:12px;border:1px solid #34434e;border-radius:12px;font-size:12px;line-height:1.6;overflow-wrap:anywhere}.good{border-color:#238754;color:#9ff2bd}.bad{border-color:#ac4747;color:#ffb6b6}.muted{font-size:11px}
+</style></head><body><main><div class="brand">VikaTech · Device Commissioning</div><h1>Connect this ESP32 to home Wi-Fi</h1>
+<p>This setup page is served by the device locally. The SSID is required. Select Open Network only when the router has no password.</p>
+<form id="wifiForm">
+<label for="ssid">Wi-Fi name (SSID) *</label><input id="ssid" name="ssid" maxlength="32" required autocomplete="off" placeholder="Enter the router or hotspot name">
+<label for="security">Wi-Fi security *</label><select id="security" name="security"><option value="wpa2_psk">WPA2-PSK · Password protected</option><option value="open">None · Open network</option></select>
+<div id="passwordWrap"><label for="password">Wi-Fi password *</label><div class="passwordRow"><input id="password" name="password" type="password" minlength="8" maxlength="63" autocomplete="new-password" placeholder="8–63 characters"><button type="button" id="showPassword">Show</button></div></div>
+<button class="submit" id="submit" type="submit">Save and connect</button></form>
+<div id="message" class="message" role="status">Connect your phone to the VikaTech ESP32 setup network, then open <b>http://192.168.4.1/setup</b>.</div>
+<p class="muted">Your router password is sent only to this local ESP32 setup endpoint. After the device connects, future changes can be managed securely from the VikaTech Admin Panel.</p>
+<script>
+const form=document.getElementById('wifiForm'),security=document.getElementById('security'),password=document.getElementById('password'),wrap=document.getElementById('passwordWrap'),message=document.getElementById('message'),submit=document.getElementById('submit');
+function updateSecurity(){const open=security.value==='open';wrap.hidden=open;password.required=!open;if(open)password.value=''}
+security.addEventListener('change',updateSecurity);updateSecurity();
+document.getElementById('showPassword').addEventListener('click',()=>{password.type=password.type==='password'?'text':'password';document.getElementById('showPassword').textContent=password.type==='password'?'Show':'Hide'});
+async function checkConnection(){try{const r=await fetch('/api/status',{cache:'no-store'});const d=await r.json();if(d.stationConnected){message.className='message good';message.textContent='Connected to home Wi-Fi. You can now return to the Admin Panel and refresh the hardware list.';submit.disabled=false;submit.textContent='Save and connect';return true}}catch(e){}return false}
+form.addEventListener('submit',async(event)=>{event.preventDefault();message.className='message';message.textContent='Saving settings on the ESP32 and starting Wi-Fi connection…';submit.disabled=true;submit.textContent='Connecting…';
+try{const response=await fetch('/api/wifi/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:document.getElementById('ssid').value,security:security.value,password:security.value==='open'?'':password.value})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not save Wi-Fi configuration');message.textContent='Settings saved. Checking the actual Wi-Fi connection…';let n=0;const timer=setInterval(async()=>{n++;if(await checkConnection()){clearInterval(timer);return}if(n>=20){clearInterval(timer);message.className='message bad';message.textContent='The ESP32 has not confirmed a home Wi-Fi connection yet. Keep this page open and check the SSID/password, then retry. Previously saved settings remain available for recovery.';submit.disabled=false;submit.textContent='Retry connection'}},1500)}catch(error){message.className='message bad';message.textContent=error.message||'Setup failed';submit.disabled=false;submit.textContent='Retry connection'}});
+</script></main></body></html>
+)rawliteral";
+    server.send(200, "text/html; charset=utf-8", setupPage);
+  });
   server.on("/api/wifi/config", HTTP_POST, []() {
     handleCORS();
     if (!server.hasArg("plain")) {
@@ -487,10 +555,10 @@ void setupWebServer() {
         "{\"success\":false,\"error\":\"SSID, security mode, or password is invalid\"}");
       return;
     }
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     homeWifiSSID = newSSID;
     homeWifiPassword = newPassword;
     homeWifiSecurity = newSecurity;
-    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     preferences.putString("wifi_ssid", homeWifiSSID);
     preferences.putString("wifi_pass", homeWifiPassword);
     preferences.putString("wifi_sec", homeWifiSecurity);
@@ -632,7 +700,7 @@ void becomeLeader() {
   Serial.print("-> SoftAP active. IP: ");
   Serial.println(WiFi.softAPIP());
   if (homeWifiSSID.length() > 0) {
-    WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+    if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str()); else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
     lastLeaderWifiTry = millis();
     Serial.println("-> Attempting home Wi-Fi in background; local AP remains enabled.");
   }
@@ -690,7 +758,7 @@ void evaluateLocalRole() {
       lastHomeWifiProbe = millis();
       WiFi.disconnect(false);
       delay(100);
-      WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+      if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str()); else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
       unsigned long start = millis();
       while (WiFi.status() != WL_CONNECTED && millis() - start < 4000) { delay(50); server.handleClient(); }
       if (WiFi.status() != WL_CONNECTED) {
@@ -819,6 +887,7 @@ bool discardPendingRelayUpdate(const PendingUpdate& expected) {
 }
 bool flushOfflineQueue() {
   if (!isHomeWifiConnected() || boardUUID == "") return false;
+
   PendingUpdate work;
   bool found = false;
   if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
@@ -832,37 +901,57 @@ bool flushOfflineQueue() {
   }
   if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
   if (!found) return true;
+
   if (!work.isFeedback) {
-    HTTPClient stateHttp;
-    stateHttp.begin(String(SUPABASE_BASE) + "/devices?id=eq." +
-                    deviceUUIDs[work.deviceIndex] + "&select=is_on,last_changed");
-    configureHttp(stateHttp, 2000, 2000);
-    stateHttp.addHeader("apikey", SUPABASE_SERVICE_KEY);
-    stateHttp.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
-    if (stateHttp.GET() == 200) {
-      DynamicJsonDocument stateDoc(384);
-      if (!deserializeJson(stateDoc, stateHttp.getString()) && stateDoc.size() > 0) {
-        const bool cloudState = stateDoc[0]["is_on"] | false;
-        const String cloudChangedAt = stateDoc[0]["last_changed"].as<String>();
-        if (cloudState == work.state || cloudStateSupersedesQueue(work, cloudChangedAt)) {
-          if (cloudState != isRelayOn[work.deviceIndex]) setRelay(work.deviceIndex, cloudState);
-          if (discardPendingRelayUpdate(work)) {
-            Serial.printf("Skipped obsolete queued state for device %d.\n", work.deviceIndex);
-          }
-          stateHttp.end();
-          return true;
+    bool gotCloudState = false;
+    bool cloudState = false;
+    String cloudChangedAt;
+
+    if (isDeviceAgentConfigured()) {
+      DynamicJsonDocument requestDoc(512), response(512);
+      requestDoc["action"] = "read_relay";
+      requestDoc["relay_index"] = work.deviceIndex;
+      if (sendDeviceAgentAction(requestDoc, response)) {
+        gotCloudState = true;
+        cloudState = response["is_on"] | false;
+        cloudChangedAt = response["last_changed"] | "";
+      }
+    } else if (isDirectCloudConfigured()) {
+      HTTPClient stateHttp;
+      stateHttp.begin(String(SUPABASE_BASE) + "/devices?id=eq." +
+                      deviceUUIDs[work.deviceIndex] + "&select=is_on,last_changed");
+      configureHttp(stateHttp, 2000, 2000);
+      stateHttp.addHeader("apikey", SUPABASE_SERVICE_KEY);
+      stateHttp.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
+      if (stateHttp.GET() == 200) {
+        DynamicJsonDocument stateDoc(384);
+        if (!deserializeJson(stateDoc, stateHttp.getString()) && stateDoc.size() > 0) {
+          gotCloudState = true;
+          cloudState = stateDoc[0]["is_on"] | false;
+          cloudChangedAt = stateDoc[0]["last_changed"].as<String>();
         }
       }
+      stateHttp.end();
     }
-    stateHttp.end();
+
+    if (gotCloudState &&
+        (cloudState == work.state || cloudStateSupersedesQueue(work, cloudChangedAt))) {
+      if (cloudState != isRelayOn[work.deviceIndex]) setRelay(work.deviceIndex, cloudState);
+      if (discardPendingRelayUpdate(work)) {
+        Serial.printf("Skipped obsolete queued state for device %d.\\n", work.deviceIndex);
+      }
+      return true;
+    }
   }
-  bool delivered = work.isFeedback
+
+  const bool delivered = work.isFeedback
     ? updateFeedbackInDB(work.deviceIndex, work.state)
     : updateDeviceInDB(work.deviceIndex, work.state);
   if (!delivered) {
-    Serial.printf("Cloud update pending for device %d; will retry.\n", work.deviceIndex);
+    Serial.printf("Cloud update pending for device %d; will retry.\\n", work.deviceIndex);
     return false;
   }
+
   if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
   for (int i = 0; i < queueCount; i++) {
     if (offlineQueue[i].pending && offlineQueue[i].deviceIndex == work.deviceIndex &&
@@ -920,11 +1009,14 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setTxPower(WIFI_POWER_15dBm);
   if (homeWifiSSID.length() > 0) {
-    wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
     Serial.print("-> Connecting to Home Wi-Fi: ");
     Serial.println(homeWifiSSID);
+    if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str());
+    else wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+
     unsigned long wifiStart = millis();
-    while (wifiMulti.run() != WL_CONNECTED && millis() - wifiStart < 8000) {
+    while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 8000) {
+      if (homeWifiSecurity != "open") wifiMulti.run();
       delay(250);
     }
     if (WiFi.status() == WL_CONNECTED) {
@@ -970,6 +1062,25 @@ void setup() {
       Serial.println("ERROR: Cloud poll task failed to start; cloud-to-relay sync is disabled.");
     }
   }
+
+  if (strlen(DEVICE_AGENT_URL) > 0 && strlen(DEVICE_TOKEN) >= 32) {
+    BaseType_t agentTaskCreated = xTaskCreatePinnedToCore(
+      deviceAgentTask,
+      "device_agent",
+      12288,
+      nullptr,
+      1,
+      &deviceAgentTaskHandle,
+      0
+    );
+    if (agentTaskCreated != pdPASS) {
+      Serial.println("ERROR: Device agent task failed to start; remote restart/config updates are unavailable.");
+    } else {
+      Serial.println("-> Authenticated device-agent task started (remote config/restart).");
+    }
+  } else {
+    Serial.println("-> Device agent not provisioned; remote config/restart unavailable until enrollment firmware is flashed.");
+  }
   Serial.println("===========================================\n");
 }
 void applyPendingWifiConfiguration() {
@@ -981,13 +1092,13 @@ void applyPendingWifiConfiguration() {
   }
   if (homeWifiSSID.length() > 0) {
     WiFi.setAutoReconnect(localRole != ROLE_LEADER);
-    WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+    if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str()); else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
     Serial.println("-> Home Wi-Fi connection started; local IP REST API remains enabled.");
   }
 }
 void loop() {
   server.handleClient();
-  applyPendingWifiConfiguration();
+  if (!remoteWifiUpdateInProgress) applyPendingWifiConfiguration();
   for (int i = 0; i < NUM_DEVICES; i++) {
     bool currentRead = digitalRead(INPUT_PINS[i]);
     if (currentRead != lastInputRead[i]) {
@@ -1015,14 +1126,14 @@ void loop() {
     }
     lastInputRead[i] = currentRead;
   }
-  evaluateLocalRole();
-  if (!isHomeWifiConnected()) {
+  if (!remoteWifiUpdateInProgress) evaluateLocalRole();
+  if (!remoteWifiUpdateInProgress && !isHomeWifiConnected()) {
     if (localRole == ROLE_LEADER) {
       if (homeWifiSSID.length() > 0 && WiFi.status() != WL_CONNECTED &&
           millis() - lastLeaderWifiTry >= LEADER_WIFI_RETRY_INTERVAL) {
         lastLeaderWifiTry = millis();
         Serial.println("-> Retrying home Wi-Fi while preserving local AP...");
-        WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+        if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str()); else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
       }
     } else if (localRole == ROLE_IDLE && homeWifiSSID.length() > 0 &&
                millis() - lastWifiRetry >= WIFI_RETRY_INTERVAL) {
@@ -1050,6 +1161,13 @@ void loop() {
 }
 void pollDatabase() {
   if (!isCloudConfigured() || boardUUID == "") return;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument response(16384);
+    if (requestDeviceAgentSnapshot(response)) applyDeviceSnapshot(response, true);
+    return;
+  }
+
+  if (!isDirectCloudConfigured()) return;
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=id,relay_index,is_on,last_changed");
   configureHttp(http, 2000, 2000);
@@ -1074,9 +1192,8 @@ void pollDatabase() {
           }
           updatePending = getPendingRelayUpdate(rIndex, queued);
         }
-        bool relayState = isRelayOn[rIndex];
-        if (!updatePending && dbState != relayState) {
-          Serial.printf("Cloud Toggle Dev [%d] -> %s\n", rIndex, dbState ? "ON" : "OFF");
+        if (!updatePending && dbState != isRelayOn[rIndex]) {
+          Serial.printf("Cloud desired state [%d] -> %s\n", rIndex, dbState ? "ON" : "OFF");
           setRelay(rIndex, dbState);
         }
       }
@@ -1086,6 +1203,15 @@ void pollDatabase() {
 }
 bool updateDeviceInDB(int index, bool state) {
   if (!isCloudConfigured() || index < 0 || index >= NUM_DEVICES || deviceUUIDs[index] == "") return false;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument requestDoc(512), response(512);
+    requestDoc["action"] = "set_relay";
+    requestDoc["relay_index"] = index;
+    requestDoc["state"] = state;
+    return sendDeviceAgentAction(requestDoc, response) && (response["ok"] | false);
+  }
+  if (!isDirectCloudConfigured()) return false;
+
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUIDs[index]);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
@@ -1101,6 +1227,15 @@ bool updateDeviceInDB(int index, bool state) {
 }
 bool updateFeedbackInDB(int index, bool feedback) {
   if (!isCloudConfigured() || index < 0 || index >= NUM_DEVICES || deviceUUIDs[index] == "") return false;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument requestDoc(512), response(512);
+    requestDoc["action"] = "set_feedback";
+    requestDoc["relay_index"] = index;
+    requestDoc["state"] = feedback;
+    return sendDeviceAgentAction(requestDoc, response) && (response["ok"] | false);
+  }
+  if (!isDirectCloudConfigured()) return false;
+
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/devices?id=eq." + deviceUUIDs[index]);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
@@ -1114,13 +1249,25 @@ bool updateFeedbackInDB(int index, bool feedback) {
 bool resolveBoardAndDevices() {
   if (!isCloudConfigured() || strlen(BOARD_IDENTIFIER) == 0 ||
       String(BOARD_IDENTIFIER) == "esp32-unconfigured") return false;
+
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument response(16384);
+    if (!requestDeviceAgentSnapshot(response)) return false;
+    applyDeviceSnapshot(response, true);
+    bool foundAny = false;
+    for (int i = 0; i < NUM_DEVICES; ++i) if (deviceUUIDs[i].length()) foundAny = true;
+    return boardUUID.length() > 0 && foundAny;
+  }
+  if (!isDirectCloudConfigured()) return false;
+
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/boards?board_identifier=eq." + BOARD_IDENTIFIER + "&select=id,user_id");
   configureHttp(http);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   if (http.GET() == 200) {
-    DynamicJsonDocument doc(512); deserializeJson(doc, http.getString());
+    DynamicJsonDocument doc(512);
+    deserializeJson(doc, http.getString());
     if (doc.size() > 0) {
       boardUUID = doc[0]["id"].as<String>();
       boardUserUUID = doc[0]["user_id"].as<String>();
@@ -1128,6 +1275,7 @@ bool resolveBoardAndDevices() {
     }
   }
   http.end();
+
   bool foundAny = false;
   if (boardUUID != "") {
     http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=id,relay_index,name");
@@ -1135,14 +1283,14 @@ bool resolveBoardAndDevices() {
     http.addHeader("apikey", SUPABASE_SERVICE_KEY);
     http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
     if (http.GET() == 200) {
-      DynamicJsonDocument doc(2048); deserializeJson(doc, http.getString());
+      DynamicJsonDocument doc(2048);
+      deserializeJson(doc, http.getString());
       for (int i = 0; i < doc.size(); i++) {
         int rIndex = doc[i]["relay_index"];
         if (rIndex >= 0 && rIndex < NUM_DEVICES) {
           deviceUUIDs[rIndex] = doc[i]["id"].as<String>();
           String resolvedName = doc[i]["name"].as<String>();
           deviceNames[rIndex] = resolvedName.length() ? resolvedName : "Device " + String(rIndex + 1);
-          Serial.printf("  -> Linked Device [%d]\n", rIndex);
           foundAny = true;
         }
       }
@@ -1156,10 +1304,24 @@ bool resolveBoardAndDevices() {
   return foundAny;
 }
 bool syncAllStatesToDB() {
-  if (!isCloudConfigured() || boardUUID == "") return false;
+  if (!isCloudConfigured()) return false;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument response(16384);
+    if (!requestDeviceAgentSnapshot(response)) return false;
+    applyDeviceSnapshot(response, true);
+    int count = 0;
+    for (int i = 0; i < NUM_DEVICES; ++i) if (deviceUUIDs[i].length()) count++;
+    if (count == 0 || boardUUID.length() == 0) {
+      Serial.println("-> Initial device-agent reconciliation returned no linked relay rows.");
+      return false;
+    }
+    Serial.printf("-> Device-agent reconciled %d relay channels.\\n", count);
+    return true;
+  }
+  if (!isDirectCloudConfigured() || boardUUID == "") return false;
+
   HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID +
-             "&select=id,relay_index,is_on,last_changed");
+  http.begin(String(SUPABASE_BASE) + "/devices?board_id=eq." + boardUUID + "&select=id,relay_index,is_on,last_changed");
   configureHttp(http);
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
@@ -1172,10 +1334,10 @@ bool syncAllStatesToDB() {
     Serial.println("-> Initial relay-state read failed; cloud polling remains paused.");
     return false;
   }
+
   for (int i = 0; i < NUM_DEVICES; i++) {
     if (deviceUUIDs[i] == "") continue;
-    bool rowFound = false;
-    bool cloudState = false;
+    bool rowFound = false, cloudState = false;
     String cloudChangedAt;
     for (JsonObject row : doc.as<JsonArray>()) {
       if (row["id"].as<String>() == deviceUUIDs[i]) {
@@ -1185,33 +1347,30 @@ bool syncAllStatesToDB() {
         break;
       }
     }
-    if (!rowFound) {
-      allSynced = false;
-      Serial.printf("-> Initial relay-state row missing for device %d.\n", i);
-      continue;
-    }
+    if (!rowFound) { allSynced = false; continue; }
+
     PendingUpdate queued;
     bool updatePending = getPendingRelayUpdate(i, queued);
-    if (updatePending && cloudState != queued.state &&
-        cloudStateSupersedesQueue(queued, cloudChangedAt)) {
-      if (discardPendingRelayUpdate(queued)) {
-        Serial.printf("Discarded stale queued state for device %d during reconciliation.\n", i);
-      }
+    if (updatePending && cloudState != queued.state && cloudStateSupersedesQueue(queued, cloudChangedAt)) {
+      if (discardPendingRelayUpdate(queued)) Serial.printf("Discarded stale queued state for device %d during reconciliation.\\n", i);
       updatePending = getPendingRelayUpdate(i, queued);
     }
     const bool targetState = updatePending ? queued.state : cloudState;
     if (targetState != isRelayOn[i]) setRelay(i, targetState);
     reconciledDevices++;
   }
-  if (reconciledDevices == 0 || !allSynced) {
-    Serial.println("-> Initial relay-state reconciliation incomplete; cloud polling remains paused.");
-    return false;
-  }
-  Serial.println("-> Relay states reconciled before cloud polling.");
-  return true;
+  return reconciledDevices > 0 && allSynced;
 }
 void pollAlarms() {
   if (!isCloudConfigured() || boardUUID == "") return;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument requestDoc(512), response(8192);
+    requestDoc["action"] = "poll_alarms";
+    if (sendDeviceAgentAction(requestDoc, response)) applyAlarmSnapshot(response);
+    return;
+  }
+  if (!isDirectCloudConfigured()) return;
+
   String queryIds = "";
   for (int i = 0; i < NUM_DEVICES; i++) {
     if (deviceUUIDs[i] != "") {
@@ -1228,22 +1387,7 @@ void pollAlarms() {
   if (http.GET() == 200) {
     DynamicJsonDocument doc(2048);
     deserializeJson(doc, http.getString());
-    for (int i = 0; i < MAX_ALARMS; i++) alarms[i].active = false;
-    for (int i = 0; i < doc.size() && i < MAX_ALARMS; i++) {
-      alarms[i].id = doc[i]["id"].as<String>();
-      String t = doc[i]["trigger_at"].as<String>();
-      alarms[i].triggerAt = t.substring(0, 19);
-      alarms[i].action = doc[i]["action"].as<bool>();
-      String aDevId = doc[i]["device_id"].as<String>();
-      alarms[i].deviceIndex = -1;
-      for (int d = 0; d < NUM_DEVICES; d++) {
-        if (deviceUUIDs[d] == aDevId) {
-          alarms[i].deviceIndex = d;
-          break;
-        }
-      }
-      alarms[i].active = (alarms[i].deviceIndex != -1);
-    }
+    applyAlarmSnapshot(doc);
   }
   http.end();
 }
@@ -1289,6 +1433,14 @@ void loadScheduleCache() {
 
 void pollSchedules() {
   if (!isCloudConfigured() || boardUUID == "") return;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument requestDoc(512), response(8192);
+    requestDoc["action"] = "poll_schedules";
+    if (sendDeviceAgentAction(requestDoc, response)) applyScheduleSnapshot(response);
+    return;
+  }
+  if (!isDirectCloudConfigured()) return;
+
   String ids;
   for (int i = 0; i < NUM_DEVICES; ++i) if (deviceUUIDs[i].length()) {
     if (ids.length()) ids += ",";
@@ -1297,31 +1449,24 @@ void pollSchedules() {
   if (!ids.length()) return;
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/schedules?device_id=in.(" + ids + ")&enabled=eq.true&select=id,device_id,action,time,days,enabled");
-  configureHttp(http); http.addHeader("apikey", SUPABASE_SERVICE_KEY);
+  configureHttp(http);
+  http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
-  int code = http.GET(); String body = code == 200 ? http.getString() : ""; http.end();
-  if (code != 200) { Serial.printf("Schedule refresh failed (HTTP %d); using saved schedules.\\n", code); return; }
-  DynamicJsonDocument doc(8192);
-  if (deserializeJson(doc, body) || !doc.is<JsonArray>()) { Serial.println("Invalid schedules response; keeping saved cache."); return; }
-  Schedule updated[MAX_SCHEDULES]; int count = 0;
-  for (JsonObject o : doc.as<JsonArray>()) {
-    if (count >= MAX_SCHEDULES) break;
-    Schedule &s = updated[count++];
-    s.id = o["id"] | ""; s.deviceId = o["device_id"] | "";
-    s.time = o["time"] | "00:00:00"; s.action = o["action"] | false;
-    s.enabled = o["enabled"] | true; s.days = ""; s.lastRunDate = ""; s.deviceIndex = -1;
-    if (o["days"].is<JsonArray>()) {
-      for (JsonVariant d : o["days"].as<JsonArray>()) { if (s.days.length()) s.days += ","; s.days += d.as<String>(); }
-    }
-    for (int d = 0; d < NUM_DEVICES; ++d) if (deviceUUIDs[d] == s.deviceId) s.deviceIndex = d;
-    for (int old = 0; old < scheduleCount; ++old) if (schedules[old].id == s.id) s.lastRunDate = schedules[old].lastRunDate;
+  int code = http.GET();
+  String body = code == 200 ? http.getString() : "";
+  http.end();
+  if (code != 200) {
+    Serial.printf("Schedule refresh failed (HTTP %d); using saved schedules.\\n", code);
+    return;
   }
-  scheduleCount = count;
-  for (int i = 0; i < count; ++i) schedules[i] = updated[i];
-  saveScheduleCache();
+  DynamicJsonDocument doc(8192);
+  if (deserializeJson(doc, body) || !doc.is<JsonArray>()) {
+    Serial.println("Invalid schedules response; keeping saved cache.");
+    return;
+  }
+  applyScheduleSnapshot(doc);
   Serial.printf("Synced %d schedules; cached for offline execution.\\n", scheduleCount);
 }
-
 void runLocalSchedules() {
   if (time(nullptr) < 100000) return; // never fire against an unset clock
   loadScheduleCache();
@@ -1355,6 +1500,17 @@ void runLocalSchedules() {
 
 bool markAlarmFiredInDB(String alarmId) {
   if (!isCloudConfigured() || alarmId.length() == 0) return false;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument requestDoc(512), response(512);
+    requestDoc["action"] = "claim_alarm";
+    requestDoc["alarm_id"] = alarmId;
+    if (!sendDeviceAgentAction(requestDoc, response)) return false;
+    const bool claimed = response["claimed"] | false;
+    if (claimed) Serial.println("Alarm atomically claimed through device agent.");
+    return claimed;
+  }
+  if (!isDirectCloudConfigured()) return false;
+
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/alarms?id=eq." + alarmId + "&fired=eq.false&select=id");
   configureHttp(http);
@@ -1362,22 +1518,28 @@ bool markAlarmFiredInDB(String alarmId) {
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Prefer", "return=representation");
-  int code = http.PATCH("{\"fired\":true}");
+  int code = http.PATCH("{\\"fired\\":true}");
   String responseBody = code == 200 ? http.getString() : "";
   http.end();
   DynamicJsonDocument doc(256);
   DeserializationError parseError = deserializeJson(doc, responseBody);
   const bool claimed = code == 200 && !parseError && doc.is<JsonArray>() && doc.size() > 0;
-  if (claimed) {
-    Serial.println("Alarm atomically claimed in Supabase.");
-  } else {
-    Serial.printf("Alarm not claimed (HTTP %d); another executor may have claimed it or cloud is unavailable.\n", code);
-  }
+  if (!claimed) Serial.printf("Alarm not claimed (HTTP %d); another executor may have claimed it or cloud is unavailable.\\n", code);
   return claimed;
 }
 bool logActivityInDB(int index, bool state, const String& triggeredBy) {
   if (!isCloudConfigured() || index < 0 || index >= NUM_DEVICES ||
-      deviceUUIDs[index] == "" || boardUserUUID == "") return false;
+      deviceUUIDs[index] == "") return false;
+  if (isDeviceAgentConfigured()) {
+    DynamicJsonDocument requestDoc(512), response(512);
+    requestDoc["action"] = "log_activity";
+    requestDoc["relay_index"] = index;
+    requestDoc["state"] = state;
+    requestDoc["triggered_by"] = triggeredBy;
+    return sendDeviceAgentAction(requestDoc, response) && (response["ok"] | false);
+  }
+  if (!isDirectCloudConfigured() || boardUserUUID == "") return false;
+
   DynamicJsonDocument doc(512);
   doc["user_id"] = boardUserUUID;
   doc["device_id"] = deviceUUIDs[index];
@@ -1395,7 +1557,7 @@ bool logActivityInDB(int index, bool state, const String& triggeredBy) {
   int code = http.POST(payload);
   http.end();
   if (code == 201 || code == 200 || code == 204) return true;
-  Serial.printf("Activity log insert failed for device %d (HTTP %d).\n", index, code);
+  Serial.printf("Activity log insert failed for device %d (HTTP %d).\\n", index, code);
   return false;
 }
 bool applyRemoteWifiConfiguration(const String& ssid, const String& security, const String& password, uint32_t configVersion) {
@@ -1622,6 +1784,16 @@ bool pollRemoteCommands() {
 
 void sendHeartbeat() {
   if (!isCloudConfigured() || boardUUID == "") return;
+  if (isDeviceAgentConfigured()) {
+    // The agent snapshot refreshes last_seen automatically; this explicit action
+    // also supports installations whose snapshot task is temporarily paused.
+    DynamicJsonDocument requestDoc(256), response(512);
+    requestDoc["action"] = "heartbeat";
+    sendDeviceAgentAction(requestDoc, response);
+    return;
+  }
+  if (!isDirectCloudConfigured()) return;
+
   String nowIso = getIsoTime();
   HTTPClient http;
   http.begin(String(SUPABASE_BASE) + "/boards?id=eq." + boardUUID);
@@ -1629,13 +1801,521 @@ void sendHeartbeat() {
   http.addHeader("apikey", SUPABASE_SERVICE_KEY);
   http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
   http.addHeader("Content-Type", "application/json");
-  String payload = "{\"last_seen\":\"" + nowIso + "\"}";
+  String payload = "{\\"last_seen\\":\\"" + nowIso + "\\"}";
   int httpCode = http.PATCH(payload);
-  if (httpCode == 200 || httpCode == 204) {
-    Serial.println("Heartbeat synced to Cloud.");
-  }
+  if (httpCode == 200 || httpCode == 204) Serial.println("Heartbeat synced to Cloud.");
   http.end();
 }
+bool deviceAgentPost(const String& payload, DynamicJsonDocument& response) {
+  if (WiFi.status() != WL_CONNECTED || strlen(DEVICE_AGENT_URL) == 0 ||
+      strlen(DEVICE_TOKEN) < 32 || String(BOARD_IDENTIFIER) == "esp32-unconfigured") return false;
+
+  // Never use HTTPClient.begin(url) without a CA: Arduino-ESP32's convenience
+  // overload can create an insecure TLS client. Require the core's trusted CA bundle.
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  WiFiClientSecure secureClient;
+  secureClient.useBuiltinCACertBundle();
+  HTTPClient http;
+  if (!http.begin(secureClient, String(DEVICE_AGENT_URL))) {
+    Serial.println("Device-agent HTTPS setup failed.");
+    return false;
+  }
+  configureHttp(http, 3500, 6500);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Authorization", "Bearer " + String(DEVICE_TOKEN));
+  int code = http.POST(payload);
+  String body = (code >= 200 && code < 300) ? http.getString() : "";
+  http.end();
+  secureClient.stop();
+
+  if (code < 200 || code >= 300) {
+    Serial.printf("Device-agent HTTPS request failed (HTTP %d).\n", code);
+    return false;
+  }
+  DeserializationError err = deserializeJson(response, body);
+  if (err) {
+    Serial.println("Device-agent returned invalid JSON.");
+    return false;
+  }
+  return true;
+#else
+  Serial.println("Device-agent disabled: update to Arduino-ESP32 core 3.x for validated HTTPS CA-bundle support.");
+  return false;
+#endif
+}
+
+bool reportDeviceConfigStatus(int version, const String& status, const String& error) {
+  if (status == "failed") {
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    preferences.putInt("failed_cfg_ver", version);
+    preferences.putString("failed_cfg_msg", error);
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  }
+
+  DynamicJsonDocument requestDoc(768);
+  requestDoc["action"] = "config_status";
+  requestDoc["board_identifier"] = BOARD_IDENTIFIER;
+  requestDoc["version"] = version;
+  requestDoc["status"] = status;
+  if (error.length()) requestDoc["error"] = error;
+  String payload;
+  serializeJson(requestDoc, payload);
+  DynamicJsonDocument response(512);
+  const bool reported = deviceAgentPost(payload, response) && (response["ok"] | false);
+
+  // Preserve failed status locally when Wi-Fi is lost during a rollback. Retry
+  // the report after the board regains connectivity, unless a newer config won.
+  if (reported && status == "failed") {
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    if (preferences.getInt("failed_cfg_ver", 0) == version) {
+      preferences.remove("failed_cfg_ver");
+      preferences.remove("failed_cfg_msg");
+    }
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  }
+  return reported;
+}
+
+bool acknowledgeDeviceCommand(const String& commandId, const String& status, const String& error) {
+  if (!commandId.length()) return false;
+  DynamicJsonDocument requestDoc(512);
+  requestDoc["action"] = "ack";
+  requestDoc["board_identifier"] = BOARD_IDENTIFIER;
+  requestDoc["command_id"] = commandId;
+  requestDoc["status"] = status;
+  if (error.length()) requestDoc["error"] = error;
+  String payload;
+  serializeJson(requestDoc, payload);
+  DynamicJsonDocument response(512);
+  return deviceAgentPost(payload, response) && (response["ok"] | false);
+}
+
+bool applyRemoteWifiConfiguration(JsonObject configuration) {
+  const int newVersion = configuration["version"] | 0;
+  String newSSID = configuration["wifi_ssid"] | "";
+  String newSecurity = configuration["wifi_security"] | "";
+  String newPassword = configuration["wifi_password"] | "";
+  newSSID.trim();
+
+  int appliedVersion = 0;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  appliedVersion = preferences.getInt("cfg_ver", 0);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  if (newVersion <= appliedVersion) return true;
+  if (newVersion <= 0 || newSSID.length() == 0 || newSSID.length() > 32 ||
+      (newSecurity != "open" && newSecurity != "wpa2_psk") ||
+      (newSecurity == "wpa2_psk" && (newPassword.length() < 8 || newPassword.length() > 63)) ||
+      (newSecurity == "open" && newPassword.length() > 0)) {
+    reportDeviceConfigStatus(newVersion, "failed", "Configuration fields failed validation.");
+    return false;
+  }
+
+  remoteWifiUpdateInProgress = true;
+  reportDeviceConfigStatus(newVersion, "checking_wifi");
+  Serial.printf("-> Checking configured network '%s' before applying version %d.\\n",
+                newSSID.c_str(), newVersion);
+
+  // Check visibility before leaving the currently working network.
+  // Hidden SSIDs are not supported in this initial update flow.
+  int networkCount = WiFi.scanNetworks(false, true);
+  bool ssidFound = false;
+  for (int i = 0; i < networkCount; ++i) {
+    if (WiFi.SSID(i) == newSSID) { ssidFound = true; break; }
+  }
+  WiFi.scanDelete();
+  if (!ssidFound) {
+    reportDeviceConfigStatus(newVersion, "failed", "Requested Wi-Fi network was not found by the ESP32 scan.");
+    remoteWifiUpdateInProgress = false;
+    return false;
+  }
+
+  const String oldSSID = homeWifiSSID;
+  const String oldPassword = homeWifiPassword;
+  const String oldSecurity = homeWifiSecurity;
+
+  reportDeviceConfigStatus(newVersion, "applying");
+  WiFi.disconnect(false, false);
+  delay(250);
+  if (newSecurity == "open") WiFi.begin(newSSID.c_str());
+  else WiFi.begin(newSSID.c_str(), newPassword.c_str());
+
+  const unsigned long connectStart = millis();
+  bool connectedToNew = false;
+  while (millis() - connectStart < 18000) {
+    if (WiFi.status() == WL_CONNECTED && WiFi.SSID() == newSSID) {
+      connectedToNew = true;
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(250));
+  }
+
+  if (!connectedToNew) {
+    Serial.println("-> New Wi-Fi failed; attempting rollback to last known-good network.");
+    WiFi.disconnect(false, false);
+    delay(250);
+    if (oldSSID.length()) {
+      if (oldSecurity == "open") WiFi.begin(oldSSID.c_str());
+      else WiFi.begin(oldSSID.c_str(), oldPassword.c_str());
+      const unsigned long rollbackStart = millis();
+      while (millis() - rollbackStart < 15000) {
+        if (WiFi.status() == WL_CONNECTED && WiFi.SSID() == oldSSID) break;
+        vTaskDelay(pdMS_TO_TICKS(250));
+      }
+    }
+
+    if (oldSSID.length() && WiFi.status() == WL_CONNECTED && WiFi.SSID() == oldSSID) {
+      reportDeviceConfigStatus(newVersion, "failed", "New Wi-Fi failed; previous network restored.");
+    } else {
+      Serial.println("!! Could not restore Wi-Fi. Previous settings remain cached; local AP recovery may be required.");
+    }
+    remoteWifiUpdateInProgress = false;
+    return false;
+  }
+
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  homeWifiSSID = newSSID;
+  homeWifiPassword = newPassword;
+  homeWifiSecurity = newSecurity;
+  preferences.putString("wifi_ssid", homeWifiSSID);
+  preferences.putString("wifi_pass", homeWifiPassword);
+  preferences.putString("wifi_sec", homeWifiSecurity);
+  preferences.putInt("cfg_ver", newVersion);
+  preferences.putBool("wifi_registered", true);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+
+  Serial.printf("-> Wi-Fi connected; configuration version %d saved to NVS.\\n", newVersion);
+  reportDeviceConfigStatus(newVersion, "applied");
+  remoteWifiUpdateInProgress = false;
+  return true;
+}
+
+void processDeviceAgentResponse(JsonDocument& response) {
+  // Report a configuration failure saved locally during an outage/failed rollback.
+  // A newer server version supersedes the old failure marker.
+  int failedVersion = 0;
+  String failedMessage;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  failedVersion = preferences.getInt("failed_cfg_ver", 0);
+  failedMessage = preferences.getString("failed_cfg_msg", "The ESP32 could not apply the Wi-Fi configuration.");
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  const int serverConfigVersion = response["server_config_version"] | 0;
+  if (failedVersion > 0 && serverConfigVersion > failedVersion) {
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    preferences.remove("failed_cfg_ver");
+    preferences.remove("failed_cfg_msg");
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+    failedVersion = 0;
+  }
+  if (failedVersion > 0 && failedVersion == serverConfigVersion) {
+    reportDeviceConfigStatus(failedVersion, "failed", failedMessage);
+  }
+
+  applyDeviceSnapshot(response, true);
+  applyAlarmSnapshot(response);
+  applyScheduleSnapshot(response);
+  // A restart requested before the previous reboot is acknowledged only after boot.
+  String pendingRestart = "";
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  pendingRestart = preferences.getString("pending_restart", "");
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  if (pendingRestart.length() && acknowledgeDeviceCommand(pendingRestart, "completed")) {
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    preferences.remove("pending_restart");
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+    Serial.println("-> Remote restart acknowledged after boot.");
+    pendingRestart = "";
+  }
+
+  JsonObject config = response["config"].as<JsonObject>();
+  if (!config.isNull()) applyRemoteWifiConfiguration(config);
+
+  int cachedConfigVersion = 0;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  cachedConfigVersion = preferences.getInt("cfg_ver", 0);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  const String serverConfigStatus = response["server_config_status"] | "";
+  if (serverConfigVersion > 0 && cachedConfigVersion == serverConfigVersion &&
+      (serverConfigStatus == "pending" || serverConfigStatus == "sending" ||
+       serverConfigStatus == "checking_wifi" || serverConfigStatus == "applying")) {
+    reportDeviceConfigStatus(serverConfigVersion, "applied", "");
+  }
+
+  JsonArray commands = response["commands"].as<JsonArray>();
+  for (JsonObject command : commands) {
+    String commandId = command["id"] | "";
+    String type = command["command_type"] | "";
+    String targetBoard = command["board_identifier"] | "";
+    // Fail closed if a gateway ever receives a command for another mesh node.
+    // Cross-board forwarding is not implemented in this firmware path.
+    if (targetBoard.length() == 0 || targetBoard != String(BOARD_IDENTIFIER)) {
+      Serial.println("-> Ignoring remote command without an exact board identity match.");
+      continue;
+    }
+    if (type != "restart" || commandId.length() == 0 || commandId == pendingRestart) continue;
+
+    Serial.println("-> Remote restart command received; confirming before reboot.");
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    preferences.putString("pending_restart", commandId);
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+
+    if (!acknowledgeDeviceCommand(commandId, "accepted")) {
+      if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+      preferences.remove("pending_restart");
+      if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+      Serial.println("Remote restart acknowledgement failed; command will be retried.");
+      continue;
+    }
+    delay(350);
+    ESP.restart();
+    return;
+  }
+}
+
+
+bool sendDeviceAgentAction(DynamicJsonDocument& requestDoc, DynamicJsonDocument& response) {
+  if (!isDeviceAgentConfigured()) return false;
+  requestDoc["board_identifier"] = BOARD_IDENTIFIER;
+  String payload;
+  serializeJson(requestDoc, payload);
+  return deviceAgentPost(payload, response) && (response["ok"] | false);
+}
+
+bool requestDeviceAgentSnapshot(DynamicJsonDocument& response) {
+  DynamicJsonDocument requestDoc(1536);
+  requestDoc["action"] = "poll";
+  requestDoc["board_identifier"] = BOARD_IDENTIFIER;
+
+  // One-time bootstrap: let the server cache the network already used by this
+  // ESP32. The device-agent encrypts the passphrase before storing it. Never
+  // include this field again after the server confirms registration.
+  bool wifiRegistered = false;
+  int appliedVersion = 0;
+  String currentWifiSSID;
+  String currentWifiPassword;
+  String currentWifiSecurity;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  wifiRegistered = preferences.getBool("wifi_registered", false);
+  appliedVersion = preferences.getInt("cfg_ver", 0);
+  currentWifiSSID = homeWifiSSID;
+  currentWifiPassword = homeWifiPassword;
+  currentWifiSecurity = homeWifiSecurity;
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  if (!wifiRegistered && currentWifiSSID.length()) {
+    requestDoc["current_wifi_ssid"] = currentWifiSSID;
+    requestDoc["current_wifi_security"] = currentWifiSecurity;
+    if (currentWifiSecurity == "wpa2_psk") requestDoc["current_wifi_password"] = currentWifiPassword;
+  }
+  requestDoc["applied_config_version"] = appliedVersion;
+  requestDoc["mesh_gateway"] = localRole == ROLE_LEADER;
+
+  if (localRole == ROLE_LEADER) {
+    JsonArray nodes = requestDoc.createNestedArray("mesh_nodes");
+    for (int i = 0; i < MAX_MESH_NODES; ++i) {
+      if (!meshNodes[i].active) continue;
+      const unsigned long lastSeenMs = millis() - meshNodes[i].lastSeen;
+      if (lastSeenMs > 45000) continue;
+      JsonObject node = nodes.createNestedObject();
+      node["node_id"] = meshNodes[i].nodeId;
+      node["last_seen_ms"] = lastSeenMs;
+    }
+  }
+
+  String payload;
+  serializeJson(requestDoc, payload);
+  const bool ok = deviceAgentPost(payload, response) && (response["ok"] | false);
+  if (ok && (response["wifi_config_registered"] | false)) {
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    preferences.putBool("wifi_registered", true);
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  }
+  return ok;
+}
+
+void applyDeviceSnapshot(JsonDocument& response, bool applyRelayStates) {
+  const String incomingBoardId = response["board_id"] | "";
+  const String incomingUserId = response["user_id"] | "";
+  if (incomingBoardId.length()) boardUUID = incomingBoardId;
+  if (incomingUserId.length()) boardUserUUID = incomingUserId;
+
+  JsonArray rows = response["devices"].as<JsonArray>();
+  if (rows.isNull()) return;
+
+  String nextIds[NUM_DEVICES] = {"", "", "", ""};
+  String nextNames[NUM_DEVICES] = {"Device 1", "Device 2", "Device 3", "Device 4"};
+  bool nextStates[NUM_DEVICES] = {false, false, false, false};
+  String changedAt[NUM_DEVICES] = {"", "", "", ""};
+
+  for (JsonObject row : rows) {
+    const int relayIndex = row["relay_index"] | -1;
+    const String id = row["id"] | "";
+    if (relayIndex < 0 || relayIndex >= NUM_DEVICES || id.length() == 0) continue;
+    nextIds[relayIndex] = id;
+    const String name = row["name"] | "";
+    nextNames[relayIndex] = name.length() ? name : "Device " + String(relayIndex + 1);
+    nextStates[relayIndex] = row["is_on"] | false;
+    changedAt[relayIndex] = row["last_changed"] | "";
+  }
+
+  bool foundAny = false;
+  for (int i = 0; i < NUM_DEVICES; ++i) {
+    deviceUUIDs[i] = nextIds[i];
+    deviceNames[i] = nextNames[i];
+    if (deviceUUIDs[i].length()) foundAny = true;
+  }
+  if (!boardUUID.length() || !foundAny) {
+    cloudDevicesReady = false;
+    return;
+  }
+
+  if (applyRelayStates) {
+    for (int i = 0; i < NUM_DEVICES; ++i) {
+      if (deviceUUIDs[i].length() == 0) continue;
+      PendingUpdate queued;
+      bool updatePending = getPendingRelayUpdate(i, queued);
+      if (updatePending && nextStates[i] != queued.state &&
+          cloudStateSupersedesQueue(queued, changedAt[i])) {
+        if (discardPendingRelayUpdate(queued)) {
+          Serial.printf("Discarded obsolete queued relay state for device %d; server state is newer.\\n", i);
+        }
+        updatePending = getPendingRelayUpdate(i, queued);
+      }
+      const bool targetState = updatePending ? queued.state : nextStates[i];
+      if (targetState != isRelayOn[i]) {
+        Serial.printf("Device-agent desired state [%d] -> %s\\n", i, targetState ? "ON" : "OFF");
+        setRelay(i, targetState);
+      }
+    }
+  }
+  cloudDevicesReady = true;
+}
+
+void applyAlarmSnapshot(JsonDocument& response) {
+  JsonArray rows = response["alarms"].as<JsonArray>();
+  if (rows.isNull()) return;
+  for (int i = 0; i < MAX_ALARMS; ++i) alarms[i].active = false;
+  int count = 0;
+  for (JsonObject row : rows) {
+    if (count >= MAX_ALARMS) break;
+    const String alarmId = row["id"] | "";
+    const String deviceId = row["device_id"] | "";
+    const String trigger = row["trigger_at"] | "";
+    if (!alarmId.length() || !deviceId.length() || trigger.length() < 19) continue;
+    int deviceIndex = -1;
+    for (int d = 0; d < NUM_DEVICES; ++d) {
+      if (deviceUUIDs[d] == deviceId) { deviceIndex = d; break; }
+    }
+    if (deviceIndex < 0) continue;
+    alarms[count].id = alarmId;
+    alarms[count].triggerAt = trigger.substring(0, 19);
+    alarms[count].action = row["action"] | false;
+    alarms[count].deviceIndex = deviceIndex;
+    alarms[count].active = !(row["fired"] | false);
+    ++count;
+  }
+}
+
+void applyScheduleSnapshot(JsonDocument& response) {
+  JsonArray rows = response["schedules"].as<JsonArray>();
+  if (rows.isNull()) return;
+
+  Schedule updated[MAX_SCHEDULES];
+  int count = 0;
+  bool changed = false;
+  for (JsonObject row : rows) {
+    if (count >= MAX_SCHEDULES) break;
+    const String scheduleId = row["id"] | "";
+    const String deviceId = row["device_id"] | "";
+    if (!scheduleId.length() || !deviceId.length()) continue;
+
+    Schedule& item = updated[count++];
+    item.id = scheduleId;
+    item.deviceId = deviceId;
+    item.time = row["time"] | "00:00:00";
+    item.action = row["action"] | false;
+    item.enabled = row["enabled"] | true;
+    item.days = "";
+    item.lastRunDate = "";
+    item.deviceIndex = -1;
+    if (row["days"].is<JsonArray>()) {
+      for (JsonVariant day : row["days"].as<JsonArray>()) {
+        if (item.days.length()) item.days += ",";
+        item.days += day.as<String>();
+      }
+    } else {
+      item.days = row["days"] | "";
+    }
+
+    for (int d = 0; d < NUM_DEVICES; ++d) {
+      if (deviceUUIDs[d] == item.deviceId) { item.deviceIndex = d; break; }
+    }
+
+    bool matchedExisting = false;
+    for (int old = 0; old < scheduleCount; ++old) {
+      if (schedules[old].id != item.id) continue;
+      matchedExisting = true;
+      item.lastRunDate = schedules[old].lastRunDate;
+      if (schedules[old].deviceId != item.deviceId ||
+          schedules[old].time != item.time ||
+          schedules[old].days != item.days ||
+          schedules[old].action != item.action ||
+          schedules[old].enabled != item.enabled ||
+          schedules[old].deviceIndex != item.deviceIndex) {
+        changed = true;
+      }
+      break;
+    }
+    if (!matchedExisting) changed = true;
+  }
+
+  if (count != scheduleCount) changed = true;
+  for (int old = 0; old < scheduleCount; ++old) {
+    bool stillExists = false;
+    for (int i = 0; i < count; ++i) {
+      if (updated[i].id == schedules[old].id) { stillExists = true; break; }
+    }
+    if (!stillExists) { changed = true; break; }
+  }
+
+  scheduleCount = count;
+  for (int i = 0; i < count; ++i) schedules[i] = updated[i];
+  // Device snapshots arrive every 10 seconds; write NVS only if the schedule
+  // definition actually changed to avoid unnecessary flash wear.
+  if (changed) saveScheduleCache();
+}
+void deviceAgentTask(void* parameter) {
+  (void)parameter;
+  unsigned long lastAttempt = 0;
+  bool deviceAgentNtpRequested = false;
+  for (;;) {
+    if (WiFi.status() != WL_CONNECTED || String(BOARD_IDENTIFIER) == "esp32-unconfigured" ||
+        strlen(DEVICE_AGENT_URL) == 0 || strlen(DEVICE_TOKEN) < 32) {
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+    // CA-validated HTTPS needs a sensible clock to check certificate dates.
+    // Start NTP here rather than waiting for the legacy cloud worker's 30s cadence.
+    if (time(nullptr) < 100000) {
+      if (!deviceAgentNtpRequested) {
+        setenv("TZ", "IST-5:30", 1);
+        tzset();
+        configTime(0, 0, "pool.ntp.org", "time.google.com");
+        deviceAgentNtpRequested = true;
+      }
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+    if (millis() - lastAttempt >= 10000) {
+      lastAttempt = millis();
+      DynamicJsonDocument response(16384);
+      if (requestDeviceAgentSnapshot(response)) {
+        processDeviceAgentResponse(response);
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(250));
+  }
+}
+
+
 void cloudSyncTask(void* parameter) {
   (void)parameter;
   unsigned long lastNtpAttempt = 0;
@@ -1653,7 +2333,10 @@ void cloudSyncTask(void* parameter) {
 
     // Secure device-management APIs use a per-board credential and do not
     // require the legacy Supabase service-role key embedded by older builds.
-    if (isHomeWifiConnected() && deviceAuthToken.length()) {
+    // Run the older PR #7 API path only on legacy firmware. Newly enrolled
+    // boards use the device-agent path above and must not execute two command
+    // pipelines in parallel.
+    if (!isDeviceAgentConfigured() && isHomeWifiConnected() && deviceAuthToken.length()) {
       if (millis() - lastDeviceHeartbeatAttempt >= 15000) {
         lastDeviceHeartbeatAttempt = millis();
         sendDeviceHeartbeat();
@@ -1689,7 +2372,9 @@ void cloudSyncTask(void* parameter) {
     }
     if (boardUUID != "" && !cloudDevicesReady) {
       if (syncAllStatesToDB()) {
-        Serial.println("-> Cloud state reconciled; 1-second cloud polling enabled.");
+        Serial.println(isDeviceAgentConfigured()
+          ? "-> Device-agent snapshots active; legacy direct polling is disabled."
+          : "-> Cloud state reconciled; cloud polling enabled.");
         cloudDevicesReady = true;
       } else {
         Serial.println("-> Initial relay-state reconciliation failed; cloud polling paused.");
@@ -1698,7 +2383,7 @@ void cloudSyncTask(void* parameter) {
       }
     }
     if (boardUUID != "") {
-      if (millis() - lastSchedulePoll >= SCHEDULE_POLL_INTERVAL) {
+      if (!isDeviceAgentConfigured() && millis() - lastSchedulePoll >= SCHEDULE_POLL_INTERVAL) {
         lastSchedulePoll = millis();
         pollSchedules();
       }
@@ -1713,11 +2398,11 @@ void cloudSyncTask(void* parameter) {
       }
       currentNtpTime = time(nullptr);
       if (currentNtpTime >= 100000) {
-        if (millis() - lastCloudAlarmPoll >= ALARM_POLL_INTERVAL) {
+        if (!isDeviceAgentConfigured() && millis() - lastCloudAlarmPoll >= ALARM_POLL_INTERVAL) {
           lastCloudAlarmPoll = millis();
           pollAlarms();
         }
-        if (millis() - lastCloudHeartbeat >= HEARTBEAT_INTERVAL) {
+        if (!isDeviceAgentConfigured() && millis() - lastCloudHeartbeat >= HEARTBEAT_INTERVAL) {
           lastCloudHeartbeat = millis();
           sendHeartbeat();
         }
@@ -1748,7 +2433,7 @@ void cloudPollTask(void* parameter) {
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
     }
-    pollDatabase();
+    if (!isDeviceAgentConfigured()) pollDatabase();
     vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL));
   }
 }
