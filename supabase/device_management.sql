@@ -88,3 +88,125 @@ alter table public.device_config_events enable row level security;
 revoke all on public.device_config_events from anon, authenticated;
 comment on table public.device_config_events is
   'Append-only status timeline for remote ESP32 configuration updates; read via the admin API only.';
+
+
+-- One authenticated device poll returns its configuration, relay rows,
+-- alarms, schedules, and pending commands in one database round trip.
+create or replace function public.device_agent_snapshot(
+  p_device_token_hash text,
+  p_board_identifier text
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_config public.device_runtime_configs%rowtype;
+  v_board public.boards%rowtype;
+  v_devices jsonb := '[]'::jsonb;
+  v_device_ids uuid[] := array[]::uuid[];
+  v_alarms jsonb := '[]'::jsonb;
+  v_schedules jsonb := '[]'::jsonb;
+  v_commands jsonb := '[]'::jsonb;
+  v_now timestamptz := now();
+begin
+  select c.* into v_config
+  from public.device_runtime_configs c
+  join public.boards b on b.id = c.board_id and b.user_id = c.user_id
+  where c.device_token_hash = p_device_token_hash
+    and b.board_identifier = p_board_identifier
+  limit 1;
+
+  if not found then
+    return jsonb_build_object('ok', false, 'error', 'device_auth_failed');
+  end if;
+
+  update public.device_runtime_configs
+  set last_seen_at = v_now,
+      updated_at = case
+        when last_seen_at is null or last_seen_at < v_now - interval '15 seconds' then v_now
+        else updated_at
+      end
+  where board_id = v_config.board_id
+  returning * into v_config;
+
+  update public.boards set last_seen = v_now where id = v_config.board_id
+    and (last_seen is null or last_seen < v_now - interval '15 seconds');
+
+  select b.* into v_board
+  from public.boards b
+  where b.id = v_config.board_id;
+
+  select
+    coalesce(jsonb_agg(jsonb_build_object(
+      'id', d.id,
+      'name', d.name,
+      'relay_index', d.relay_index,
+      'is_on', d.is_on,
+      'last_changed', d.last_changed
+    ) order by d.relay_index), '[]'::jsonb),
+    coalesce(array_agg(d.id), array[]::uuid[])
+  into v_devices, v_device_ids
+  from public.devices d
+  where d.board_id = v_config.board_id and d.user_id = v_config.user_id;
+
+  if cardinality(v_device_ids) > 0 then
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'id', a.id,
+      'device_id', a.device_id,
+      'trigger_at', a.trigger_at,
+      'action', a.action,
+      'fired', a.fired
+    ) order by a.trigger_at), '[]'::jsonb)
+    into v_alarms
+    from public.alarms a
+    where a.device_id = any(v_device_ids) and a.user_id = v_config.user_id and a.fired = false;
+
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'id', s.id,
+      'device_id', s.device_id,
+      'time', s.time,
+      'days', s.days,
+      'action', s.action,
+      'enabled', s.enabled
+    ) order by s.time), '[]'::jsonb)
+    into v_schedules
+    from public.schedules s
+    where s.device_id = any(v_device_ids) and s.user_id = v_config.user_id and s.enabled = true;
+  end if;
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id', c.id,
+    'command_type', c.command_type,
+    'requested_at', c.requested_at
+  ) order by c.requested_at), '[]'::jsonb)
+  into v_commands
+  from (
+    select *
+    from public.device_commands
+    where board_id = v_config.board_id
+      and user_id = v_config.user_id
+      and status = 'pending'
+    order by requested_at
+    limit 5
+  ) c;
+
+  return jsonb_build_object(
+    'ok', true,
+    'board', jsonb_build_object(
+      'id', v_board.id,
+      'user_id', v_board.user_id,
+      'board_identifier', v_board.board_identifier
+    ),
+    'config', to_jsonb(v_config),
+    'devices', v_devices,
+    'alarms', v_alarms,
+    'schedules', v_schedules,
+    'commands', v_commands,
+    'server_time', v_now
+  );
+end;
+$$;
+
+revoke all on function public.device_agent_snapshot(text, text) from public, anon, authenticated;
+grant execute on function public.device_agent_snapshot(text, text) to service_role;
