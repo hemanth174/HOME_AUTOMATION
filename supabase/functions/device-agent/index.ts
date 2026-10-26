@@ -251,18 +251,20 @@ async function poll(request: Request, body: Record<string, unknown>) {
     }
   }
 
-  // Mesh presence is informative only. Do not return another board's commands
-  // or decrypt its Wi-Fi password for this gateway: current firmware has no
-  // authenticated per-member command/config forwarding path.
+  // Mesh presence is used only for routing restart commands to nodes that
+  // the authenticated leader can reach right now. Configuration secrets are
+  // never returned for another board; Wi-Fi changes still require direct check-in.
   const isMeshGateway = body.mesh_gateway === true;
   if (isMeshGateway && userId && boardId) {
     const userBoards = await rest(
       "boards?user_id=eq." + encodeURIComponent(userId) + "&select=id,board_identifier",
     );
-    const knownBoards: Record<string, string> = { [String(board.board_identifier)]: boardId };
+    const knownBoardIdByIdentifier: Record<string, string> = { [String(board.board_identifier)]: boardId };
+    const knownIdentifierByBoardId: Record<string, string> = { [boardId]: String(board.board_identifier) };
     for (const item of Array.isArray(userBoards) ? userBoards : []) {
       if (typeof item.board_identifier === "string" && validBoardIdentifier(item.board_identifier)) {
-        knownBoards[item.board_identifier] = String(item.id);
+        knownBoardIdByIdentifier[item.board_identifier] = String(item.id);
+        knownIdentifierByBoardId[String(item.id)] = item.board_identifier;
       }
     }
 
@@ -272,7 +274,7 @@ async function poll(request: Request, body: Record<string, unknown>) {
       if (!node || !validBoardIdentifier(node.node_id)) continue;
       const lastSeenMs = Number(node.last_seen_ms);
       if (!Number.isFinite(lastSeenMs) || lastSeenMs < 0 || lastSeenMs > 45000) continue;
-      const memberBoardId = knownBoards[String(node.node_id)];
+      const memberBoardId = knownBoardIdByIdentifier[String(node.node_id)];
       if (memberBoardId && memberBoardId !== boardId) liveBoardIds.push(memberBoardId);
     }
 
@@ -280,8 +282,7 @@ async function poll(request: Request, body: Record<string, unknown>) {
     if (uniqueLiveIds.length) {
       const idFilter = "in.(" + uniqueLiveIds.map((id) => encodeURIComponent(id)).join(",") + ")";
       const now = new Date().toISOString();
-      // This timestamp indicates mesh reachability only. Admin remote control
-      // requires a recent direct authenticated check-in from the target board.
+      const idList = uniqueLiveIds.join(",");
       await rest(
         "device_runtime_configs?board_id=" + idFilter + "&user_id=eq." + encodeURIComponent(userId),
         {
@@ -294,6 +295,67 @@ async function poll(request: Request, body: Record<string, unknown>) {
         "boards?id=" + idFilter + "&user_id=eq." + encodeURIComponent(userId),
         { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_seen: now }) },
       );
+
+      // Members that have no recent direct device-agent connection can receive
+      // restart commands through this gateway only. Commands are bound to this
+      // gateway in gateway_board_id, so acknowledgements cannot be cross-routed.
+      const configRows = await rest(
+        "device_runtime_configs?board_id=" + idFilter +
+          "&user_id=eq." + encodeURIComponent(userId) +
+          "&select=board_id,last_direct_seen_at",
+      );
+      const directRecentlySeen = new Set<string>();
+      for (const row of Array.isArray(configRows) ? configRows : []) {
+        const directAt = row.last_direct_seen_at ? new Date(String(row.last_direct_seen_at)).getTime() : 0;
+        const age = Date.now() - directAt;
+        if (Number.isFinite(directAt) && age >= 0 && age < 120000) directRecentlySeen.add(String(row.board_id));
+      }
+      const meshOnlyIds = uniqueLiveIds.filter((id) => !directRecentlySeen.has(id));
+      if (meshOnlyIds.length) {
+        const meshIdFilter = "in.(" + meshOnlyIds.map((id) => encodeURIComponent(id)).join(",") + ")";
+        const pendingRows = await rest(
+          "device_commands?board_id=" + meshIdFilter +
+            "&user_id=eq." + encodeURIComponent(userId) +
+            "&command_type=eq.restart&status=eq.pending&expires_at=gt." + encodeURIComponent(now) +
+            "&select=id,board_id,user_id,command_type,status,requested_at,expires_at,gateway_board_id",
+        );
+        for (const candidate of Array.isArray(pendingRows) ? pendingRows : []) {
+          const commandId = String(candidate.id || "");
+          const targetBoardId = String(candidate.board_id || "");
+          const existingGatewayId = candidate.gateway_board_id ? String(candidate.gateway_board_id) : "";
+          const targetIdentifier = knownIdentifierByBoardId[targetBoardId];
+          if (!/^[0-9a-f-]{36}$/i.test(commandId) || !targetIdentifier || !validBoardIdentifier(targetIdentifier)) continue;
+          if (existingGatewayId && existingGatewayId !== boardId) continue;
+
+          let assigned = candidate;
+          if (!existingGatewayId) {
+            const assignmentRows = await rest(
+              "device_commands?id=eq." + encodeURIComponent(commandId) +
+                "&board_id=eq." + encodeURIComponent(targetBoardId) +
+                "&user_id=eq." + encodeURIComponent(userId) +
+                "&status=eq.pending&expires_at=gt." + encodeURIComponent(now) +
+                "&or=(gateway_board_id.is.null,gateway_board_id.eq." + encodeURIComponent(boardId) + ")",
+              {
+                method: "PATCH",
+                headers: { Prefer: "return=representation" },
+                body: JSON.stringify({ gateway_board_id: boardId }),
+              },
+            );
+            if (!Array.isArray(assignmentRows) || assignmentRows.length === 0) continue;
+            assigned = assignmentRows[0];
+          }
+          commands.push({
+            id: commandId,
+            board_id: targetBoardId,
+            board_identifier: targetIdentifier,
+            command_type: "restart",
+            status: String(assigned.status || "pending"),
+            requested_at: assigned.requested_at,
+            expires_at: assigned.expires_at,
+            forwarded_via_board_id: boardId,
+          });
+        }
+      }
     }
   }
 
@@ -364,29 +426,62 @@ async function updateConfigStatus(device: { config: Record<string, unknown> }, b
   return json({ ok: true, version, status });
 }
 
-async function acknowledgeCommand(device: { config: Record<string, unknown> }, body: Record<string, unknown>) {
+async function acknowledgeCommand(device: { config: Record<string, unknown>; board: Record<string, unknown> }, body: Record<string, unknown>) {
   const commandId = String(body.command_id || "");
   const status = String(body.status || "");
+  const requestedTarget = String(body.target_board_identifier || "").trim();
   if (!/^[0-9a-f-]{36}$/i.test(commandId) || !["accepted", "completed", "failed"].includes(status)) {
     return json({ error: "Invalid command acknowledgement" }, 400);
   }
+
+  const gatewayBoardId = String(device.config.board_id || "");
+  const userId = String(device.config.user_id || "");
+  const ownBoardIdentifier = String(device.board.board_identifier || "");
+  let targetBoardId = gatewayBoardId;
+  let gatewayFilter = "&gateway_board_id=is.null";
+
+  // A board may acknowledge a mesh-member restart only when this authenticated
+  // gateway was assigned that command by the device-agent poll. A gateway
+  // cannot acknowledge another owner's command or an arbitrary board's ID.
+  if (requestedTarget && requestedTarget !== ownBoardIdentifier) {
+    if (!validBoardIdentifier(requestedTarget) || !gatewayBoardId || !userId) {
+      return json({ error: "Invalid mesh command target" }, 400);
+    }
+    const targetRows = await rest(
+      "boards?board_identifier=eq." + encodeURIComponent(requestedTarget) +
+        "&user_id=eq." + encodeURIComponent(userId) + "&select=id,board_identifier",
+    );
+    const targetBoard = Array.isArray(targetRows) ? targetRows[0] : null;
+    if (!targetBoard || String(targetBoard.id) === gatewayBoardId) {
+      return json({ error: "Mesh target does not belong to this gateway owner" }, 403);
+    }
+    targetBoardId = String(targetBoard.id);
+    gatewayFilter = "&gateway_board_id=eq." + encodeURIComponent(gatewayBoardId);
+  } else if (requestedTarget && requestedTarget !== ownBoardIdentifier) {
+    return json({ error: "Invalid command target" }, 400);
+  }
+
   const now = new Date().toISOString();
   const patch: Record<string, unknown> = {
     status,
     last_error: status === "failed" ? String(body.error || "Command failed").slice(0, 500) : null,
-    result: { reported_by_device: true, message: String(body.message || "").slice(0, 300) },
+    result: { reported_by_device: true, message: String(body.message || "").slice(0, 300),
+      acknowledged_by_board: ownBoardIdentifier },
   };
   if (status === "accepted") patch.accepted_at = now;
   if (status === "completed" || status === "failed") patch.completed_at = now;
 
   const rows = await rest(
-    `device_commands?id=eq.${encodeURIComponent(commandId)}&board_id=eq.${encodeURIComponent(String(device.config.board_id))}&status=in.(pending,accepted)&expires_at=gt.${encodeURIComponent(now)}`,
+    "device_commands?id=eq." + encodeURIComponent(commandId) +
+      "&board_id=eq." + encodeURIComponent(targetBoardId) +
+      "&user_id=eq." + encodeURIComponent(userId) +
+      "&status=in.(pending,accepted)&expires_at=gt." + encodeURIComponent(now) + gatewayFilter,
     { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) },
   );
   if (!Array.isArray(rows) || rows.length === 0) {
-    return json({ ok: true, ignored: true, reason: "already_acknowledged_or_not_found" });
+    return json({ ok: true, ignored: true, reason: "already_acknowledged_or_not_assigned_to_this_gateway" });
   }
-  return json({ ok: true, command_id: commandId, status });
+  return json({ ok: true, command_id: commandId, target_board_identifier: requestedTarget || ownBoardIdentifier, status });
 }
 
 async function handleDeviceDataAction(
