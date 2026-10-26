@@ -23,6 +23,10 @@ export async function POST(request) {
 
   const now = new Date().toISOString();
   const currentWifiPassword = typeof body.wifiPassword === 'string' ? body.wifiPassword : '';
+  if (!existing && wifiSecurity === 'wpa2_psk' &&
+      (currentWifiPassword.length < 8 || currentWifiPassword.length > 63)) {
+    return NextResponse.json({ error: 'Initial WPA2 provisioning requires the current 8–63 character Wi-Fi password.' }, { status: 400 });
+  }
   const insertPassword = wifiSecurity === 'wpa2_psk' && currentWifiPassword
     ? encryptProvisioningValue(currentWifiPassword)
     : null;
