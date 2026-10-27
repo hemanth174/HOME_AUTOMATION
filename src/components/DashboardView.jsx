@@ -93,7 +93,7 @@ export default function DashboardView({ c }) {
           </div>
         ) : (
           <>
-            <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)] items-start">
+            <div className="grid min-w-0 gap-4 lg:grid-cols-[280px_minmax(0,1fr)] items-start">
                  <section className="boards-section-selector min-w-0 rounded-2xl border border-(--pg-line) bg-(--pg-card) p-3 sm:p-5 lg:order-2">
                 <div className="flex flex-wrap items-center justify-between gap-3 pb-1">
                   <div className="min-w-0 flex-1">
@@ -109,7 +109,7 @@ export default function DashboardView({ c }) {
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
                     {roomExpanded ? (
                       <div
                         className="flex items-center rounded-xl border border-(--pg-line) bg-(--pg-card) p-0.5"
@@ -198,8 +198,8 @@ export default function DashboardView({ c }) {
                         ref={c.carouselRef}
                         className={
                           c.deviceView === "carousel"
-                            ? "flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth overscroll-x-contain pb-1"
-                            : "grid sm:grid-cols-2 gap-2.5"
+                            ? "flex w-full min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth overscroll-x-contain pb-1"
+                            : "grid w-full min-w-0 sm:grid-cols-2 gap-2.5"
                         }
                         aria-label="Local devices carousel"
                         onScroll={c.saveDeviceIndex}
@@ -250,7 +250,7 @@ export default function DashboardView({ c }) {
                   </>
                 )}
               </section>
-              <div className="lg:order-1 rounded-2xl border border-(--pg-line) bg-(--pg-card) p-3">
+              <div className="lg:order-1 min-w-0 max-w-full overflow-hidden rounded-2xl border border-(--pg-line) bg-(--pg-card) p-3">
                 <RoomList
                   boards={c.boards}
                   devices={c.devices}

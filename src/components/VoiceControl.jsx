@@ -456,7 +456,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           toggleListening();
         }}
         style={voicePosition ? { left: `${voicePosition.left}px`, top: `${voicePosition.top}px`, right: 'auto', bottom: 'auto', touchAction: 'none' } : { touchAction: 'none' }}
-        className={`fixed bottom-7 right-7 max-md:bottom-20 max-md:right-6 w-14 h-14 rounded-full border-none bg-gradient-to-tr from-accent to-[#e2cc89] text-[var(--btn-text)] cursor-grab active:cursor-grabbing z-[200] shadow-[0_6px_24px_var(--accent-glow)] shadow-gold-glow flex items-center justify-center select-none group ${listening ? 'text-[var(--btn-text)]' : 'voice-agent-idle'}`}
+        className={`fixed bottom-7 right-7 max-md:bottom-[calc(4.75rem_+_env(safe-area-inset-bottom))] max-md:right-5 w-14 h-14 rounded-full border-none bg-gradient-to-tr from-accent to-[#e2cc89] text-[var(--btn-text)] cursor-grab active:cursor-grabbing z-[200] shadow-[0_6px_24px_var(--accent-glow)] shadow-gold-glow flex items-center justify-center select-none group ${listening ? 'text-[var(--btn-text)]' : 'voice-agent-idle'}`}
         title="Voice Control"
       >
         {listening ? (
