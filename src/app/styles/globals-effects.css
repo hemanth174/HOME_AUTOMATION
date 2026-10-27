@@ -126,7 +126,6 @@ body {
 
 /* -------- Cart Animations -------- */
 .lp-map-marker {
-    position: relative;
     width: 40px;
     height: 40px;
     display: flex;
@@ -135,7 +134,6 @@ body {
     color: #00ff41;
     filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.5));
     pointer-events: none;
-    transform: translateY(-2px);
 }
 .lp-map-marker .material-symbols-outlined {
     font-size: 40px;
@@ -146,7 +144,6 @@ body {
 
 /* Uber/Google-style precise location dot */
 .lp-map-live-dot {
-    position: relative;
     width: 16px;
     height: 16px;
     border-radius: 50%;
@@ -170,7 +167,6 @@ body {
 
 /* GPS accuracy confidence circle */
 .lp-map-accuracy-ring {
-    position: relative;
     border-radius: 50%;
     background: rgba(66, 133, 244, 0.12);
     border: 1.5px solid rgba(66, 133, 244, 0.55);
