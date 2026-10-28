@@ -24,14 +24,16 @@ export default function PresetModal({
         className="max-h-[88vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl animate-fade-up max-md:w-full max-md:max-h-[92vh] max-md:rounded-t-[24px] max-md:rounded-b-none max-md:border-t max-md:border-x-0 max-md:border-b-0 max-md:pb-10 max-md:animate-slide-up max-md:shadow-none flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto mb-5 shrink-0 active:cursor-grabbing" />
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-lg font-extrabold text-text">{editingPreset ? `Edit: ${editingPreset.name}` : 'New Preset'}</h2>
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="rounded-md bg-accent-bg px-2 py-1 text-[10px] font-extrabold text-accent">
-              {Object.values(presetActions).filter((action) => action.included).length} selected
-            </span>
-            {editingPreset && <span className="rounded-md bg-accent-bg px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest text-accent">Editing</span>}
+        <div data-sheet-drag-zone="1" className="shrink-0 touch-none">
+          <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto mb-5 shrink-0 active:cursor-grabbing" />
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="text-lg font-extrabold text-text">{editingPreset ? `Edit: ${editingPreset.name}` : 'New Preset'}</h2>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="rounded-md bg-accent-bg px-2 py-1 text-[10px] font-extrabold text-accent">
+                {Object.values(presetActions).filter((action) => action.included).length} selected
+              </span>
+              {editingPreset && <span className="rounded-md bg-accent-bg px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest text-accent">Editing</span>}
+            </div>
           </div>
         </div>
         <form onSubmit={savePreset} className="flex flex-col gap-4">

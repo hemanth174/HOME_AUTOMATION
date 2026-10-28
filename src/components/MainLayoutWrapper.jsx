@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import AlarmExecutor from './AlarmExecutor';
 import NotificationEngine from './NotificationEngine';
@@ -44,6 +44,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
   const [accessPath, setAccessPath] = useState(null);
   const [sessionReady, setSessionReady] = useState(false);
   const [authNonce, setAuthNonce] = useState(0);
+  const userRef = useRef(null);
   const [isClientOnline, setIsClientOnline] = useState(true); // Always true initially to match SSR
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const { isLocalConnected, localUrl } = useLocalConnection();
@@ -182,7 +183,8 @@ export default function MainLayoutWrapper({ children, className = "" }) {
       if (!active) return;
 
       const currentUser = session?.user || null;
-      setUser(currentUser);
+      userRef.current = currentUser;
+      setUser((previous) => (previous?.id === currentUser?.id ? previous : currentUser));
 
       if (!currentUser) {
         setAccess('guest');
@@ -277,6 +279,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!active) return;
       if (event === 'SIGNED_OUT') {
+        userRef.current = null;
         setUser(null);
         setAccess('guest');
         setAccessPath(cleanPath);
@@ -295,10 +298,15 @@ export default function MainLayoutWrapper({ children, className = "" }) {
           router.replace('/login');
         }
       } else if (event === 'SIGNED_IN') {
-        setUser(session?.user || null);
-        setAccess('checking');
-        setAccessPath(null);
-        setAuthNonce((value) => value + 1);
+        const nextUser = session?.user || null;
+        const sameUser = Boolean(nextUser && userRef.current?.id === nextUser.id);
+        userRef.current = nextUser;
+        setUser((previous) => (previous?.id === nextUser?.id ? previous : nextUser));
+        if (!sameUser) {
+          setAccess('checking');
+          setAccessPath(null);
+          setAuthNonce((value) => value + 1);
+        }
       }
     });
 

@@ -32,6 +32,13 @@ export default function AdminConfirmDrawer({ confirmation, busy, onCancel, onCon
 
   const startDrag = (event) => {
     if (busy) return;
+    if (!window.matchMedia("(max-width: 767px)").matches) return;
+    if (
+      event.target instanceof Element &&
+      event.target.closest("button,a,input,select,textarea,label,[role='button']")
+    ) {
+      return;
+    }
     dragStartY.current = event.clientY;
     event.currentTarget.setPointerCapture?.(event.pointerId);
     setDragging(true);
@@ -71,6 +78,7 @@ export default function AdminConfirmDrawer({ confirmation, busy, onCancel, onCon
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-confirm-title"
+        data-sheet-drag-owner="1"
         onClick={(event) => event.stopPropagation()}
         style={{
           transform: dragOffset ? `translateY(${dragOffset}px)` : undefined,
@@ -79,38 +87,42 @@ export default function AdminConfirmDrawer({ confirmation, busy, onCancel, onCon
         className="flex max-h-[92svh] w-full flex-col overflow-hidden rounded-t-[24px] border border-border bg-card shadow-2xl md:h-full md:max-h-none md:max-w-md md:rounded-none md:border-y-0 md:border-r-0"
       >
         <div
-          role="presentation"
           onPointerDown={startDrag}
           onPointerMove={moveDrag}
           onPointerUp={finishDrag}
           onPointerCancel={finishDrag}
-          className="mx-auto mt-2.5 flex h-7 w-20 shrink-0 cursor-grab touch-none items-start justify-center active:cursor-grabbing md:hidden"
-          aria-label="Drag down to close confirmation"
+          className="shrink-0 touch-none"
         >
-          <span className="mt-1.5 h-1 w-12 rounded-full bg-border" />
-        </div>
-
-        <header className="flex items-start justify-between gap-3 border-b border-border p-4 sm:p-5">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className={"flex h-11 w-11 shrink-0 items-center justify-center rounded-xl " + (danger ? "bg-red-400/10 text-red-500" : "bg-accent/10 text-accent")}>
-              <Icon size={20} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-[.18em] text-accent">Confirm action</p>
-              <h2 id="admin-confirm-title" className="mt-1 break-words text-lg font-black">{confirmation.title}</h2>
-              <p className="mt-1 break-words text-xs font-semibold text-text-muted">{confirmation.deviceName}</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            aria-label="Close confirmation"
-            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg border border-border text-text-muted hover:text-text disabled:opacity-50"
+          <div
+            role="presentation"
+            className="mx-auto mt-2.5 flex h-7 w-20 cursor-grab items-start justify-center active:cursor-grabbing md:hidden"
+            aria-label="Drag down to close confirmation"
           >
-            <X size={16} />
-          </button>
-        </header>
+            <span className="mt-1.5 h-1 w-12 rounded-full bg-border" />
+          </div>
+
+          <header className="flex items-start justify-between gap-3 border-b border-border p-4 sm:p-5">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className={"flex h-11 w-11 shrink-0 items-center justify-center rounded-xl " + (danger ? "bg-red-400/10 text-red-500" : "bg-accent/10 text-accent")}>
+                <Icon size={20} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[.18em] text-accent">Confirm action</p>
+                <h2 id="admin-confirm-title" className="mt-1 break-words text-lg font-black">{confirmation.title}</h2>
+                <p className="mt-1 break-words text-xs font-semibold text-text-muted">{confirmation.deviceName}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={busy}
+              aria-label="Close confirmation"
+              className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg border border-border text-text-muted hover:text-text disabled:opacity-50"
+            >
+              <X size={16} />
+            </button>
+          </header>
+        </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
           <p className="rounded-xl border border-border bg-background p-3 text-sm font-semibold leading-6 text-text-muted">

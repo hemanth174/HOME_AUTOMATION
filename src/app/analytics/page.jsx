@@ -166,6 +166,12 @@ export default function AnalyticsPage() {
 
   const handlePowerGuidePointerDown = (event) => {
     if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+    if (
+      event.target instanceof Element &&
+      event.target.closest("button,a,input,select,textarea,label,[role='button']")
+    ) {
+      return;
+    }
     event.currentTarget.setPointerCapture?.(event.pointerId);
     powerGuideDragStartYRef.current = event.clientY;
     powerGuideDragYRef.current = 0;
@@ -652,6 +658,7 @@ export default function AnalyticsPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="power-guide-title"
+            data-sheet-drag-owner="1"
             className="flex w-full max-h-[88svh] flex-col overflow-hidden rounded-t-[28px] border border-border bg-card p-5 text-left shadow-2xl sm:w-[min(100%,620px)] sm:rounded-[24px] sm:p-6"
             style={{
               transform: `translateY(${powerGuideY}px)`,
@@ -660,29 +667,34 @@ export default function AnalyticsPage() {
             onClick={e => e.stopPropagation()}
           >
             <div
-              data-sheet-handle="1"
+              data-sheet-drag-zone="1"
               onPointerDown={handlePowerGuidePointerDown}
               onPointerMove={handlePowerGuidePointerMove}
               onPointerUp={handlePowerGuidePointerEnd}
               onPointerCancel={handlePowerGuidePointerEnd}
-              className="mb-3 flex shrink-0 cursor-grab touch-none flex-col items-center gap-3 active:cursor-grabbing"
-              aria-label="Drag down to close guide"
+              className="shrink-0 touch-none"
             >
-              <span className="h-1.5 w-12 rounded-full bg-border" />
-            </div>
-
-            <div className="flex shrink-0 items-center justify-between border-b border-border/60 pb-3">
-              <div className="flex items-center gap-2 text-accent">
-                <TrendingUp size={18} className="stroke-[2.5px]" />
-                <h3 id="power-guide-title" className="text-base font-extrabold tracking-tight text-text">How Power is Calculated</h3>
-              </div>
-              <button 
-                onClick={closePowerGuide}
-                aria-label="Close power calculation guide"
-                className="text-text-muted hover:text-accent p-1 rounded-lg hover:bg-white/5 cursor-pointer border-none bg-transparent"
+              <div
+                data-sheet-handle="1"
+                className="mb-3 flex cursor-grab flex-col items-center gap-3 active:cursor-grabbing"
+                aria-label="Drag down to close guide"
               >
-                <X size={16} />
-              </button>
+                <span className="h-1.5 w-12 rounded-full bg-border" />
+              </div>
+
+              <div className="flex shrink-0 items-center justify-between border-b border-border/60 pb-3">
+                <div className="flex items-center gap-2 text-accent">
+                  <TrendingUp size={18} className="stroke-[2.5px]" />
+                  <h3 id="power-guide-title" className="text-base font-extrabold tracking-tight text-text">How Power is Calculated</h3>
+                </div>
+                <button
+                  onClick={closePowerGuide}
+                  aria-label="Close power calculation guide"
+                  className="text-text-muted hover:text-accent p-1 rounded-lg hover:bg-white/5 cursor-pointer border-none bg-transparent"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
             
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 pt-1 text-xs font-bold leading-relaxed text-text">

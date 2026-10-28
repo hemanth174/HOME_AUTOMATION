@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 export default function EditBoardModal({
   showEditBoardModal,
@@ -12,6 +12,9 @@ export default function EditBoardModal({
   const [boardName, setBoardName] = useState('');
   const [boardIdentifier, setBoardIdentifier] = useState('');
   const [deviceNames, setDeviceNames] = useState(['', '', '', '']);
+  const [dragOffset, setDragOffset] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const dragStartY = useRef(null);
 
   // Pre-fill form when modal opens or when editing a different board
   useEffect(() => {
@@ -34,6 +37,43 @@ export default function EditBoardModal({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showEditBoardModal, editingBoardObj?.id]);
 
+  useEffect(() => {
+    setDragOffset(0);
+    setDragging(false);
+    dragStartY.current = null;
+  }, [showEditBoardModal]);
+
+  const startDrag = (event) => {
+    if (!window.matchMedia('(max-width: 767px)').matches) return;
+    if (
+      event.target instanceof Element &&
+      event.target.closest('button,a,input,select,textarea,label,[role="button"]')
+    ) {
+      return;
+    }
+    dragStartY.current = event.clientY;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setDragging(true);
+  };
+
+  const moveDrag = (event) => {
+    if (dragStartY.current === null) return;
+    const offset = Math.max(0, event.clientY - dragStartY.current);
+    setDragOffset(Math.min(offset, window.innerHeight * 0.8));
+  };
+
+  const finishDrag = (event) => {
+    if (dragStartY.current === null) return;
+    const offset = Math.max(0, event.clientY - dragStartY.current);
+    dragStartY.current = null;
+    setDragging(false);
+    if (offset > 96) {
+      setShowEditBoardModal(false);
+      return;
+    }
+    setDragOffset(0);
+  };
+
   const handleDeviceNameChange = (index, value) => {
     const updated = [...deviceNames];
     updated[index] = value;
@@ -54,11 +94,24 @@ export default function EditBoardModal({
       onClick={() => setShowEditBoardModal(false)}
     >
       <div
+        data-sheet-drag-owner="1"
         className="max-h-[88vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl animate-fade-up max-md:w-full max-md:max-h-[92vh] max-md:rounded-t-[24px] max-md:rounded-b-none max-md:border-t max-md:border-x-0 max-md:border-b-0 max-md:pb-10 max-md:animate-slide-up max-md:shadow-none flex flex-col"
         onClick={(e) => e.stopPropagation()}
+        style={{
+          transform: dragOffset ? `translateY(${dragOffset}px)` : undefined,
+          transition: dragging ? 'none' : 'transform 220ms cubic-bezier(.22,1,.36,1)',
+        }}
       >
-        <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto mb-5 shrink-0 active:cursor-grabbing" />
-        <h2 className="mb-4 text-lg font-extrabold text-text">Edit Board & Devices</h2>
+        <div
+          onPointerDown={startDrag}
+          onPointerMove={moveDrag}
+          onPointerUp={finishDrag}
+          onPointerCancel={finishDrag}
+          className="shrink-0 touch-none"
+        >
+          <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto mb-5 shrink-0 active:cursor-grabbing" aria-label="Drag down to close edit board" />
+          <h2 className="mb-4 text-lg font-extrabold text-text">Edit Board & Devices</h2>
+        </div>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-extrabold tracking-wide text-text-muted">Board Name</label>

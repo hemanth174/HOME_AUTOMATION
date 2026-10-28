@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { ScrollText } from 'lucide-react';
+import { RotateCcw, ScrollText, Search, SlidersHorizontal, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import Loader from '@/components/Loader';
 import Toast from '@/components/Toast';
@@ -13,6 +13,12 @@ export default function LogsPage() {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [boardFilter, setBoardFilter] = useState('all');
+  const [deviceFilter, setDeviceFilter] = useState('all');
+  const [sourceFilter, setSourceFilter] = useState('all');
+  const [stateFilter, setStateFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [showFilters, setShowFilters] = useState(false);
   const [toast, setToast] = useState('');
 
   // Modal confirm state
@@ -197,14 +203,69 @@ export default function LogsPage() {
     return `${day}${getOrdinalSuffix(day)} ${month} ${formattedHours}:${formattedMinutes}:${formattedSeconds} ${ampm}`;
   };
 
+  const getLogState = (log) => {
+    const action = String(log.action || '').toLowerCase();
+    return action.includes('on') || action.includes('activate') ? 'on' : 'off';
+  };
+
+  const filterOptions = useMemo(() => {
+    const boardIds = new Set();
+    const deviceIds = new Set();
+    const sources = new Set();
+
+    logs.forEach((log) => {
+      boardIds.add(getBoardIdentifier(log));
+      if (log.device_id) deviceIds.add(String(log.device_id));
+      sources.add(getTriggerSource(log.triggered_by));
+    });
+
+    return {
+      boardIds: [...boardIds].sort(),
+      deviceIds: [...deviceIds].sort((a, b) => {
+        const deviceA = devices.find((device) => String(device.id) === a);
+        const deviceB = devices.find((device) => String(device.id) === b);
+        return (deviceA?.name || a).localeCompare(deviceB?.name || b);
+      }),
+      sources: [...sources].sort(),
+    };
+  }, [logs, boards, devices]);
+
+  const resetFilters = () => {
+    setSearch('');
+    setBoardFilter('all');
+    setDeviceFilter('all');
+    setSourceFilter('all');
+    setStateFilter('all');
+    setDateFilter('all');
+  };
+
+  const hasActiveFilters = Boolean(
+    search.trim() ||
+    boardFilter !== 'all' ||
+    deviceFilter !== 'all' ||
+    sourceFilter !== 'all' ||
+    stateFilter !== 'all' ||
+    dateFilter !== 'all',
+  );
+
   const filteredLogs = useMemo(() => {
     const term = search.toLowerCase().trim();
-    if (!term) return logs;
-    return logs.filter(log => {
+    const now = Date.now();
+    const dateCutoff =
+      dateFilter === 'today'
+        ? new Date(new Date().setHours(0, 0, 0, 0)).getTime()
+        : dateFilter === '7'
+          ? now - 7 * 24 * 60 * 60 * 1000
+          : dateFilter === '30'
+            ? now - 30 * 24 * 60 * 60 * 1000
+            : null;
+
+    return logs.filter((log) => {
       const boardIdVal = getBoardIdentifier(log).toLowerCase();
       const triggerSource = getTriggerSource(log.triggered_by).toLowerCase();
-      const stateVal = (log.action?.toLowerCase().includes('on') || log.action?.toLowerCase().includes('activate')) ? 'on' : 'off';
-      return (
+      const stateVal = getLogState(log);
+      const createdAt = new Date(log.created_at).getTime();
+      const matchesSearch = !term || (
         (log.device_name || '').toLowerCase().includes(term) ||
         (log.action || '').toLowerCase().includes(term) ||
         (log.triggered_by || '').toLowerCase().includes(term) ||
@@ -212,8 +273,16 @@ export default function LogsPage() {
         triggerSource.includes(term) ||
         stateVal === term
       );
+      return (
+        matchesSearch &&
+        (boardFilter === 'all' || getBoardIdentifier(log) === boardFilter) &&
+        (deviceFilter === 'all' || String(log.device_id || '') === deviceFilter) &&
+        (sourceFilter === 'all' || getTriggerSource(log.triggered_by) === sourceFilter) &&
+        (stateFilter === 'all' || stateVal === stateFilter) &&
+        (dateCutoff === null || createdAt >= dateCutoff)
+      );
     });
-  }, [logs, search, boards, devices]);
+  }, [logs, search, boardFilter, deviceFilter, sourceFilter, stateFilter, dateFilter, boards, devices]);
 
   if (loading) {
     return <Loader message="Loading activity logs..." />;
@@ -240,13 +309,31 @@ export default function LogsPage() {
       </div>
 
       {/* Controls */}
-      <div className="mb-4">
-        <input
-          className="w-full rounded-xl border border-border bg-input px-4 py-2 text-xs font-bold text-text outline-0 focus:border-accent"
-          placeholder="Filter logs by device name, action, or source..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <div className="mb-4 flex items-center gap-2">
+        <label className="relative min-w-0 flex-1">
+          <span className="sr-only">Search logs</span>
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+          <input
+            className="min-h-11 w-full rounded-xl border border-border bg-input py-2 pl-9 pr-3 text-base font-bold text-text outline-0 transition-colors placeholder:text-text-muted focus:border-accent sm:min-h-10 sm:text-xs"
+            placeholder="Search device, action, board, or source"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => setShowFilters(true)}
+          className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-border bg-card px-3 text-[10px] font-black uppercase tracking-wider text-text transition-colors hover:border-accent hover:text-accent sm:min-h-10 sm:px-4"
+          aria-label="Open log filters"
+        >
+          <SlidersHorizontal size={15} />
+          <span className="hidden sm:inline">Filters</span>
+          {hasActiveFilters && (
+            <span className="rounded-full bg-accent px-1.5 py-0.5 text-[9px] text-[var(--btn-text)]">
+              {filteredLogs.length}/{logs.length}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* Logs Container */}
@@ -258,11 +345,11 @@ export default function LogsPage() {
             </div>
             <div className="flex flex-col gap-1 max-w-xs mx-auto">
               <h3 className="text-sm font-extrabold text-text tracking-tight">
-                {search ? 'No Matches Found' : 'No Activity Logs'}
+                {hasActiveFilters ? 'No Matches Found' : 'No Activity Logs'}
               </h3>
               <p className="text-xs text-text-muted font-semibold leading-relaxed">
-                {search 
-                  ? 'We couldn\'t find any logs matching your filter query. Try searching another term.' 
+                  {hasActiveFilters
+                    ? 'We couldn\'t find any logs matching your filter query. Try searching another term.'
                   : 'Historical events and relay triggers will be shown here. Logs older than 7 days are automatically cleared.'}
               </p>
             </div>
@@ -338,7 +425,153 @@ export default function LogsPage() {
       </div>
     </div>
 
-    <Toast message={toast} onClose={() => setToast('')} />
+      <Toast message={toast} onClose={() => setToast('')} />
+
+      {showFilters && (
+        <div
+          className="fixed inset-0 z-[1050] flex items-end justify-center bg-black/65 backdrop-blur-sm md:items-stretch md:justify-end"
+          onClick={() => setShowFilters(false)}
+        >
+          <div className="absolute inset-0" />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="log-filters-title"
+            className="relative z-10 flex max-h-[92svh] w-full flex-col overflow-hidden rounded-t-[24px] border border-border bg-card shadow-2xl max-md:max-h-[88svh] max-md:rounded-t-[24px] max-md:rounded-b-none max-md:border-x-0 max-md:border-b-0 md:h-full md:max-h-none md:max-w-md md:rounded-none md:border-y-0 md:border-r-0"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div data-sheet-drag-zone="1" className="shrink-0 touch-none">
+              <div
+                data-sheet-handle="1"
+                className="mx-auto mt-2.5 flex h-7 w-20 cursor-grab items-start justify-center active:cursor-grabbing md:hidden"
+                aria-label="Drag down to close filters"
+              >
+                <span className="mt-1.5 h-1 w-12 rounded-full bg-border" />
+              </div>
+              <header className="flex items-center justify-between gap-3 border-b border-border p-4 sm:p-5">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[.18em] text-accent">Activity logs</p>
+                  <h2 id="log-filters-title" className="mt-1 text-lg font-black text-text">Filter activity</h2>
+                </div>
+                <button
+                  type="button"
+                  data-sheet-close="1"
+                  onClick={() => setShowFilters(false)}
+                  aria-label="Close filters"
+                  className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-border text-text-muted transition-colors hover:text-text"
+                >
+                  <X size={16} />
+                </button>
+              </header>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+              <div className="grid gap-3">
+                <label className="grid gap-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-text-muted">Board</span>
+                  <select
+                    value={boardFilter}
+                    onChange={(e) => setBoardFilter(e.target.value)}
+                    className="min-h-11 w-full rounded-xl border border-border bg-input px-3 py-2 text-base font-bold text-text outline-0 focus:border-accent sm:text-sm"
+                  >
+                    <option value="all">All boards</option>
+                    {filterOptions.boardIds.map((boardId) => {
+                      const board = boards.find((item) => item.board_identifier === boardId);
+                      return (
+                        <option key={boardId} value={boardId}>
+                          {board?.name ? `${board.name} · ${boardId}` : boardId}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </label>
+
+                <label className="grid gap-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-text-muted">Device</span>
+                  <select
+                    value={deviceFilter}
+                    onChange={(e) => setDeviceFilter(e.target.value)}
+                    className="min-h-11 w-full rounded-xl border border-border bg-input px-3 py-2 text-base font-bold text-text outline-0 focus:border-accent sm:text-sm"
+                  >
+                    <option value="all">All devices</option>
+                    {filterOptions.deviceIds.map((deviceId) => {
+                      const device = devices.find((item) => String(item.id) === deviceId);
+                      return (
+                        <option key={deviceId} value={deviceId}>
+                          {device?.name || 'Unknown device'}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </label>
+
+                <label className="grid gap-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-text-muted">Trigger source</span>
+                  <select
+                    value={sourceFilter}
+                    onChange={(e) => setSourceFilter(e.target.value)}
+                    className="min-h-11 w-full rounded-xl border border-border bg-input px-3 py-2 text-base font-bold text-text outline-0 focus:border-accent sm:text-sm"
+                  >
+                    <option value="all">All sources</option>
+                    {filterOptions.sources.map((source) => (
+                      <option key={source} value={source}>{source}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="grid gap-1.5">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-text-muted">State</span>
+                    <select
+                      value={stateFilter}
+                      onChange={(e) => setStateFilter(e.target.value)}
+                      className="min-h-11 w-full rounded-xl border border-border bg-input px-3 py-2 text-base font-bold text-text outline-0 focus:border-accent sm:text-sm"
+                    >
+                      <option value="all">All states</option>
+                      <option value="on">ON only</option>
+                      <option value="off">OFF only</option>
+                    </select>
+                  </label>
+
+                  <label className="grid gap-1.5">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-text-muted">Date range</span>
+                    <select
+                      value={dateFilter}
+                      onChange={(e) => setDateFilter(e.target.value)}
+                      className="min-h-11 w-full rounded-xl border border-border bg-input px-3 py-2 text-base font-bold text-text outline-0 focus:border-accent sm:text-sm"
+                    >
+                      <option value="all">Any time</option>
+                      <option value="today">Today</option>
+                      <option value="7">Last 7 days</option>
+                      <option value="30">Last 30 days</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <footer className="flex flex-col-reverse gap-2 border-t border-border p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:flex-row sm:justify-between sm:p-5">
+              <button
+                type="button"
+                onClick={resetFilters}
+                disabled={!hasActiveFilters}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border px-4 text-xs font-black text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <RotateCcw size={14} />
+                Reset filters
+              </button>
+              <button
+                type="button"
+                data-sheet-close="1"
+                onClick={() => setShowFilters(false)}
+                className="inline-flex min-h-11 items-center justify-center rounded-xl bg-accent px-5 text-xs font-black text-[var(--btn-text)] transition-opacity hover:opacity-90"
+              >
+                Apply filters
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
 
       {showConfirmModal && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md animate-scale-in max-md:items-end max-md:p-0" onClick={() => setShowConfirmModal(false)}>
@@ -346,12 +579,13 @@ export default function LogsPage() {
             className="max-h-[82vh] w-[min(100%,420px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl backdrop-blur-xl animate-fade-up max-md:w-full max-md:max-h-[85vh] max-md:rounded-t-[24px] max-md:rounded-b-none max-md:border-t max-md:border-x-0 max-md:border-b-0 max-md:pb-24 max-md:animate-slide-up max-md:shadow-none flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Drag Handle for Mobile */}
-            <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto mb-5 shrink-0 active:cursor-grabbing" />
-            <h2 className="mb-2 text-lg font-extrabold text-text">Clear Activity Logs</h2>
-            <p className="text-xs text-text-muted mb-6 leading-relaxed font-semibold">
-              Are you sure you want to clear all activity logs? This action cannot be undone and will delete all local history.
-            </p>
+            <div data-sheet-drag-zone="1" className="shrink-0 touch-none">
+              <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto mb-5 shrink-0 active:cursor-grabbing" />
+              <h2 className="mb-2 text-lg font-extrabold text-text">Clear Activity Logs</h2>
+              <p className="text-xs text-text-muted mb-6 leading-relaxed font-semibold">
+                Are you sure you want to clear all activity logs? This action cannot be undone and will delete all local history.
+              </p>
+            </div>
             <div className="flex justify-end gap-2.5 max-md:w-full max-md:flex-col-reverse">
               <button
                 type="button"

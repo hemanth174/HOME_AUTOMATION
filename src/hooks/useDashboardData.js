@@ -84,7 +84,7 @@ export default function useDashboardData() {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (active && user) {
-          setUser(user);
+          setUser((previous) => (previous?.id === user.id ? previous : user));
         }
       } catch (err) {
         console.warn('Auth check skipped:', err);
@@ -94,7 +94,8 @@ export default function useDashboardData() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (active) {
-        setUser(session?.user || null);
+        const nextUser = session?.user || null;
+        setUser((previous) => (previous?.id === nextUser?.id ? previous : nextUser));
       }
     });
 

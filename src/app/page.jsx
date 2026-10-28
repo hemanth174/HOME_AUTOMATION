@@ -37,7 +37,8 @@ export default function Home() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!active) return;
-      setUser(session?.user || null);
+      const nextUser = session?.user || null;
+      setUser((previous) => (previous?.id === nextUser?.id ? previous : nextUser));
       setLoading(false);
     });
 

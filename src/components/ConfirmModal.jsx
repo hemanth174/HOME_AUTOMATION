@@ -39,18 +39,20 @@ export default function ConfirmModal({
         className="flex w-[min(100%,380px)] flex-col gap-4 rounded-[20px] border border-border bg-card p-5 shadow-2xl max-md:w-full max-md:rounded-b-none max-md:rounded-t-[24px] max-md:p-6 max-md:pb-8"
         onClick={(event) => event.stopPropagation()}
       >
-        <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto -mt-1 mb-1 shrink-0 active:cursor-grabbing" />
-        <div className="flex items-start gap-3.5">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-red-500/30 bg-red-500/10 text-red-500">
-            <AlertTriangle size={20} strokeWidth={2.5} />
-          </div>
-          <div className="min-w-0">
-            <h3 id="confirm-modal-title" className="text-base font-extrabold tracking-tight text-text">
-              {title}
-            </h3>
-            <p id="confirm-modal-description" className="mt-1 text-xs font-semibold leading-relaxed text-text-muted">
-              {description}
-            </p>
+        <div data-sheet-drag-zone="1" className="shrink-0 touch-none">
+          <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto -mt-1 mb-1 shrink-0 active:cursor-grabbing" />
+          <div className="flex items-start gap-3.5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-red-500/30 bg-red-500/10 text-red-500">
+              <AlertTriangle size={20} strokeWidth={2.5} />
+            </div>
+            <div className="min-w-0">
+              <h3 id="confirm-modal-title" className="text-base font-extrabold tracking-tight text-text">
+                {title}
+              </h3>
+              <p id="confirm-modal-description" className="mt-1 text-xs font-semibold leading-relaxed text-text-muted">
+                {description}
+              </p>
+            </div>
           </div>
         </div>
 
