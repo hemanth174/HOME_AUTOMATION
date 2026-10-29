@@ -34,7 +34,9 @@ test("ESP32 verifies the board-bound AES-GCM envelope before applying Wi-Fi sett
 
 test("firmware uses CA-validated HTTPS for device-agent requests", async () => {
   const firmware = await read("esp32.cpp");
-  assert.match(firmware, /secureClient\.useBuiltinCACertBundle\(\)/);
+  assert.match(firmware, /secureClient\.setCACert\(DEVICE_AGENT_ROOT_CA\)/);
+  assert.match(firmware, /-----BEGIN CERTIFICATE-----/);
+  assert.match(firmware, /GTS Root R4/);
   assert.doesNotMatch(firmware, /\.setInsecure\s*\(/);
 });
 
@@ -54,6 +56,7 @@ test("admin fleet and update tracker remain mobile responsive with safe status b
   const configuration = await read("src/app/api/admin/devices/[boardId]/configuration/route.js");
   assert.match(fleet, /sm:grid-cols/);
   assert.match(fleet, /Back to VikaTech site/);
+  assert.match(fleet, /href="\//);
   assert.match(fleet, /directOnline/);
   assert.match(fleet, /restart/);
   assert.match(tracker, /checking_wifi/);
