@@ -235,8 +235,16 @@ export default function DeviceFleet() {
   };
 
   const openWifiEditor = (device, mode) => {
-    if (mode === "update" && !device.config.directOnline) {
-      setNotice("Connect to this board directly before changing its Wi-Fi settings.");
+    if (mode === "update") {
+      if (!device.provisioned) {
+        setNotice("Prepare and flash enrollment firmware before updating Wi-Fi remotely.");
+        return;
+      }
+      if (!device.config.directOnline) {
+        setNotice("Connect to this board directly before changing its Wi-Fi settings.");
+        return;
+      }
+      router.push("/admin/devices/" + encodeURIComponent(device.id) + "/update");
       return;
     }
     setWifiEditor({ deviceId: device.id, mode });
