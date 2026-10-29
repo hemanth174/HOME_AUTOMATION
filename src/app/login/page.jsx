@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { isAdminEmail } from '@/lib/adminEmails';
 import ThemeToggle from '@/components/ThemeToggle';
 import Toast from '@/components/Toast';
 import { Eye, EyeOff, ArrowLeft, Zap, Timer, Activity } from 'lucide-react';
@@ -18,15 +19,35 @@ const SECURITY_QUESTIONS = [
   "What was your first school?",
 ];
 
-const getAuthRedirectUrl = () => {
-  const origin = window.location.origin;
-  const isLocalDevelopment =
-    window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1';
+const getAuthRedirectUrl = () => window.location.origin;
 
-  return isLocalDevelopment
-    ? origin
-    : process.env.NEXT_PUBLIC_SITE_URL || origin;
+const OAUTH_FLAG_KEY = 'vt_oauth_started';
+
+const markOAuthStarted = () => {
+  try {
+    sessionStorage.setItem(OAUTH_FLAG_KEY, '1');
+  } catch {}
+};
+
+const clearOAuthStarted = () => {
+  try {
+    sessionStorage.removeItem(OAUTH_FLAG_KEY);
+  } catch {}
+};
+
+const routeForApproval = (approval, email) => {
+  if (isAdminEmail(email)) return '/';
+  if (approval?.account_status === 'rejected' || approval?.account_status === 'revoked') {
+    return '/denied';
+  }
+  if (
+    approval?.account_status === 'approved' &&
+    approval.admin_one_approved_at &&
+    approval.admin_two_approved_at
+  ) {
+    return '/';
+  }
+  return '/pending';
 };
 
 export default function LoginPage() {
@@ -57,9 +78,26 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      window.location.href = '/';
+      const session = data?.session;
+      let destination = '/pending';
+      if (session?.access_token) {
+        try {
+          const response = await fetch('/api/account/status', {
+            cache: 'no-store',
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          });
+          if (response.ok) {
+            const payload = await response.json();
+            destination = routeForApproval(payload.approval, session.user?.email);
+          }
+        } catch {
+          destination = '/pending';
+        }
+      }
+      clearOAuthStarted();
+      window.location.href = destination;
     } catch (err) {
       setError(err.message);
     } finally {
@@ -90,6 +128,7 @@ export default function LoginPage() {
     try {
       const { data, error } = await supabase.auth.signUp({ email, password });
       if (error) throw error;
+      const createdWithSession = Boolean(data.session);
       if (data.user) {
         await supabase.rpc('create_security_profile', {
           p_user_id: data.user.id,
@@ -125,7 +164,17 @@ export default function LoginPage() {
         console.warn('Welcome email failed:', e);
       }
 
-      setSuccess('Account created successfully! You can now log in.');
+      // A fresh sign-up must never stay authenticated. Sign the session out
+      // locally so the user has to pass through the login screen first.
+      try {
+        await supabase.auth.signOut({ scope: 'local' });
+      } catch {}
+      clearOAuthStarted();
+      setSuccess(
+        createdWithSession
+          ? 'Account created successfully! Please sign in to continue.'
+          : 'Account created! Confirm your email, then sign in to continue.',
+      );
       setView('login');
       setPassword('');
       setConfirmPassword('');
@@ -139,22 +188,31 @@ export default function LoginPage() {
   };
 
   const handleGoogleSignIn = async () => {
+    markOAuthStarted();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: getAuthRedirectUrl() }
     });
-    if (error) setError(error.message);
+    if (error) {
+      clearOAuthStarted();
+      setError(error.message);
+    }
   };
 
   const handleGithubSignIn = async () => {
+    markOAuthStarted();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'github',
       options: { redirectTo: getAuthRedirectUrl() }
     });
-    if (error) setError(error.message);
+    if (error) {
+      clearOAuthStarted();
+      setError(error.message);
+    }
   };
 
   const handleMicrosoftSignIn = async () => {
+    markOAuthStarted();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'azure',
       options: {
@@ -162,7 +220,10 @@ export default function LoginPage() {
         redirectTo: getAuthRedirectUrl()
       }
     });
-    if (error) setError(error.message);
+    if (error) {
+      clearOAuthStarted();
+      setError(error.message);
+    }
   };
 
   const handleForgotSubmitEmail = async (e) => {

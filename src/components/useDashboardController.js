@@ -50,7 +50,6 @@ export default function useDashboardController() {
     [editingBoardObj, setEditingBoardObj] = useState(null),
     [selectedBoardId, setSelectedBoardId] = useState(null),
     [deviceView, setDeviceView] = useState("carousel"),
-    [viewSwitcherEnabled, setViewSwitcherEnabled] = useState(false),
     [pending, setPending] = useState({});
   const [todayLogs, setTodayLogs] = useState([]),
     [dailyRows, setDailyRows] = useState([]);
@@ -68,44 +67,17 @@ export default function useDashboardController() {
     [devices],
   );
   useEffect(() => {
-    if (!user?.id) {
-      setViewSwitcherEnabled(false);
-      setDeviceView("carousel");
-      return undefined;
-    }
-
-    let active = true;
-    supabase
-      .from("user_settings")
-      .select("dashboard_view_switcher_enabled")
-      .eq("user_id", user.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!active) return;
-        const enabled = data?.dashboard_view_switcher_enabled === true;
-        setViewSwitcherEnabled(enabled);
-        if (!enabled) setDeviceView("carousel");
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [user?.id]);
-  useEffect(() => {
-    if (viewSwitcherEnabled && viewCookie) {
+    if (viewCookie) {
       const saved = readCookie(viewCookie);
       if (saved === "list" || saved === "carousel") setDeviceView(saved);
-    } else if (!viewSwitcherEnabled) {
-      setDeviceView("carousel");
     }
-  }, [viewCookie, viewSwitcherEnabled]);
+  }, [viewCookie]);
   const changeDeviceView = useCallback(
     (view) => {
-      if (!viewSwitcherEnabled) return;
       setDeviceView(view);
       if (viewCookie) writeCookie(viewCookie, view);
     },
-    [viewCookie, viewSwitcherEnabled],
+    [viewCookie],
   );
   useEffect(() => {
     if (!boards.length) return setSelectedBoardId(null);
@@ -475,7 +447,6 @@ export default function useDashboardController() {
     selectedBoard,
     selectedDevices,
     deviceView,
-    viewSwitcherEnabled,
     changeDeviceView,
     pending,
     toggleDevice,

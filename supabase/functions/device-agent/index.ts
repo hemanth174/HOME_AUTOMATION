@@ -2,6 +2,8 @@ import { encryptDeviceConfigEnvelope } from "../_shared/device-config-crypto.mjs
 const SUPABASE_URL = (Deno.env.get("SUPABASE_URL") || "").replace(/\/$/, "");
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const PROVISIONING_ENCRYPTION_KEY = Deno.env.get("PROVISIONING_ENCRYPTION_KEY") || "";
+const WIFI_SSID_RE = /^[\x20-\x7e]{1,32}$/;
+const WIFI_PASSWORD_RE = /^[\x20-\x7e]{8,63}$/;
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -98,7 +100,7 @@ async function getDevice(request: Request, boardIdentifier: unknown) {
   if (bearer.length < 32 || !validBoardIdentifier(boardIdentifier)) return null;
   const tokenHash = await sha256(bearer);
   const rows = await rest(
-    `device_runtime_configs?device_token_hash=eq.${encodeURIComponent(tokenHash)}&select=board_id,user_id,device_token_hash,wifi_ssid,wifi_security,encrypted_wifi_password,config_version,applied_config_version,config_update_status`,
+    `device_runtime_configs?device_token_hash=eq.${encodeURIComponent(tokenHash)}&revoked_at=is.null&select=board_id,user_id,device_token_hash,wifi_ssid,wifi_security,encrypted_wifi_password,config_version,applied_config_version,config_update_status`,
   );
   const config = Array.isArray(rows) ? rows[0] : null;
   if (!config) return null;
@@ -131,6 +133,46 @@ async function writeConfigEvent(
   });
 }
 
+async function recordDeviceHeartbeat(
+  config: Record<string, unknown>,
+  board: Record<string, unknown>,
+  body: Record<string, unknown>,
+) {
+  const now = new Date().toISOString();
+  const bootId = typeof body.boot_id === "string" ? body.boot_id.slice(0, 100) : "";
+  const ip = typeof body.ip === "string" ? body.ip.slice(0, 64) : "";
+  const uptimeMs = Number(body.uptime_ms);
+  const currentSsid = typeof body.current_wifi_ssid === "string"
+    ? body.current_wifi_ssid.slice(0, 32)
+    : "";
+  const currentSecurity = body.current_wifi_security === "open" || body.current_wifi_security === "wpa2_psk"
+    ? body.current_wifi_security
+    : "";
+  const patch: Record<string, unknown> = {
+    last_seen_at: now,
+    last_direct_seen_at: now,
+    updated_at: now,
+  };
+  if (ip) patch.last_ip = ip;
+  if (Number.isSafeInteger(uptimeMs) && uptimeMs >= 0) patch.last_uptime_ms = uptimeMs;
+  if (currentSsid) patch.applied_wifi_ssid = currentSsid;
+  if (currentSecurity) patch.applied_wifi_security = currentSecurity;
+  if (bootId && bootId !== String(config.last_boot_id || "")) {
+    patch.last_boot_id = bootId;
+    patch.last_boot_at = now;
+  }
+
+  await rest(
+    `device_runtime_configs?board_id=eq.${encodeURIComponent(String(board.id))}&user_id=eq.${encodeURIComponent(String(board.user_id))}&revoked_at=is.null`,
+    { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(patch) },
+  );
+  await rest(
+    `boards?id=eq.${encodeURIComponent(String(board.id))}&user_id=eq.${encodeURIComponent(String(board.user_id))}`,
+    { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_seen: now }) },
+  );
+  Object.assign(config, patch);
+}
+
 async function poll(request: Request, body: Record<string, unknown>) {
   const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
   const boardIdentifier = body.board_identifier;
@@ -154,6 +196,18 @@ async function poll(request: Request, body: Record<string, unknown>) {
   const userId = String(board.user_id || "");
   const boardId = String(board.id || "");
 
+  // The snapshot RPC intentionally excludes encrypted secrets from its JSON
+  // contract. Fetch the pending encrypted Wi-Fi value separately inside this
+  // service-role function; it is only decrypted into the authenticated device
+  // response when a valid configuration update is waiting.
+  const secretRows = await rest(
+    "device_runtime_configs?board_id=eq." + encodeURIComponent(boardId) +
+      "&user_id=eq." + encodeURIComponent(userId) +
+      "&revoked_at=is.null&select=encrypted_wifi_password",
+  );
+  const secretConfig = Array.isArray(secretRows) ? secretRows[0] : null;
+  if (secretConfig) config.encrypted_wifi_password = secretConfig.encrypted_wifi_password;
+
   // On first authenticated check-in, record the network this board is already
   // connected to. Do this only when no admin-defined config exists; never let
   // a later device heartbeat overwrite an admin's pending Wi-Fi change.
@@ -166,8 +220,8 @@ async function poll(request: Request, body: Record<string, unknown>) {
   const statusBeforeRegistration = String(config.config_update_status || "");
   let wifiConfigRegistered = existingSsid.length > 0;
   if (!existingSsid && statusBeforeRegistration === "unprovisioned" &&
-      currentSsid.length >= 1 && currentSsid.length <= 32 && !/[\\u0000-\\u001f]/.test(currentSsid) &&
-      (currentSecurity === "open" || (currentSecurity === "wpa2_psk" && currentPassword.length >= 8 && currentPassword.length <= 63)) &&
+      WIFI_SSID_RE.test(currentSsid) &&
+      (currentSecurity === "open" || (currentSecurity === "wpa2_psk" && WIFI_PASSWORD_RE.test(currentPassword))) &&
       (currentSecurity !== "open" || currentPassword.length === 0)) {
     const initialPassword = currentSecurity === "wpa2_psk" ? await encryptProvisioningValue(currentPassword) : null;
     const initialVersion = Math.max(1, Number(config.config_version || 1));
@@ -217,6 +271,8 @@ async function poll(request: Request, body: Record<string, unknown>) {
     }
   }
 
+  await recordDeviceHeartbeat(config, board, body);
+
   let configuration: Record<string, unknown> | null = null;
   let commands: Record<string, unknown>[] = Array.isArray(snapshot.commands)
     ? snapshot.commands.filter((item: Record<string, unknown>) =>
@@ -226,9 +282,35 @@ async function poll(request: Request, body: Record<string, unknown>) {
   const reportedVersion = Number(body.applied_config_version ?? config.applied_config_version ?? 0);
   const currentVersion = Number(config.config_version ?? 0);
   const ssid = String(config.wifi_ssid || "");
-  const deliveryStatus = String(config.config_update_status || "");
+  let deliveryStatus = String(config.config_update_status || "");
+
+  const configExpiry = Date.parse(String(config.config_expires_at || ""));
+  if (["pending", "sending", "checking_wifi", "applying"].includes(deliveryStatus) &&
+      Number.isFinite(configExpiry) && configExpiry <= Date.now()) {
+    const expiryMessage = "Configuration delivery expired before the ESP32 confirmed application.";
+    const expiredAt = new Date().toISOString();
+    const expiredRows = await rest(
+      `device_runtime_configs?board_id=eq.${encodeURIComponent(boardId)}&config_update_status=in.(pending,sending,checking_wifi,applying)`,
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({
+          config_update_status: "failed",
+          last_error: expiryMessage,
+          updated_at: expiredAt,
+        }),
+      },
+    );
+    if (Array.isArray(expiredRows) && expiredRows.length > 0) {
+      config.config_update_status = "failed";
+      config.last_error = expiryMessage;
+      deliveryStatus = "failed";
+      await writeConfigEvent(config, "failed", expiryMessage, "device-agent");
+    }
+  }
 
   if (currentVersion > reportedVersion && ssid.length > 0 &&
+      deliveryStatus !== "failed" &&
       ["pending", "sending", "checking_wifi", "applying"].includes(deliveryStatus)) {
     let password = "";
     if (config.wifi_security === "wpa2_psk") {
@@ -252,18 +334,20 @@ async function poll(request: Request, body: Record<string, unknown>) {
     }
   }
 
-  // Mesh presence is informative only. Do not return another board's commands
-  // or decrypt its Wi-Fi password for this gateway: current firmware has no
-  // authenticated per-member command/config forwarding path.
+  // Mesh presence is used only for routing restart commands to nodes that
+  // the authenticated leader can reach right now. Configuration secrets are
+  // never returned for another board; Wi-Fi changes still require direct check-in.
   const isMeshGateway = body.mesh_gateway === true;
   if (isMeshGateway && userId && boardId) {
     const userBoards = await rest(
       "boards?user_id=eq." + encodeURIComponent(userId) + "&select=id,board_identifier",
     );
-    const knownBoards: Record<string, string> = { [String(board.board_identifier)]: boardId };
+    const knownBoardIdByIdentifier: Record<string, string> = { [String(board.board_identifier)]: boardId };
+    const knownIdentifierByBoardId: Record<string, string> = { [boardId]: String(board.board_identifier) };
     for (const item of Array.isArray(userBoards) ? userBoards : []) {
       if (typeof item.board_identifier === "string" && validBoardIdentifier(item.board_identifier)) {
-        knownBoards[item.board_identifier] = String(item.id);
+        knownBoardIdByIdentifier[item.board_identifier] = String(item.id);
+        knownIdentifierByBoardId[String(item.id)] = item.board_identifier;
       }
     }
 
@@ -273,7 +357,7 @@ async function poll(request: Request, body: Record<string, unknown>) {
       if (!node || !validBoardIdentifier(node.node_id)) continue;
       const lastSeenMs = Number(node.last_seen_ms);
       if (!Number.isFinite(lastSeenMs) || lastSeenMs < 0 || lastSeenMs > 45000) continue;
-      const memberBoardId = knownBoards[String(node.node_id)];
+      const memberBoardId = knownBoardIdByIdentifier[String(node.node_id)];
       if (memberBoardId && memberBoardId !== boardId) liveBoardIds.push(memberBoardId);
     }
 
@@ -281,8 +365,6 @@ async function poll(request: Request, body: Record<string, unknown>) {
     if (uniqueLiveIds.length) {
       const idFilter = "in.(" + uniqueLiveIds.map((id) => encodeURIComponent(id)).join(",") + ")";
       const now = new Date().toISOString();
-      // This timestamp indicates mesh reachability only. Admin remote control
-      // requires a recent direct authenticated check-in from the target board.
       await rest(
         "device_runtime_configs?board_id=" + idFilter + "&user_id=eq." + encodeURIComponent(userId),
         {
@@ -295,12 +377,77 @@ async function poll(request: Request, body: Record<string, unknown>) {
         "boards?id=" + idFilter + "&user_id=eq." + encodeURIComponent(userId),
         { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_seen: now }) },
       );
+
+      // Members that have no recent direct device-agent connection can receive
+      // restart commands through this gateway only. Commands are bound to this
+      // gateway in gateway_board_id, so acknowledgements cannot be cross-routed.
+      const configRows = await rest(
+        "device_runtime_configs?board_id=" + idFilter +
+          "&user_id=eq." + encodeURIComponent(userId) +
+          "&select=board_id,last_direct_seen_at",
+      );
+      const directRecentlySeen = new Set<string>();
+      for (const row of Array.isArray(configRows) ? configRows : []) {
+        const directAt = row.last_direct_seen_at ? new Date(String(row.last_direct_seen_at)).getTime() : 0;
+        const age = Date.now() - directAt;
+        if (Number.isFinite(directAt) && age >= 0 && age < 120000) directRecentlySeen.add(String(row.board_id));
+      }
+      // Query all currently reachable mesh boards so a command already assigned
+      // to this gateway is still delivered if the member regains direct Wi-Fi
+      // connectivity before the gateway has forwarded the restart.
+      const liveIdFilter = "in.(" + uniqueLiveIds.map((id) => encodeURIComponent(id)).join(",") + ")";
+      const pendingRows = await rest(
+        "device_commands?board_id=" + liveIdFilter +
+          "&user_id=eq." + encodeURIComponent(userId) +
+          "&command_type=eq.restart&status=eq.pending&expires_at=gt." + encodeURIComponent(now) +
+          "&select=id,board_id,user_id,command_type,status,requested_at,expires_at,gateway_board_id",
+      );
+      for (const candidate of Array.isArray(pendingRows) ? pendingRows : []) {
+        const commandId = String(candidate.id || "");
+        const targetBoardId = String(candidate.board_id || "");
+        const existingGatewayId = candidate.gateway_board_id ? String(candidate.gateway_board_id) : "";
+        const targetIdentifier = knownIdentifierByBoardId[targetBoardId];
+        if (!/^[0-9a-f-]{36}$/i.test(commandId) || !targetIdentifier || !validBoardIdentifier(targetIdentifier)) continue;
+        if (existingGatewayId && existingGatewayId !== boardId) continue;
+
+        // A fresh direct connection owns only commands that have not been
+        // assigned to a gateway. Once assigned, finish the same gateway path.
+        if (!existingGatewayId && directRecentlySeen.has(targetBoardId)) continue;
+
+        let assigned = candidate;
+        if (!existingGatewayId) {
+          const assignmentRows = await rest(
+            "device_commands?id=eq." + encodeURIComponent(commandId) +
+              "&board_id=eq." + encodeURIComponent(targetBoardId) +
+              "&user_id=eq." + encodeURIComponent(userId) +
+              "&status=eq.pending&expires_at=gt." + encodeURIComponent(now) +
+              "&or=(gateway_board_id.is.null,gateway_board_id.eq." + encodeURIComponent(boardId) + ")",
+            {
+              method: "PATCH",
+              headers: { Prefer: "return=representation" },
+              body: JSON.stringify({ gateway_board_id: boardId }),
+            },
+          );
+          if (!Array.isArray(assignmentRows) || assignmentRows.length === 0) continue;
+          assigned = assignmentRows[0];
+        }
+        commands.push({
+          id: commandId,
+          board_id: targetBoardId,
+          board_identifier: targetIdentifier,
+          command_type: "restart",
+          status: String(assigned.status || "pending"),
+          requested_at: assigned.requested_at,
+          expires_at: assigned.expires_at,
+          expires_at_epoch: Math.floor(Date.parse(String(assigned.expires_at)) / 1000),
+          forwarded_via_board_id: boardId,
+        });
+      }
     }
   }
 
-  // Sensitive Wi-Fi configuration is encrypted for this exact board using
-  // the per-board device token before it leaves the Edge Function. HTTPS is
-  // still required and independently protects the transport.
+  // Encrypt pending Wi-Fi configuration for this exact device. Do not send
+  // the plaintext password in the JSON body, even though HTTPS is required.
   const configurationEnvelope = configuration
     ? await encryptDeviceConfigEnvelope(
         bearer,
@@ -359,6 +506,14 @@ async function updateConfigStatus(device: { config: Record<string, unknown> }, b
     last_direct_seen_at: acknowledgedAt,
     updated_at: acknowledgedAt,
   };
+  const currentSsid = typeof body.current_wifi_ssid === "string" ? body.current_wifi_ssid.slice(0, 32) : "";
+  const currentSecurity = body.current_wifi_security === "open" || body.current_wifi_security === "wpa2_psk"
+    ? body.current_wifi_security
+    : "";
+  if (status === "applied" && currentSsid && currentSecurity) {
+    patch.applied_wifi_ssid = currentSsid;
+    patch.applied_wifi_security = currentSecurity;
+  }
   if (status === "applied") {
     patch.applied_config_version = version;
     patch.config_applied_at = new Date().toISOString();
@@ -377,29 +532,62 @@ async function updateConfigStatus(device: { config: Record<string, unknown> }, b
   return json({ ok: true, version, status });
 }
 
-async function acknowledgeCommand(device: { config: Record<string, unknown> }, body: Record<string, unknown>) {
+async function acknowledgeCommand(device: { config: Record<string, unknown>; board: Record<string, unknown> }, body: Record<string, unknown>) {
   const commandId = String(body.command_id || "");
   const status = String(body.status || "");
+  const requestedTarget = String(body.target_board_identifier || "").trim();
   if (!/^[0-9a-f-]{36}$/i.test(commandId) || !["accepted", "completed", "failed"].includes(status)) {
     return json({ error: "Invalid command acknowledgement" }, 400);
   }
+
+  const gatewayBoardId = String(device.config.board_id || "");
+  const userId = String(device.config.user_id || "");
+  const ownBoardIdentifier = String(device.board.board_identifier || "");
+  let targetBoardId = gatewayBoardId;
+  let gatewayFilter = "&gateway_board_id=is.null";
+
+  // A board may acknowledge a mesh-member restart only when this authenticated
+  // gateway was assigned that command by the device-agent poll. A gateway
+  // cannot acknowledge another owner's command or an arbitrary board's ID.
+  if (requestedTarget && requestedTarget !== ownBoardIdentifier) {
+    if (!validBoardIdentifier(requestedTarget) || !gatewayBoardId || !userId) {
+      return json({ error: "Invalid mesh command target" }, 400);
+    }
+    const targetRows = await rest(
+      "boards?board_identifier=eq." + encodeURIComponent(requestedTarget) +
+        "&user_id=eq." + encodeURIComponent(userId) + "&select=id,board_identifier",
+    );
+    const targetBoard = Array.isArray(targetRows) ? targetRows[0] : null;
+    if (!targetBoard || String(targetBoard.id) === gatewayBoardId) {
+      return json({ error: "Mesh target does not belong to this gateway owner" }, 403);
+    }
+    targetBoardId = String(targetBoard.id);
+    gatewayFilter = "&gateway_board_id=eq." + encodeURIComponent(gatewayBoardId);
+  } else if (requestedTarget && requestedTarget !== ownBoardIdentifier) {
+    return json({ error: "Invalid command target" }, 400);
+  }
+
   const now = new Date().toISOString();
   const patch: Record<string, unknown> = {
     status,
     last_error: status === "failed" ? String(body.error || "Command failed").slice(0, 500) : null,
-    result: { reported_by_device: true, message: String(body.message || "").slice(0, 300) },
+    result: { reported_by_device: true, message: String(body.message || "").slice(0, 300),
+      acknowledged_by_board: ownBoardIdentifier },
   };
   if (status === "accepted") patch.accepted_at = now;
   if (status === "completed" || status === "failed") patch.completed_at = now;
 
   const rows = await rest(
-    `device_commands?id=eq.${encodeURIComponent(commandId)}&board_id=eq.${encodeURIComponent(String(device.config.board_id))}&status=in.(pending,accepted)&expires_at=gt.${encodeURIComponent(now)}`,
+    "device_commands?id=eq." + encodeURIComponent(commandId) +
+      "&board_id=eq." + encodeURIComponent(targetBoardId) +
+      "&user_id=eq." + encodeURIComponent(userId) +
+      "&status=in.(pending,accepted)&expires_at=gt." + encodeURIComponent(now) + gatewayFilter,
     { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) },
   );
   if (!Array.isArray(rows) || rows.length === 0) {
-    return json({ ok: true, ignored: true, reason: "already_acknowledged_or_not_found" });
+    return json({ ok: true, ignored: true, reason: "already_acknowledged_or_not_assigned_to_this_gateway" });
   }
-  return json({ ok: true, command_id: commandId, status });
+  return json({ ok: true, command_id: commandId, target_board_identifier: requestedTarget || ownBoardIdentifier, status });
 }
 
 async function handleDeviceDataAction(

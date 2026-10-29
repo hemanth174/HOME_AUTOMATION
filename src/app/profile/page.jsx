@@ -439,8 +439,6 @@ export default function ProfilePage() {
             <div 
               className="relative bg-card w-full border border-border max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:rounded-t-[24px] max-md:p-6 max-md:pb-10 max-md:border-t max-md:border-x-0 md:w-[420px] md:rounded-[20px] md:p-8 md:shadow-2xl flex flex-col items-center"
             >
-              <div data-sheet-handle="1" className="w-12 h-1.5 bg-border rounded-full mb-6 cursor-grab active:cursor-grabbing touch-none md:hidden shrink-0" />
-              
               <button
                 type="button"
                 onClick={() => {
@@ -453,16 +451,20 @@ export default function ProfilePage() {
                 <X size={16} />
               </button>
 
-              <div className="w-12 h-12 rounded-full bg-accent-bg border border-accent/20 flex items-center justify-center text-accent mb-4 shadow-gold-glow/10 animate-pulse">
-                <KeyRound size={22} className="stroke-[2.5px]" />
-              </div>
+              <div data-sheet-drag-zone="1" className="w-full shrink-0 touch-none">
+                <div data-sheet-handle="1" className="w-12 h-1.5 bg-border rounded-full mb-6 cursor-grab active:cursor-grabbing touch-none md:hidden shrink-0" />
 
-              <h3 className="text-base font-extrabold text-text text-center tracking-tight mb-1">
-                {verifyingCurrentEmail ? 'Email Verification' : 'MFA Security Verification'}
-              </h3>
-              <p className="text-xs text-text-muted text-center leading-relaxed mb-6 px-2">
-                Enter the 6-digit code sent to <strong>{user?.email}</strong>.
-              </p>
+                <div className="w-12 h-12 rounded-full bg-accent-bg border border-accent/20 flex items-center justify-center text-accent mb-4 shadow-gold-glow/10 animate-pulse">
+                  <KeyRound size={22} className="stroke-[2.5px]" />
+                </div>
+
+                <h3 className="text-base font-extrabold text-text text-center tracking-tight mb-1">
+                  {verifyingCurrentEmail ? 'Email Verification' : 'MFA Security Verification'}
+                </h3>
+                <p className="text-xs text-text-muted text-center leading-relaxed mb-6 px-2">
+                  Enter the 6-digit code sent to <strong>{user?.email}</strong>.
+                </p>
+              </div>
 
               {mfaError && (
                 <div className="w-full mb-4 p-3 rounded-xl border border-red-500/20 bg-red-500/5 text-red-500 text-xs font-bold text-center animate-shake leading-snug">

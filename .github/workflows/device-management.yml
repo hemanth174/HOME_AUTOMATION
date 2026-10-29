@@ -7,8 +7,12 @@ on:
       - "supabase/**"
       - "src/app/admin/**"
       - "src/app/api/admin/devices/**"
-      - "src/lib/provisioningServer.js"
+      - "src/lib/**"
+      - "src/components/**"
+      - "src/hooks/**"
+      - "src/app/api/esp32/**"
       - "tests/**"
+      - "next.config.*"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/device-management.yml"
@@ -16,6 +20,7 @@ on:
     branches:
       - main
       - feat/device-fleet-remote-management
+      - fix/device-management-hardening-final
 
 permissions:
   contents: read
@@ -33,6 +38,25 @@ jobs:
       - run: npm ci
       - run: npm run test:device-management
 
+  next-production-build:
+    name: Next.js production build
+    runs-on: ubuntu-latest
+    env:
+      # Non-production placeholders are enough for compile-time imports.
+      # Never use real customer or Supabase production credentials in CI.
+      NEXT_PUBLIC_SUPABASE_URL: https://build-check.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: build-only-anon-key-not-for-deployment
+      SUPABASE_SERVICE_ROLE_KEY: build-only-service-role-placeholder-not-for-deployment
+      PROVISIONING_ENCRYPTION_KEY: build-only-encryption-key-placeholder-not-for-deployment-123456
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
   esp32-firmware-compile:
     name: Compile ESP32 device-agent firmware
     runs-on: ubuntu-latest
@@ -43,7 +67,7 @@ jobs:
         run: |
           arduino-cli config init
           arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-          arduino-cli core install esp32:esp32@3.1.0 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.12 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli lib install "ArduinoJson@6.21.5"
       - name: Compile the repository firmware source
         shell: bash

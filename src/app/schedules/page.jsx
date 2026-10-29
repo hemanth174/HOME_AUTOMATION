@@ -100,8 +100,10 @@ export default function SchedulesPage() {
             className="bg-card border border-border rounded-[18px] p-6 w-[min(100%-40px,360px)] max-md:w-full max-md:rounded-b-none max-md:rounded-t-[24px] max-md:pb-8"
             onClick={(e) => e.stopPropagation()}
           >
-            <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto -mt-1 mb-3 shrink-0 active:cursor-grabbing" />
-            <h3 className="text-base font-extrabold text-text">Delete All Schedules?</h3>
+            <div data-sheet-drag-zone="1" className="shrink-0 touch-none">
+              <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto -mt-1 mb-3 shrink-0 active:cursor-grabbing" />
+              <h3 className="text-base font-extrabold text-text">Delete All Schedules?</h3>
+            </div>
             <p className="text-xs text-text-muted my-4">
               This will permanently delete all <strong>{schedules.length}</strong> schedules. This
               action cannot be undone.

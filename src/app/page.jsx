@@ -12,18 +12,33 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
+    let sessionTimeout;
 
     const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!active) return;
-      setUser(session?.user || null);
-      setLoading(false);
+      try {
+        const { data: { session } } = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise((resolve) => {
+            sessionTimeout = setTimeout(() => resolve({ data: { session: null } }), 8000);
+          }),
+        ]);
+
+        if (!active) return;
+        setUser(session?.user || null);
+      } catch {
+        if (!active) return;
+        setUser(null);
+      } finally {
+        clearTimeout(sessionTimeout);
+        if (active) setLoading(false);
+      }
     };
     checkUser();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!active) return;
-      setUser(session?.user || null);
+      const nextUser = session?.user || null;
+      setUser((previous) => (previous?.id === nextUser?.id ? previous : nextUser));
       setLoading(false);
     });
 

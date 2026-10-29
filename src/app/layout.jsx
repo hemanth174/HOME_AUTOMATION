@@ -1,6 +1,5 @@
 // 'use client'
 import "./globals.css";
-import Navbar from "@/components/Navbar";
 import MainLayoutWrapper from "@/components/MainLayoutWrapper";
 import PGShellScope from "@/components/PGShellScope";
 import PGDrawerEnhancer from "@/components/PGDrawerEnhancer";
@@ -37,8 +36,7 @@ export const viewport = {
   themeColor: "#060606",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }) {
@@ -71,6 +69,7 @@ export default function RootLayout({ children }) {
         <Script
           src="https://unpkg.com/@dotlottie/player-component@2.7.12/dist/dotlottie-player.mjs"
           type="module"
+          crossOrigin="anonymous"
           strategy="beforeInteractive"
         />
         <ThemeInit />
@@ -78,7 +77,6 @@ export default function RootLayout({ children }) {
         <PGDrawerEnhancer />
         <MobileModalEnhancer />
         <FeatureAnnouncementNotifier />
-        <Navbar />
         <MainLayoutWrapper className="scrollbar-hidden">{children}</MainLayoutWrapper>
       </body>
     </html>

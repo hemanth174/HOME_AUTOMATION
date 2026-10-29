@@ -35,25 +35,27 @@ export default function ScheduleFormModal({ state }) {
         className="max-h-[88vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl animate-fade-up max-md:w-full max-md:max-h-[92vh] max-md:rounded-t-[24px] max-md:rounded-b-none max-md:pb-10"
         onClick={(event) => event.stopPropagation()}
       >
-        <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto -mt-1 mb-4 shrink-0 active:cursor-grabbing" />
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-extrabold text-text">
-            {editingSchedule ? "Edit Schedule" : "New Schedule"}
-          </h2>
-          <div className="text-right">
-            {selectedDevices.length > 0 && (
-              <p className="text-[10px] font-bold text-accent/80">
-                Selected: {selectedDevices.length} device
-                {selectedDevices.length !== 1 ? "s" : ""}
-              </p>
-            )}
-            {scheduleDays.length > 0 && (
-              <p className="text-[11px] font-bold text-accent">
-                <span className="rounded border p-0.5">
-                  {formatDays(scheduleDays)}
-                </span>
-              </p>
-            )}
+        <div data-sheet-drag-zone="1" className="shrink-0 touch-none">
+          <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto -mt-1 mb-4 shrink-0 active:cursor-grabbing" />
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-extrabold text-text">
+              {editingSchedule ? "Edit Schedule" : "New Schedule"}
+            </h2>
+            <div className="text-right">
+              {selectedDevices.length > 0 && (
+                <p className="text-[10px] font-bold text-accent/80">
+                  Selected: {selectedDevices.length} device
+                  {selectedDevices.length !== 1 ? "s" : ""}
+                </p>
+              )}
+              {scheduleDays.length > 0 && (
+                <p className="text-[11px] font-bold text-accent">
+                  <span className="rounded border p-0.5">
+                    {formatDays(scheduleDays)}
+                  </span>
+                </p>
+              )}
+            </div>
           </div>
         </div>
 

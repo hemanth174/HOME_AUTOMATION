@@ -21,21 +21,21 @@ export async function POST(request, { params }) {
 
   const { data: config, error: configError } = await auth.admin
     .from('device_runtime_configs')
-    .select('board_id, user_id, device_token_hash, last_seen_at, last_direct_seen_at, last_mesh_seen_at')
+    .select('board_id, user_id, device_token_hash, revoked_at, last_seen_at, last_direct_seen_at, last_mesh_seen_at')
     .eq('board_id', boardId)
     .maybeSingle();
   if (configError) return NextResponse.json({ error: configError.message }, { status: 503 });
-  if (!config?.device_token_hash) {
+  if (!config?.device_token_hash || config.revoked_at) {
     return NextResponse.json({ error: 'This ESP32 needs the new device-agent firmware flashed once before remote restart is available.' }, { status: 409 });
   }
   const lastDirectSeen = config.last_direct_seen_at ? new Date(config.last_direct_seen_at).getTime() : 0;
   const directAge = Date.now() - lastDirectSeen;
-  if (!Number.isFinite(lastDirectSeen) || directAge < 0 || directAge > 120_000) {
+  const directOnline = Number.isFinite(lastDirectSeen) && directAge >= 0 && directAge < 120_000;
+  const meshOnline = isRecent(config.last_mesh_seen_at);
+  if (!directOnline && !meshOnline) {
     return NextResponse.json({
-      error: isRecent(config.last_mesh_seen_at)
-        ? 'This board is visible only through the local mesh. Remote restart is disabled until that ESP32 itself checks in directly; this prevents restarting the wrong board.'
-        : 'This ESP32 is offline or has not checked in directly recently. Restart was not queued.',
-      code: 'DEVICE_NOT_DIRECTLY_CONNECTED',
+      error: 'This ESP32 has neither a recent direct device-agent check-in nor a recent mesh-gateway observation. Restart was not queued.',
+      code: 'DEVICE_OFFLINE',
     }, { status: 409 });
   }
 
@@ -44,7 +44,7 @@ export async function POST(request, { params }) {
     .update({
       status: 'cancelled',
       completed_at: nowIso,
-      last_error: 'Restart request expired before the ESP32 accepted it.',
+      last_error: 'Restart request expired before completion.',
     })
     .eq('board_id', boardId)
     .in('status', ['pending', 'accepted'])
@@ -93,7 +93,11 @@ export async function POST(request, { params }) {
     metadata: { board_id: board.id, board_identifier: board.board_identifier, command_id: command.id },
   });
 
-  return NextResponse.json({ command, board: { id: board.id, name: board.name, boardIdentifier: board.board_identifier } }, {
+  return NextResponse.json({
+    command,
+    board: { id: board.id, name: board.name, boardIdentifier: board.board_identifier },
+    deliveryMode: directOnline ? 'direct' : 'mesh_gateway',
+  }, {
     status: 202, headers: { 'Cache-Control': 'no-store' },
   });
 }
@@ -109,7 +113,7 @@ export async function GET(request, { params }) {
     .update({
       status: 'cancelled',
       completed_at: nowIso,
-      last_error: 'Restart request expired before the ESP32 accepted it.',
+      last_error: 'Restart request expired before completion.',
     })
     .eq('board_id', boardId)
     .in('status', ['pending', 'accepted'])

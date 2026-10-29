@@ -7,10 +7,12 @@ export function AlarmModal({ manager }) {
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md max-md:items-end max-md:p-0" onClick={closeModal}>
       <div className="max-h-[88vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl max-md:w-full max-md:max-h-[92vh] max-md:rounded-t-[24px] max-md:rounded-b-none" onClick={(event) => event.stopPropagation()}>
-        <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto mb-5 active:cursor-grabbing" />
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-extrabold text-text">{editingAlarm ? "Edit Alarm" : "New Alarm"}</h2>
-          {editingAlarm && <span className="text-[10px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-md bg-accent-bg text-accent">Editing</span>}
+        <div data-sheet-drag-zone="1" className="shrink-0 touch-none">
+          <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto mb-5 active:cursor-grabbing" />
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-extrabold text-text">{editingAlarm ? "Edit Alarm" : "New Alarm"}</h2>
+            {editingAlarm && <span className="text-[10px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-md bg-accent-bg text-accent">Editing</span>}
+          </div>
         </div>
 
         <form onSubmit={addAlarm} className="flex flex-col gap-4">
@@ -64,8 +66,10 @@ export function DeleteAllModal({ alarms, show, onClose, onDelete }) {
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 max-md:items-end max-md:p-0" onClick={onClose}>
       <div className="bg-card border border-border rounded-[18px] p-6 w-[min(100%-40px,360px)] shadow-2xl flex flex-col gap-4 max-md:w-full max-md:rounded-b-none max-md:rounded-t-[24px] max-md:pb-8" onClick={(event) => event.stopPropagation()}>
-        <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto -mt-1 shrink-0 active:cursor-grabbing" />
-        <h3 className="text-base font-extrabold text-text">Delete All Alarms?</h3>
+        <div data-sheet-drag-zone="1" className="shrink-0 touch-none">
+          <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto -mt-1 shrink-0 active:cursor-grabbing" />
+          <h3 className="text-base font-extrabold text-text">Delete All Alarms?</h3>
+        </div>
         <p className="text-xs text-text-muted font-semibold">This will permanently delete all <strong className="text-text">{alarms.length}</strong> alarm{alarms.length !== 1 ? "s" : ""}. This action cannot be undone.</p>
         <div className="flex gap-2.5 justify-end">
           <button type="button" data-sheet-close="1" onClick={onClose} className="inline-flex min-h-[34px] items-center rounded-lg border border-border bg-card px-4 text-xs font-semibold text-text">Cancel</button>

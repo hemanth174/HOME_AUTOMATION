@@ -4,34 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 
 const DEFAULT_CENTER = [78.486671, 17.385044]; // Hyderabad [lng, lat]
 
-const CARTO_TILES = [
-  'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
-  'https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
-  'https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
-  'https://d.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'
-];
-
-const OSM_TILES = [
-  'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-  'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
-  'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
-];
-
-const LIGHT_STYLE = {
-  version: 8,
-  sources: {
-    'base-tiles': {
-      type: 'raster',
-      tiles: CARTO_TILES,
-      tileSize: 256,
-      maxzoom: 19,
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
-    }
-  },
-  layers: [
-    { id: 'base-tiles-layer', type: 'raster', source: 'base-tiles' }
-  ]
+const MAP_STYLES = {
+  liberty: 'https://tiles.openfreemap.org/styles/liberty',
+  positron: 'https://tiles.openfreemap.org/styles/positron',
 };
+
+const MAP_ATTRIBUTION = '© OpenStreetMap contributors © OpenFreeMap';
 
 // Script-loading helper with a shared promise so React StrictMode double-mount
 // never loads the library twice.
@@ -45,7 +23,7 @@ function loadMapLibre() {
   maplibrePromise = new Promise((resolve, reject) => {
     const css = document.createElement('link');
     css.rel = 'stylesheet';
-    css.href = urls[0].replace('.js', '.css');
+    css.href = 'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css';
     document.head.appendChild(css);
 
     let attempt = 0;
@@ -84,6 +62,10 @@ export default function LocationPicker({ value, onChange }) {
   const [locating, setLocating] = useState(false);
   const [accuracy, setAccuracy] = useState(null);
   const [error, setError] = useState('');
+  const [mapReady, setMapReady] = useState(false);
+  const [mapStyle, setMapStyle] = useState('liberty');
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
 
   // meters per pixel at a given zoom (Web Mercator)
   const metersPerPixel = (lat, zoom) =>
@@ -139,7 +121,7 @@ export default function LocationPicker({ value, onChange }) {
     let cancelled = false;
     let map = null;
     let resizeObserver = null;
-    let tilesFellBack = false;
+    let readyTimer = null;
 
     const checkWebGL = () => {
       try {
@@ -168,20 +150,19 @@ export default function LocationPicker({ value, onChange }) {
             zoom: 13,
             pitch: 55,
             bearing: -20,
-            style: LIGHT_STYLE,
-            attributionControl: true,
+            style: MAP_STYLES.liberty,
+            attributionControl: {
+              compact: true,
+              customAttribution: MAP_ATTRIBUTION
+            },
             dragRotate: true
           });
 
-          // Fall back to OSM tiles if the primary tile server fails
-          map.on('error', (e) => {
-            if (e?.error?.message && e.error.message.includes('tile')) {
-              if (!tilesFellBack && map.getSource('base-tiles')) {
-                tilesFellBack = true;
-                map.getSource('base-tiles').setTiles(OSM_TILES);
-              }
+          readyTimer = window.setTimeout(() => {
+            if (!cancelled) {
+              setError('The map is taking too long to load. Check your connection and refresh.');
             }
-          });
+          }, 20000);
 
           // Lock page scrolling while the pointer is over the map
           map.scrollZoom.enable();
@@ -192,18 +173,12 @@ export default function LocationPicker({ value, onChange }) {
 
           map.on('load', () => {
             if (cancelled || !map) return;
-            try {
-              map.addSource('terrain-dem', {
-                type: 'raster-dem',
-                tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
-                encoding: 'terrarium',
-                tileSize: 256,
-                maxzoom: 15
-              });
-              map.setTerrain({ source: 'terrain-dem', exaggeration: 1.2 });
-            } catch (err) {
-              // Terrain is optional — never block the map on it
+            if (readyTimer) {
+              window.clearTimeout(readyTimer);
+              readyTimer = null;
             }
+            setError('');
+            setMapReady(true);
             map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
             map.resize();
           });
@@ -240,6 +215,7 @@ export default function LocationPicker({ value, onChange }) {
 
     return () => {
       cancelled = true;
+      if (readyTimer) window.clearTimeout(readyTimer);
       clearLiveTracking();
       window.removeEventListener('resize', onWindowResize);
       if (resizeObserver) resizeObserver.disconnect();
@@ -282,6 +258,50 @@ export default function LocationPicker({ value, onChange }) {
       .catch(() => {});
   };
 
+  const switchMapStyle = (nextStyle) => {
+    setMapStyle(nextStyle);
+    const map = mapInstanceRef.current;
+    if (map) map.setStyle(MAP_STYLES[nextStyle]);
+  };
+
+  const handleAddressSearch = async () => {
+    const query = (value?.address || '').trim();
+    if (!query) {
+      setSearchError('Type an address, area, or landmark to search.');
+      return;
+    }
+    setSearching(true);
+    setSearchError('');
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`
+      );
+      if (!response.ok) throw new Error('Search failed');
+      const results = await response.json();
+      if (!Array.isArray(results) || results.length === 0) {
+        setSearchError('No matching place found. Try a nearby landmark or city.');
+        return;
+      }
+      const lat = Number(results[0].lat);
+      const lng = Number(results[0].lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw new Error('Invalid result');
+      const maplibregl = await loadMapLibre();
+      if (!mapInstanceRef.current) return;
+      placeMarker(maplibregl, lng, lat);
+      mapInstanceRef.current.flyTo({
+        center: [lng, lat],
+        zoom: 16,
+        pitch: 55,
+        bearing: -20,
+        duration: 1600
+      });
+    } catch {
+      setSearchError('Could not search that address. Check your connection and try again.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
   const handleUseMyLocation = () => {
     if (!navigator.geolocation) {
       setError('Geolocation is not supported by this browser.');
@@ -302,7 +322,7 @@ export default function LocationPicker({ value, onChange }) {
               pitch: 55,
               duration: 1600
             });
-setLocating(false);
+            setLocating(false);
             // Lock to the GPS pin — map clicks must not move it while tracking
             toolRef.current = 'pan';
             setTool('pan');
@@ -368,9 +388,37 @@ setLocating(false);
         </div>
       </div>
 
-      <div className="relative w-full h-[280px] sm:h-[320px] md:h-[360px]">
+      <div className="relative w-full h-[320px] sm:h-[380px] md:h-[440px]">
         {/* Map canvas — directly sized, exactly as the versions that rendered for you */}
         <div ref={mapRef} className="w-full h-full rounded-lg border border-lp-outline-variant overflow-hidden" />
+
+        {/* Style switcher */}
+        <div className="absolute top-3 left-3 z-10 flex rounded-lg overflow-hidden border border-gray-200 shadow-md">
+          <button
+            type="button"
+            onClick={() => switchMapStyle('liberty')}
+            disabled={!mapReady}
+            className={`px-3 py-2 text-[10px] font-label-caps uppercase tracking-wide transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              mapStyle === 'liberty'
+                ? 'bg-lp-primary-container text-lp-on-primary-container'
+                : 'bg-white text-[#555] hover:bg-gray-50'
+            }`}
+          >
+            3D
+          </button>
+          <button
+            type="button"
+            onClick={() => switchMapStyle('positron')}
+            disabled={!mapReady}
+            className={`px-3 py-2 text-[10px] font-label-caps uppercase tracking-wide transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              mapStyle === 'positron'
+                ? 'bg-lp-primary-container text-lp-on-primary-container'
+                : 'bg-white text-[#555] hover:bg-gray-50'
+            }`}
+          >
+            Light
+          </button>
+        </div>
 
         {/* Tool switcher (Google Maps style) */}
         <div className="absolute top-3 right-3 z-10 flex flex-col gap-1.5">
@@ -378,7 +426,8 @@ setLocating(false);
             type="button"
             onClick={() => handleToolChange('select')}
             title="Select / drop pin (crosshair)"
-            className={`w-10 h-10 rounded-lg border flex items-center justify-center transition-all active:scale-90 cursor-pointer shadow-md ${
+            disabled={!mapReady}
+            className={`w-10 h-10 rounded-lg border flex items-center justify-center transition-all active:scale-90 cursor-pointer shadow-md disabled:opacity-50 disabled:cursor-not-allowed ${
               tool === 'select'
                 ? 'bg-lp-primary-container text-lp-on-primary-container border-lp-primary-container'
                 : 'bg-white text-[#555] border-gray-200 hover:bg-gray-50'
@@ -390,7 +439,8 @@ setLocating(false);
             type="button"
             onClick={() => handleToolChange('pan')}
             title="Move map (hand)"
-            className={`w-10 h-10 rounded-lg border flex items-center justify-center transition-all active:scale-90 cursor-pointer shadow-md ${
+            disabled={!mapReady}
+            className={`w-10 h-10 rounded-lg border flex items-center justify-center transition-all active:scale-90 cursor-pointer shadow-md disabled:opacity-50 disabled:cursor-not-allowed ${
               tool === 'pan'
                 ? 'bg-lp-primary-container text-lp-on-primary-container border-lp-primary-container'
                 : 'bg-white text-[#555] border-gray-200 hover:bg-gray-50'
@@ -405,6 +455,16 @@ setLocating(false);
           {tool === 'select' ? 'Select mode · Click to drop pin' : 'Pan mode · Drag to move map'}
         </span>
 
+        {!mapReady && !error && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-white/85 p-6 text-center">
+            <span className="w-8 h-8 rounded-full border-2 border-lp-primary-container border-t-transparent animate-spin" />
+            <p className="text-xs font-bold text-[#555]">Loading 3D map…</p>
+            <p className="text-[10px] font-label-caps text-[#777] uppercase tracking-wide">
+              Fetching OpenFreeMap tiles
+            </p>
+          </div>
+        )}
+
         {error && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-white/85 p-6 text-center">
             <span className="material-symbols-outlined text-red-500 text-3xl">error</span>
@@ -416,12 +476,35 @@ setLocating(false);
       <p className="text-[10px] font-label-caps text-lp-on-surface-variant opacity-70 uppercase tracking-wide">
         Drag to rotate · Scroll to tilt · Click to drop a pin · Precise location follows you live
       </p>
-      <input
-        value={value?.address || ''}
-        onChange={(e) => onChange({ ...value, address: e.target.value })}
-        placeholder="Or type your full address manually"
-        className="px-4 py-3 rounded bg-lp-surface-lowest border border-lp-outline-variant text-sm text-white outline-none focus:border-lp-primary-container transition-colors placeholder:text-lp-on-surface-variant/60"
-      />
+      <div className="flex gap-2">
+        <input
+          value={value?.address || ''}
+          onChange={(e) => {
+            setSearchError('');
+            onChange({ ...value, address: e.target.value });
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              handleAddressSearch();
+            }
+          }}
+          placeholder="Search an address, area, or landmark"
+          className="flex-1 min-w-0 px-4 py-3 rounded bg-lp-surface-lowest border border-lp-outline-variant text-sm text-white outline-none focus:border-lp-primary-container transition-colors placeholder:text-lp-on-surface-variant/60"
+        />
+        <button
+          type="button"
+          onClick={handleAddressSearch}
+          disabled={searching || !mapReady}
+          className="shrink-0 px-4 py-3 rounded bg-lp-primary-container text-lp-on-primary-container font-label-caps text-[10px] uppercase tracking-wide transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+        >
+          <span className="material-symbols-outlined text-sm">{searching ? 'progress_activity' : 'search'}</span>
+          {searching ? 'Searching' : 'Search'}
+        </button>
+      </div>
+      {searchError && (
+        <p className="text-[10px] font-label-caps text-red-400 uppercase tracking-wide">{searchError}</p>
+      )}
       {value?.lat != null && (
         <p className="text-[10px] font-label-caps text-lp-primary-container uppercase tracking-wide">
           Pinned: {value.lat.toFixed(5)}, {value.lng.toFixed(5)}

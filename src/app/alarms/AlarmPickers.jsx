@@ -41,8 +41,9 @@ export function DevicePicker({ devices, selectedDevice, onSelect }) {
         ) : (
           Object.entries(groups).map(([board, list]) => (
             <div key={board}>
-              <div className="sticky top-0 flex items-center gap-3 border-b border-border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-accent">
-                <Cpu size={10} /> {board}
+              <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-input px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-accent">
+                <Cpu size={10} className="shrink-0" />
+                <span className="min-w-0 truncate">{board}</span>
               </div>
               {list.map((device) => (
                 <button

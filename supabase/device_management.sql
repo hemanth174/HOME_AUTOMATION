@@ -24,15 +24,22 @@ create table if not exists public.device_runtime_configs (
   encrypted_wifi_password text,
   config_version integer not null default 1 check (config_version > 0),
   applied_config_version integer not null default 0 check (applied_config_version >= 0),
-  config_update_status text not null default 'unprovisioned'
-    check (config_update_status in ('unprovisioned','pending','checking_wifi','sending','applying','applied','failed')),
-  last_seen_at timestamptz,
+   config_update_status text not null default 'unprovisioned'
+     check (config_update_status in ('unprovisioned','pending','checking_wifi','sending','applying','applied','failed')),
+   config_expires_at timestamptz,
+   applied_wifi_ssid text,
+   applied_wifi_security text check (applied_wifi_security is null or applied_wifi_security in ('open', 'wpa2_psk')),
+   last_seen_at timestamptz,
   -- Direct check-in means this exact ESP32 authenticated to the device-agent.
   -- Mesh gateway observations are tracked separately and never authorize remote commands.
   last_direct_seen_at timestamptz,
-  last_mesh_seen_at timestamptz,
-  last_error text,
-  last_ip text,
+   last_mesh_seen_at timestamptz,
+   last_boot_id text,
+   last_boot_at timestamptz,
+   last_uptime_ms bigint,
+    last_ip text,
+    last_error text,
+    revoked_at timestamptz,
   config_requested_at timestamptz,
   config_applied_at timestamptz,
   created_at timestamptz not null default now(),
@@ -55,13 +62,29 @@ create table if not exists public.device_commands (
   result jsonb not null default '{}'::jsonb
 );
 
+-- If a command is delivered through a leader, bind that handoff to the
+-- authenticated gateway so a different board cannot acknowledge it.
+alter table public.device_commands
+  add column if not exists gateway_board_id uuid references public.boards(id) on delete set null;
+create index if not exists device_commands_gateway_board_idx
+  on public.device_commands(gateway_board_id, status, requested_at)
+  where gateway_board_id is not null;
+
 alter table public.device_runtime_configs
   add column if not exists encrypted_device_token text,
   add column if not exists mesh_ssid text not null default 'HOME-AUTO-LEADER',
   add column if not exists encrypted_mesh_password text,
   add column if not exists first_seen_at timestamptz,
-  add column if not exists last_direct_seen_at timestamptz,
-  add column if not exists last_mesh_seen_at timestamptz;
+   add column if not exists last_direct_seen_at timestamptz,
+   add column if not exists last_mesh_seen_at timestamptz,
+   add column if not exists config_expires_at timestamptz,
+   add column if not exists applied_wifi_ssid text,
+   add column if not exists applied_wifi_security text,
+   add column if not exists last_boot_id text,
+   add column if not exists last_boot_at timestamptz,
+   add column if not exists last_uptime_ms bigint,
+   add column if not exists last_ip text,
+   add column if not exists revoked_at timestamptz;
 
 -- Link legacy provisioning records to their registered board before the
 -- enrollment endpoint attempts to reuse their mesh credentials.
@@ -82,6 +105,11 @@ where last_seen_at is not null and last_direct_seen_at is null;
 update public.device_runtime_configs
 set first_seen_at = coalesce(first_seen_at, last_seen_at)
 where last_seen_at is not null and first_seen_at is null;
+
+update public.device_runtime_configs
+set applied_wifi_ssid = coalesce(applied_wifi_ssid, nullif(wifi_ssid, '')),
+    applied_wifi_security = coalesce(applied_wifi_security, wifi_security)
+where config_update_status = 'applied';
 
 create index if not exists device_runtime_configs_user_id_idx
   on public.device_runtime_configs(user_id);
@@ -170,11 +198,12 @@ declare
   v_commands jsonb := '[]'::jsonb;
   v_now timestamptz := now();
 begin
-  select c.* into v_config
-  from public.device_runtime_configs c
-  join public.boards b on b.id = c.board_id and b.user_id = c.user_id
-  where c.device_token_hash = p_device_token_hash
-    and b.board_identifier = p_board_identifier
+   select c.* into v_config
+   from public.device_runtime_configs c
+   join public.boards b on b.id = c.board_id and b.user_id = c.user_id
+   where c.device_token_hash = p_device_token_hash
+     and c.revoked_at is null
+     and b.board_identifier = p_board_identifier
   limit 1;
 
   if not found then
@@ -243,7 +272,8 @@ begin
     'board_identifier', b.board_identifier,
     'command_type', command_row.command_type,
     'requested_at', command_row.requested_at,
-    'expires_at', command_row.expires_at
+    'expires_at', command_row.expires_at,
+    'expires_at_epoch', extract(epoch from command_row.expires_at)::bigint
   ) order by command_row.requested_at), '[]'::jsonb)
   into v_commands
   from (
@@ -253,6 +283,8 @@ begin
       and user_id = v_config.user_id
       and status = 'pending'
       and expires_at > v_now
+      -- A mesh member must not also consume a restart already assigned to its leader.
+      and gateway_board_id is null
     order by requested_at
     limit 5
   ) command_row
@@ -265,7 +297,33 @@ begin
       'user_id', v_board.user_id,
       'board_identifier', v_board.board_identifier
     ),
-    'config', to_jsonb(v_config),
+    -- Never return encrypted credentials, token hashes, or mesh secrets to a
+    -- device. The device only needs the status metadata below; the pending
+    -- Wi-Fi secret is returned separately by the Edge Function after it has
+    -- authenticated this exact board.
+    'config', jsonb_build_object(
+      'board_id', v_config.board_id,
+      'user_id', v_config.user_id,
+      'wifi_ssid', v_config.wifi_ssid,
+      'wifi_security', v_config.wifi_security,
+      'config_version', v_config.config_version,
+      'applied_config_version', v_config.applied_config_version,
+      'config_update_status', v_config.config_update_status,
+      'config_expires_at', v_config.config_expires_at,
+      'applied_wifi_ssid', v_config.applied_wifi_ssid,
+      'applied_wifi_security', v_config.applied_wifi_security,
+      'last_seen_at', v_config.last_seen_at,
+      'last_direct_seen_at', v_config.last_direct_seen_at,
+      'last_mesh_seen_at', v_config.last_mesh_seen_at,
+      'last_boot_id', v_config.last_boot_id,
+      'last_boot_at', v_config.last_boot_at,
+      'last_uptime_ms', v_config.last_uptime_ms,
+      'last_ip', v_config.last_ip,
+      'last_error', v_config.last_error,
+      'revoked_at', v_config.revoked_at,
+      'config_requested_at', v_config.config_requested_at,
+      'config_applied_at', v_config.config_applied_at
+    ),
     'devices', v_devices,
     'alarms', v_alarms,
     'schedules', v_schedules,

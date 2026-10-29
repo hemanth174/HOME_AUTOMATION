@@ -1,15 +1,30 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import AlarmExecutor from './AlarmExecutor';
 import NotificationEngine from './NotificationEngine';
 import GlobalToast from './GlobalToast';
 import Loader from './Loader';
 import LocalModeBanner from './LocalModeBanner';
+import AccessForbidden from './AccessForbidden';
+import Navbar from './Navbar';
 import useLocalConnection from '@/hooks/useLocalConnection';
 import { checkInternet } from '@/lib/netCheck';
+import { isAdminEmail } from '@/lib/adminEmails';
+
+const OAUTH_FLAG_KEY = 'vt_oauth_started';
+
+function consumeOAuthFlag() {
+  try {
+    const started = sessionStorage.getItem(OAUTH_FLAG_KEY) === '1';
+    if (started) sessionStorage.removeItem(OAUTH_FLAG_KEY);
+    return started;
+  } catch {
+    return false;
+  }
+}
 
 export default function MainLayoutWrapper({ children, className = "" }) {
   const pathname = usePathname();
@@ -25,12 +40,27 @@ export default function MainLayoutWrapper({ children, className = "" }) {
   const isPendingPage = cleanPath === '/pending';
   const isDeniedPage = cleanPath === '/denied';
   const [user, setUser] = useState(null);
-  const [authChecked, setAuthChecked] = useState(true);
+  const [access, setAccess] = useState('checking');
+  const [accessPath, setAccessPath] = useState(null);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [authNonce, setAuthNonce] = useState(0);
+  const userRef = useRef(null);
   const [isClientOnline, setIsClientOnline] = useState(true); // Always true initially to match SSR
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const { isLocalConnected, localUrl } = useLocalConnection();
 
+  const requiresApproval =
+    !isLoginPage &&
+    !isPendingPage &&
+    !isDeniedPage &&
+    !isPublicPage &&
+    !is404Page &&
+    cleanPath !== '/admin' &&
+    !isAdminDeviceRoute &&
+    cleanPath !== '/local';
+
   const fullWidthPage = isLoginPage || isPendingPage || isDeniedPage || cleanPath === '/admin' || isAdminDeviceRoute || is404Page || isPublicPage || (!user && cleanPath === '/');
+  const accessReady = sessionReady && accessPath === cleanPath;
 
   useEffect(() => {
     const syncSidebar = (event) => {
@@ -130,62 +160,190 @@ export default function MainLayoutWrapper({ children, className = "" }) {
     }
   }, [pathname]);
 
-  // Non-blocking background auth session check
+  // Access gate: protected routes must not render (and therefore must not
+  // fetch dashboard data) until the account is fully approved.
   useEffect(() => {
     let active = true;
 
-    const checkSession = async () => {
-      try {
-        if (cleanPath === '/local') return;
+    if (cleanPath === '/local') {
+      setSessionReady(true);
+      return undefined;
+    }
 
-        const { data: { session } } = await supabase.auth.getSession();
+    if (requiresApproval) setSessionReady(false);
+
+    const checkAccess = async () => {
+      let session = null;
+      try {
+        const { data } = await supabase.auth.getSession();
+        session = data.session;
+      } catch {
+        session = null;
+      }
+      if (!active) return;
+
+      const currentUser = session?.user || null;
+      userRef.current = currentUser;
+      setUser((previous) => (previous?.id === currentUser?.id ? previous : currentUser));
+
+      if (!currentUser) {
+        setAccess('guest');
+        setAccessPath(cleanPath);
+        setSessionReady(true);
+        if (
+          !isLoginPage &&
+          !isPendingPage &&
+          !isDeniedPage &&
+          !isPublicPage &&
+          !is404Page &&
+          cleanPath !== '/' &&
+          cleanPath !== '/admin' &&
+          !isAdminDeviceRoute &&
+          navigator.onLine
+        ) {
+          router.replace('/login');
+        }
+        return;
+      }
+
+      if (!requiresApproval) {
+        setAccess('approved');
+        setAccessPath(cleanPath);
+        setSessionReady(true);
+        return;
+      }
+
+      if (isAdminEmail(currentUser.email)) {
+        setAccess('approved');
+        setAccessPath(cleanPath);
+        setSessionReady(true);
+        return;
+      }
+
+      const oauthReturn = cleanPath === '/' ? consumeOAuthFlag() : false;
+
+      try {
+        const response = await fetch('/api/account/status', {
+          cache: 'no-store',
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
         if (!active) return;
 
-        const currentUser = session?.user || null;
-        setUser(currentUser);
-
-        if (currentUser && !isPendingPage && !isDeniedPage && !isLoginPage && !isPublicPage && cleanPath !== '/admin' && !isAdminDeviceRoute) {
-          const approvalResponse = await fetch('/api/account/status', { cache: 'no-store', headers: { Authorization: `Bearer ${session.access_token}` } });
-          if (approvalResponse.ok) {
-            const approvalData = await approvalResponse.json();
-            if (approvalData.approval?.account_status !== 'approved') {
-              router.push('/pending');
-              return;
-            }
-          }
+        if (response.status === 401) {
+          try {
+            await supabase.auth.signOut({ scope: 'local' });
+          } catch {}
+          if (!active) return;
+          setUser(null);
+          setAccess('guest');
+          setAccessPath(cleanPath);
+          setSessionReady(true);
+          router.replace('/login');
+          return;
         }
 
-        if (!currentUser && !isLoginPage && !isPublicPage && cleanPath !== '/' && navigator.onLine) {
-          router.push('/login');
-        } else if (currentUser && isLoginPage) {
-          router.push('/');
+        if (!response.ok) throw new Error('Could not verify account access');
+
+        const payload = await response.json();
+        const approval = payload.approval || {};
+        const rejected = approval.account_status === 'rejected' || approval.account_status === 'revoked';
+        const approved =
+          approval.account_status === 'approved' &&
+          Boolean(approval.admin_one_approved_at) &&
+          Boolean(approval.admin_two_approved_at);
+
+        if (approved) {
+          setAccess('approved');
+        } else if (rejected) {
+          setAccess('denied');
+          router.replace('/denied');
+        } else if (oauthReturn) {
+          setAccess('redirecting');
+          router.replace('/pending');
+        } else {
+          setAccess('pending');
         }
-      } catch (err) {
-        // Silent catch for offline / AP mode
+        setAccessPath(cleanPath);
+        setSessionReady(true);
+      } catch {
+        if (!active) return;
+        // Fail closed: an unverifiable account never gets the dashboard.
+        setAccess('pending');
+        setAccessPath(cleanPath);
+        setSessionReady(true);
       }
     };
 
-    checkSession();
+    checkAccess();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!active) return;
-      const currentUser = session?.user || null;
-      setUser(currentUser);
+      if (event === 'SIGNED_OUT') {
+        userRef.current = null;
+        setUser(null);
+        setAccess('guest');
+        setAccessPath(cleanPath);
+        setSessionReady(true);
+        setAuthNonce((value) => value + 1);
+        if (
+          !isLoginPage &&
+          !isPendingPage &&
+          !isDeniedPage &&
+          !isPublicPage &&
+          cleanPath !== '/' &&
+          cleanPath !== '/local' &&
+          cleanPath !== '/admin' &&
+          !isAdminDeviceRoute
+        ) {
+          router.replace('/login');
+        }
+      } else if (event === 'SIGNED_IN') {
+        const nextUser = session?.user || null;
+        const sameUser = Boolean(nextUser && userRef.current?.id === nextUser.id);
+        userRef.current = nextUser;
+        setUser((previous) => (previous?.id === nextUser?.id ? previous : nextUser));
+        if (!sameUser) {
+          setAccess('checking');
+          setAccessPath(null);
+          setAuthNonce((value) => value + 1);
+        }
+      }
     });
 
     return () => {
       active = false;
       subscription.unsubscribe();
     };
-  }, [isLoginPage, isPendingPage, isDeniedPage, cleanPath, router, isPublicPage]);
+  }, [
+    cleanPath,
+    isLoginPage,
+    isPendingPage,
+    isDeniedPage,
+    isPublicPage,
+    is404Page,
+    isAdminDeviceRoute,
+    requiresApproval,
+    authNonce,
+    router,
+  ]);
 
-  // Loading screens to prevent UI flashes
-  // Redirecting loading screen if accessing unauthorized areas while online
-  if (!user && !isLoginPage && !isPublicPage && cleanPath !== '/' && cleanPath !== '/local' && isClientOnline && !isLocalConnected) {
+  // Loading / access screens. Protected pages never render children until
+  // the approval check has completed successfully. The server always renders
+  // the loader for protected routes so hydration matches the client.
+  if (requiresApproval && (typeof window === 'undefined' || !accessReady)) {
+    return <Loader message="Checking access..." />;
+  }
+  if (requiresApproval && access === 'pending') {
+    return <AccessForbidden email={user?.email} />;
+  }
+  if (requiresApproval && (access === 'denied' || access === 'redirecting')) {
+    return <Loader message={access === 'denied' ? 'Redirecting...' : 'Opening approval status...'} />;
+  }
+  if (requiresApproval && access === 'guest' && cleanPath !== '/') {
     return <Loader message="Redirecting to login..." />;
   }
-  if (user && isLoginPage) {
-    return <Loader message="Redirecting to dashboard..." />;
+  if (!user && !isLoginPage && !isPendingPage && !isDeniedPage && !isPublicPage && !is404Page && cleanPath !== '/' && cleanPath !== '/local' && isClientOnline && !isLocalConnected) {
+    return <Loader message="Redirecting to login..." />;
   }
 
   return (
@@ -193,6 +351,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
       className={`${fullWidthPage ? "w-full min-h-screen" : "desktop-shell-content w-full min-h-screen pb-20 md:pb-8"} ${className}`}
       style={fullWidthPage ? undefined : { '--desktop-sidebar-width': sidebarExpanded ? '16rem' : '4rem' }}
     >
+      {!fullWidthPage && <Navbar />}
       {!fullWidthPage && cleanPath !== '/local' && (
           <LocalModeBanner
             isClientOnline={isClientOnline}

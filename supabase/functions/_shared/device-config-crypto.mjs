@@ -22,8 +22,8 @@ export async function encryptDeviceConfigEnvelope(
     throw new Error("Invalid configuration version for encryption");
   }
 
-  // A board-specific key prevents an envelope intended for one board from
-  // being decrypted by another board. The public HTTPS endpoint still uses TLS.
+  // Derive a per-board encryption key from the board's unique bearer token.
+  // TLS is still required; this envelope adds at-rest-to-device protection.
   const keyMaterial = encoder.encode("vikatech-device-config-v1:" + deviceToken);
   const keyBytes = new Uint8Array(await crypto.subtle.digest("SHA-256", keyMaterial));
   const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
@@ -43,8 +43,7 @@ export async function encryptDeviceConfigEnvelope(
     schema_version: 1,
     config_version: configVersion,
     iv: base64Url(iv),
-    // WebCrypto returns ciphertext followed by the 16-byte GCM tag. Keeping
-    // them together reduces framing mistakes in the embedded receiver.
+    // WebCrypto returns ciphertext followed by the 16-byte GCM tag.
     ciphertext: base64Url(ciphertext),
   };
 }

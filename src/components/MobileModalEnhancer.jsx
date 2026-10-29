@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 // attaches one consistent drag gesture instead of every modal rolling its own.
 const PANEL_SELECTOR = 'div.fixed.inset-0 > div[class*="max-md:rounded-t"]';
 const HANDLE_SELECTOR = '[data-sheet-handle="1"]';
+const DRAG_ZONE_SELECTOR = '[data-sheet-drag-zone="1"]';
 const GRAB_ZONE_PX = 72;
 const CLOSE_DISTANCE_PX = 64;
 const CLOSE_VELOCITY_PX_MS = 0.35;
@@ -55,14 +56,22 @@ export default function MobileModalEnhancer() {
       if (!(panel instanceof HTMLElement) || panel.dataset.mobileModalDrag === '1') {
         return;
       }
+      if (panel.dataset.sheetDragOwner === '1') return;
 
       const handle = panel.querySelector(HANDLE_SELECTOR);
+      const dragZone = panel.querySelector(DRAG_ZONE_SELECTOR);
       const originalHandleCursor = handle?.style.cursor || '';
       const originalHandleTouchAction = handle?.style.touchAction || '';
+      const originalDragZoneCursor = dragZone?.style.cursor || '';
+      const originalDragZoneTouchAction = dragZone?.style.touchAction || '';
 
       if (handle) {
         handle.style.cursor = 'grab';
         handle.style.touchAction = 'none';
+      }
+      if (dragZone) {
+        dragZone.style.cursor = 'grab';
+        dragZone.style.touchAction = 'none';
       }
 
       panel.dataset.mobileModalDrag = '1';
@@ -92,6 +101,7 @@ export default function MobileModalEnhancer() {
         delete panel.dataset.mobileSheetClosing;
         closing = false;
         if (handle) handle.style.cursor = 'grab';
+        if (dragZone) dragZone.style.cursor = 'grab';
       };
 
       const cancelDrag = () => {
@@ -127,17 +137,11 @@ export default function MobileModalEnhancer() {
 
         const rect = panel.getBoundingClientRect();
 
-        if (handle) {
-          const handleRect = handle.getBoundingClientRect();
-          const insideHandle =
-            clientX >= handleRect.left - 16 &&
-            clientX <= handleRect.right + 16 &&
-            clientY >= handleRect.top - 12 &&
-            clientY <= handleRect.bottom + 28;
-          if (!insideHandle) return false;
-        } else if (
+        const insideDragZone =
+          dragZone && target instanceof Node && dragZone.contains(target);
+        if (
           panel.scrollTop > 0 ||
-          clientY - rect.top > GRAB_ZONE_PX
+          (!insideDragZone && clientY - rect.top > GRAB_ZONE_PX)
         ) {
           return false;
         }
@@ -153,6 +157,7 @@ export default function MobileModalEnhancer() {
         panel.style.transition = 'none';
         panel.style.willChange = 'transform, opacity';
         if (handle) handle.style.cursor = 'grabbing';
+        if (dragZone) dragZone.style.cursor = 'grabbing';
         return true;
       };
 
@@ -187,6 +192,7 @@ export default function MobileModalEnhancer() {
         dragging = false;
         delete panel.dataset.mobileSheetDragging;
         if (handle) handle.style.cursor = 'grab';
+        if (dragZone) dragZone.style.cursor = 'grab';
 
         if (shouldClose) {
           slideOut(() => {
@@ -323,11 +329,15 @@ export default function MobileModalEnhancer() {
         delete panel.dataset.mobileSheet;
         delete panel.dataset.mobileSheetDragging;
         delete panel.dataset.mobileSheetClosing;
+        resetPanel();
         if (handle && handle.isConnected) {
           handle.style.cursor = originalHandleCursor;
           handle.style.touchAction = originalHandleTouchAction;
         }
-        resetPanel();
+        if (dragZone && dragZone.isConnected) {
+          dragZone.style.cursor = originalDragZoneCursor;
+          dragZone.style.touchAction = originalDragZoneTouchAction;
+        }
         disposers.delete(panel);
       });
     };
@@ -337,7 +347,12 @@ export default function MobileModalEnhancer() {
         if (!panel.isConnected) dispose();
       });
       if (mediaQuery.matches) {
-        document.querySelectorAll(PANEL_SELECTOR).forEach(enhance);
+        const panels = new Set(document.querySelectorAll(PANEL_SELECTOR));
+        document.querySelectorAll(HANDLE_SELECTOR).forEach((handle) => {
+          const panel = handle.closest('div.fixed.inset-0 > div');
+          if (panel) panels.add(panel);
+        });
+        panels.forEach(enhance);
       }
       syncBodyLock();
     };

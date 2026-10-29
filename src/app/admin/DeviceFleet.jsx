@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import {
   Activity, AlertCircle, CheckCircle2, CircleHelp, Clock3, Cpu, Download, ExternalLink,
   LoaderCircle, Power, RefreshCw, Settings2, Wifi, WifiOff,
 } from "lucide-react";
+import AdminConfirmDrawer from "./AdminConfirmDrawer";
+import DeviceWifiDrawer from "./DeviceWifiDrawer";
 
 function ago(value) {
   if (!value) return "Never connected";
@@ -20,7 +20,6 @@ function ago(value) {
 }
 
 export default function DeviceFleet() {
-  const router = useRouter();
   const [accessToken, setAccessToken] = useState("");
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -28,7 +27,8 @@ export default function DeviceFleet() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState({});
   const [restartByBoard, setRestartByBoard] = useState({});
-  const [provisioningInfoByBoard, setProvisioningInfoByBoard] = useState({});
+  const [wifiEditor, setWifiEditor] = useState(null);
+  const [confirmation, setConfirmation] = useState(null);
   const [filter, setFilter] = useState("all");
 
   useEffect(() => {
@@ -124,8 +124,8 @@ export default function DeviceFleet() {
             setNotice(command.status === "completed"
               ? "ESP32 restarted and checked in successfully."
               : command.status === "failed"
-                ? "The ESP32 reported a restart failure."
-                : "Restart request was cancelled.");
+                ? (command.last_error || "The ESP32 reported a restart failure.")
+                : (command.last_error || "Restart request expired or was cancelled."));
             loadDevices(true);
           }
         } catch {
@@ -138,22 +138,31 @@ export default function DeviceFleet() {
     return () => { active = false; clearInterval(timer); };
   }, [accessToken, restartByBoard, loadDevices]);
 
-  const restartDevice = async (device) => {
+  const restartDevice = (device) => {
     if (!device.provisioned) {
       setNotice("Prepare and flash the device-agent firmware once before requesting a remote restart.");
       return;
     }
-    if (!device.config.directOnline) {
-      setNotice(device.config.meshOnline
-        ? "This board is visible through the local mesh but has no recent direct device-agent check-in. Remote restart is disabled so another ESP32 cannot be restarted by mistake."
-        : "This ESP32 is offline or has no recent direct device-agent check-in. Reconnect it before sending a restart request.");
+    const meshOnly = !device.config.directOnline && Boolean(device.config.meshOnline);
+    if (!device.config.directOnline && !meshOnly) {
+      setNotice("This ESP32 has no recent direct check-in or live mesh-gateway observation. Reconnect it before sending a restart request.");
       return;
     }
-    const approved = window.confirm(
-      "Restart " + device.name + "?\n\nThis will briefly disconnect the ESP32 and its attached relay channels. Use this only when a software restart is safe for the connected equipment."
-    );
-    if (!approved) return;
+    const deliveryNote = meshOnly
+      ? "This board is reachable through its mesh leader. The signed restart request targets this board identifier only, and success requires the member to rejoin the mesh."
+      : "";
+    setConfirmation({
+      kind: "restart",
+      deviceId: device.id,
+      title: "Restart this ESP32?",
+      deviceName: device.name,
+      message: "This will briefly disconnect the ESP32 and its attached relay channels. Use this only when a software restart is safe for the connected equipment. " + deliveryNote,
+      confirmLabel: "Restart ESP32",
+      tone: "danger",
+    });
+  };
 
+  const executeRestart = async (device) => {
     setBusy((current) => ({ ...current, [device.id]: "restart" }));
     setNotice("");
     try {
@@ -168,8 +177,9 @@ export default function DeviceFleet() {
         ...previous,
         [device.id]: { commandId: data.command.id, status: data.command.status, polling: true, startedAt: Date.now(), timedOut: false, error: "" },
       }));
-      setNotice("Restart queued. Opening the live restart tracker.");
-      router.push("/admin/devices/" + device.id + "/restart?commandId=" + encodeURIComponent(data.command.id));
+      setNotice(data.deliveryMode === "mesh_gateway"
+        ? "Restart queued through the mesh leader. Waiting for the selected member to reboot and rejoin."
+        : "Restart queued. Waiting for the ESP32 to acknowledge and reconnect.");
     } catch (error) {
       setNotice(error.message || "Could not queue restart");
     } finally {
@@ -204,8 +214,8 @@ export default function DeviceFleet() {
         setNotice(command.status === "completed"
           ? "ESP32 restart completed and the device acknowledged its return."
           : command.status === "failed"
-            ? "ESP32 reported a restart failure."
-            : "Restart request was cancelled.");
+            ? (command.last_error || "ESP32 reported a restart failure.")
+            : (command.last_error || "Restart request expired or was cancelled."));
         loadDevices(true);
       } else {
         setNotice("Latest status: " + command.status + ". The command is still non-terminal; do not queue another restart unless you have reviewed the audit history.");
@@ -217,11 +227,31 @@ export default function DeviceFleet() {
     }
   };
 
-  const provisionDevice = async (device) => {
-    const approved = window.confirm(
-      "Prepare one-time enrollment firmware for " + device.name + "?\n\nThe downloaded file must be flashed to the ESP32 once over USB. After enrollment, Wi-Fi changes and software restart requests can be sent remotely."
-    );
-    if (!approved) return;
+  const openWifiEditor = (device, mode) => {
+    if (mode === "update" && !device.config.directOnline) {
+      setNotice("Connect to this board directly before changing its Wi-Fi settings.");
+      return;
+    }
+    setWifiEditor({ deviceId: device.id, mode });
+  };
+
+  const downloadLatestFirmware = (device) => {
+    if (!device.provisioned) {
+      openWifiEditor(device, "enroll");
+      return;
+    }
+    setConfirmation({
+      kind: "firmware",
+      deviceId: device.id,
+      title: "Download latest firmware?",
+      deviceName: device.name,
+      message: "Existing device and Wi-Fi credentials will be preserved. Flash the downloaded file over USB to update this board.",
+      confirmLabel: "Download firmware",
+      tone: "accent",
+    });
+  };
+
+  const executeDownloadLatestFirmware = async (device) => {
     setBusy((current) => ({ ...current, [device.id]: "provision" }));
     setNotice("");
     try {
@@ -231,7 +261,7 @@ export default function DeviceFleet() {
         body: JSON.stringify({}),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not prepare enrollment firmware");
+      if (!response.ok) throw new Error(data.error || "Could not prepare latest firmware");
       const blob = new Blob([data.firmware], { type: "text/x-c++src;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -241,35 +271,55 @@ export default function DeviceFleet() {
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1500);
-      setProvisioningInfoByBoard((previous) => ({
-        ...previous,
-        [device.id]: {
-          meshSsid: data.meshSsid || "",
-          meshPassword: data.meshPassword || "",
-          setupUrl: data.setupUrl || "http://192.168.4.1/setup",
-        },
-      }));
-      setNotice("Enrollment firmware downloaded. Flash it once, connect your phone to the device setup Wi-Fi shown on this card, then open its local setup page.");
+      setNotice(data.message || "Latest firmware downloaded. Flash it over USB to update this board.");
       await loadDevices(true);
     } catch (error) {
-      setNotice(error.message || "Could not prepare enrollment firmware");
+      setNotice(error.message || "Could not prepare latest firmware");
     } finally {
       setBusy((current) => ({ ...current, [device.id]: "" }));
     }
   };
 
-  const copySetupDetails = async (device) => {
-    const info = provisioningInfoByBoard[device.id];
-    if (!info) return;
-    const text = "VikaTech ESP32 initial setup\nWi-Fi network: " + info.meshSsid +
-      "\nWi-Fi password: " + info.meshPassword +
-      "\nOpen: " + info.setupUrl;
+  const revokeDevice = (device) => {
+    if (!device.provisioned) return;
+    setConfirmation({
+      kind: "revoke",
+      deviceId: device.id,
+      title: "Revoke device credential?",
+      deviceName: device.name,
+      message: "The current firmware will stop authenticating. A new one-time enrollment flash will be required.",
+      confirmLabel: "Revoke credential",
+      tone: "danger",
+    });
+  };
+
+  const executeRevokeDevice = async (device) => {
+    setBusy((current) => ({ ...current, [device.id]: "revoke" }));
     try {
-      await navigator.clipboard.writeText(text);
-      setNotice("Initial setup details copied.");
-    } catch {
-      setNotice("Copy was blocked by the browser. Use the setup details shown on this card.");
+      const response = await fetch("/api/admin/devices/" + device.id + "/revoke", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + accessToken },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not revoke device credential");
+      setNotice("Device credential revoked. Generate replacement enrollment firmware and flash this board once.");
+      await loadDevices(true);
+    } catch (error) {
+      setNotice(error.message || "Could not revoke device credential");
+    } finally {
+      setBusy((current) => ({ ...current, [device.id]: "" }));
     }
+  };
+
+  const confirmAction = async () => {
+    if (!confirmation) return;
+    const pending = confirmation;
+    setConfirmation(null);
+    const device = devices.find((item) => item.id === pending.deviceId);
+    if (!device) return;
+    if (pending.kind === "restart") await executeRestart(device);
+    if (pending.kind === "firmware") await executeDownloadLatestFirmware(device);
+    if (pending.kind === "revoke") await executeRevokeDevice(device);
   };
 
   const filteredDevices = devices.filter((device) =>
@@ -278,6 +328,9 @@ export default function DeviceFleet() {
     (filter === "offline" && !device.config.online) ||
     (filter === "unprovisioned" && !device.provisioned)
   );
+  const activeEditorDevice = wifiEditor
+    ? devices.find((device) => device.id === wifiEditor.deviceId) || null
+    : null;
 
   if (loading) {
     return <div className="rounded-2xl border border-border bg-card p-10 text-center text-sm font-semibold text-text-muted">
@@ -298,16 +351,19 @@ export default function DeviceFleet() {
               Manage ESP32 boards, update Wi-Fi configuration, and request a software restart for an individual board.
             </p>
           </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+            <a href="/" className="col-span-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-xs font-black hover:border-accent sm:col-span-1">
+              Back to VikaTech site
+            </a>
             <select value={filter} onChange={(event) => setFilter(event.target.value)}
-              className="min-h-11 min-w-0 rounded-xl border border-border bg-background px-3 text-xs font-bold outline-none focus:border-accent">
+              className="min-h-11 w-full min-w-0 rounded-xl border border-border bg-background px-3 text-xs font-bold outline-none focus:border-accent sm:w-auto">
               <option value="all">All boards</option>
               <option value="online">Online</option>
               <option value="offline">Offline</option>
               <option value="unprovisioned">Needs enrollment</option>
             </select>
             <button onClick={() => loadDevices(true)} disabled={refreshing}
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-xs font-black hover:border-accent disabled:opacity-50">
+              className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 text-xs font-black hover:border-accent disabled:opacity-50 sm:px-4">
               <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} /> Refresh
             </button>
             <Link href="/" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-accent px-4 text-xs font-black text-[var(--btn-text)] hover:brightness-105">
@@ -315,7 +371,7 @@ export default function DeviceFleet() {
             </Link>
           </div>
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
           {[
             ["Total boards", devices.length],
             ["Online", devices.filter((item) => item.config.online).length],
@@ -352,7 +408,7 @@ export default function DeviceFleet() {
             const needsEnrollment = !device.provisioned;
             const canManageDirectly = Boolean(device.config.directOnline);
             const meshOnly = Boolean(device.config.online && !device.config.directOnline && device.config.meshOnline);
-            const setupInfo = provisioningInfoByBoard[device.id];
+            const canRestart = device.provisioned && (canManageDirectly || Boolean(device.config.meshOnline));
             const versionText = device.config.version == null
               ? "Not enrolled"
               : "v" + device.config.appliedVersion + " applied / v" + device.config.version + " requested";
@@ -370,16 +426,20 @@ export default function DeviceFleet() {
                         {canManageDirectly ? "Online" : meshOnly ? "Mesh reachable" : "Offline"}
                       </span>
                     </div>
-                    <p className="mt-1 break-all font-mono text-[10px] text-text-muted">{device.boardIdentifier}</p>
+                    <p className="mt-1 break-all font-mono text-[10px] text-text-muted">Board identifier: {device.boardIdentifier}</p>
+                    <p className="mt-1 break-all font-mono text-[10px] text-text-muted">Database board ID: {device.databaseBoardId}</p>
                     <p className="mt-1 break-words text-xs font-semibold text-text-muted">{device.userEmail}</p>
                   </div>
                 </div>
 
-                <div className="mt-4 grid grid-cols-2 gap-2">
+                <div className="mt-4 grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
                   <div className="min-w-0 rounded-xl border border-border bg-background p-3">
                     <p className="text-[9px] font-black uppercase tracking-wide text-text-muted">Wi-Fi name</p>
                     <p className="mt-1 truncate text-xs font-bold">{device.config.wifiSsid || "Not configured"}</p>
                     <p className="mt-1 text-[10px] text-text-muted">{device.config.wifiSecurity === "open" ? "Open network" : "WPA2-PSK"}</p>
+                    {device.config.desiredWifiSsid && device.config.desiredWifiSsid !== device.config.wifiSsid && (
+                      <p className="mt-1 break-words text-[10px] font-bold text-amber-500">Desired: {device.config.desiredWifiSsid}</p>
+                    )}
                   </div>
                   <div className="min-w-0 rounded-xl border border-border bg-background p-3">
                     <p className="text-[9px] font-black uppercase tracking-wide text-text-muted">Configuration</p>
@@ -394,10 +454,14 @@ export default function DeviceFleet() {
                   <span className="inline-flex items-center gap-1"><Clock3 size={12} /> Last check-in: {ago(device.config.lastSeenAt)}</span>
                   <span>{device.devices?.length || 0} relay channels</span>
                 </div>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-semibold text-text-muted">
+                  <span>Applied v{device.config.appliedVersion ?? "—"} / desired v{device.config.desiredVersion ?? "—"}</span>
+                  <span>Boot: {device.config.lastBootId || "Not reported"}</span>
+                </div>
 
                 {meshOnly && (
                   <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/5 p-3 text-[11px] leading-5 text-amber-600 break-words">
-                    This board is visible through the local mesh, but it has not checked in directly with the device agent. Remote Wi-Fi changes and restart are paused for this board until its own secure heartbeat is fresh.
+                    This board is visible through the local mesh, but it has not checked in directly with the device agent. Wi-Fi editing unlocks when this exact board checks in directly; restart is available only through the mesh gateway.
                   </div>
                 )}
                 {device.config.lastError && (
@@ -424,57 +488,45 @@ export default function DeviceFleet() {
 
                 <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {needsEnrollment ? (
-                    <button type="button" onClick={() => provisionDevice(device)} disabled={Boolean(busyAction)}
+                    <button type="button" onClick={() => openWifiEditor(device, "enroll")} disabled={Boolean(busyAction)}
                       className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-accent px-3 py-2.5 text-xs font-black text-[var(--btn-text)] disabled:opacity-50 sm:col-span-2">
                       {busyAction === "provision" ? <LoaderCircle size={14} className="animate-spin" /> : <Download size={14} />}
                       {busyAction === "provision" ? "Preparing firmware…" : "Prepare one-time enrollment firmware"}
                     </button>
                   ) : (
                     <>
-                      <button type="button" onClick={() => router.push("/admin/devices/" + device.id + "/update")}
-                        disabled={!canManageDirectly || Boolean(busyAction)}
-                        title={!canManageDirectly ? "A fresh direct device-agent check-in is required" : "Update Wi-Fi configuration"}
+                      <button type="button" onClick={() => openWifiEditor(device, "update")}
+                        disabled={!device.provisioned || !canManageDirectly || Boolean(busyAction)}
+                        title={!canManageDirectly ? "Connect to this board directly before changing its Wi-Fi" : "Update Wi-Fi configuration"}
                         className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-accent px-3 py-2.5 text-xs font-black text-[var(--btn-text)] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40">
-                        <Settings2 size={14} /> Update configuration
+                        <Settings2 size={14} /> Update Wi-Fi
                       </button>
                       <button type="button" onClick={() => restartDevice(device)}
-                        disabled={!canManageDirectly || Boolean(busyAction) || restart?.polling || (restart && ["pending", "accepted"].includes(restart.status))}
+                        disabled={!canRestart || Boolean(busyAction) || restart?.polling || (restart && ["pending", "accepted"].includes(restart.status))}
+                        title={!canManageDirectly && canRestart ? "Restart will be forwarded through the current mesh leader" : !canRestart ? "A recent direct check-in or live mesh gateway is required" : "Restart this exact ESP32"}
                         className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border px-3 py-2.5 text-xs font-black hover:border-red-400/60 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40">
                         {busyAction === "restart" || restart?.polling ? <LoaderCircle size={14} className="animate-spin" /> : <Power size={14} />}
                         {busyAction === "restart" ? "Queueing…" : restart?.polling ? "Restart pending…" : "Restart this ESP32"}
+                      </button>
+                      <button type="button" onClick={() => downloadLatestFirmware(device)} disabled={Boolean(busyAction)}
+                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border px-3 py-2.5 text-xs font-black hover:border-accent disabled:cursor-not-allowed disabled:opacity-40 sm:col-span-2">
+                        <Download size={14} /> Download latest firmware
                       </button>
                     </>
                   )}
                 </div>
                 {needsEnrollment && (
                   <p className="mt-2 text-[10px] leading-4 text-text-muted">
-                    Enrollment requires one initial USB flash. Remote restart and configuration are unavailable until this firmware checks in.
+                    {device.credentialRevoked ? "The previous device credential was revoked. " : "Enrollment requires one initial USB flash. "}Remote restart and configuration are unavailable until replacement firmware checks in.
                   </p>
                 )}
-                {needsEnrollment && setupInfo && (
-                  <div className="mt-3 min-w-0 rounded-xl border border-accent/30 bg-accent/5 p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h4 className="text-xs font-black">Initial local Wi-Fi setup</h4>
-                      <button type="button" onClick={() => copySetupDetails(device)}
-                        className="min-h-9 rounded-lg border border-border bg-background px-3 text-[10px] font-black">
-                        Copy setup details
-                      </button>
-                    </div>
-                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      <div className="min-w-0 rounded-lg border border-border bg-background p-2.5">
-                        <p className="text-[9px] font-black uppercase tracking-wide text-text-muted">Connect to Wi-Fi</p>
-                        <p className="mt-1 break-all text-xs font-bold">{setupInfo.meshSsid}</p>
-                      </div>
-                      <div className="min-w-0 rounded-lg border border-border bg-background p-2.5">
-                        <p className="text-[9px] font-black uppercase tracking-wide text-text-muted">Setup password</p>
-                        <p className="mt-1 break-all font-mono text-xs font-bold">{setupInfo.meshPassword}</p>
-                      </div>
-                    </div>
-                    <p className="mt-3 break-all text-[11px] leading-5 text-text-muted">
-                      1. Flash the downloaded firmware once over USB. 2. Connect your phone to the network above. 3. Open {setupInfo.setupUrl} and enter the customer's Wi-Fi name and security. 4. Return here and refresh until the board reports Online.
-                    </p>
-                  </div>
+                {!needsEnrollment && (
+                  <button type="button" onClick={() => revokeDevice(device)} disabled={Boolean(busyAction)}
+                    className="mt-2 inline-flex min-h-9 items-center justify-center rounded-lg border border-red-400/40 px-3 text-[10px] font-black text-red-500 disabled:opacity-50">
+                    {busyAction === "revoke" ? "Revoking credential…" : "Revoke device credential"}
+                  </button>
                 )}
+
               </article>
             );
           })}
@@ -483,6 +535,29 @@ export default function DeviceFleet() {
       <div className="rounded-xl border border-border bg-background p-3 text-[10px] leading-5 text-text-muted">
         Remote restart is a software reboot request. It is not the physical EN pin; it works only after the updated firmware is installed, the board is online, and the device-agent check-in succeeds.
       </div>
+
+      <AdminConfirmDrawer
+        confirmation={confirmation}
+        busy={false}
+        onCancel={() => setConfirmation(null)}
+        onConfirm={confirmAction}
+      />
+
+      {wifiEditor && activeEditorDevice && (
+        <DeviceWifiDrawer
+          device={activeEditorDevice}
+          mode={wifiEditor.mode}
+          accessToken={accessToken}
+          refreshing={refreshing}
+          onClose={() => setWifiEditor(null)}
+          onSaved={() => loadDevices(true)}
+          onDownloaded={(data) => {
+            setNotice(data.message || "Enrollment firmware downloaded. Flash it once over USB; the Wi-Fi settings are built into the file.");
+            loadDevices(true);
+          }}
+          onCheckConnection={() => loadDevices(true)}
+        />
+      )}
     </section>
   );
 }

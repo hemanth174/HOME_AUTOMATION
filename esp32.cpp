@@ -1,25 +1,41 @@
 #include <WiFi.h>
-#include <WiFiMulti.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <esp_arduino_version.h>
 #include <ArduinoJson.h>
-#include <mbedtls/base64.h>
-#include <mbedtls/gcm.h>
-#include <mbedtls/md.h>
+#include <WebSocketsClient.h>
 #include <WebServer.h>
+#include <ESPmDNS.h>
 #include <Preferences.h>
 #include <time.h>
 #include <esp_system.h>
+#include <esp_task_wdt.h>
+#include <mbedtls/md.h>
+#include <mbedtls/base64.h>
+#include <mbedtls/gcm.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
+#include <esp_crt_bundle.h>
+
+// Arduino-ESP32 3.3.x removed WiFiClientSecure::useBuiltinCACertBundle(),
+// but the underlying secure client still exposes the certificate-bundle hook.
+// Keep CA validation enabled without falling back to insecure TLS.
+class VikaTechSecureClient : public WiFiClientSecure {
+public:
+  void useBuiltinCACertBundle() {
+    _use_ca_bundle = true;
+    sslclient->bundle_attach_cb = &esp_crt_bundle_attach;
+  }
+};
+
 #define NUM_DEVICES 4
 const int RELAY_PINS[NUM_DEVICES] = {32, 33, 25, 26};
 const int INPUT_PINS[NUM_DEVICES] = {19, 18, 5, 17};
 String homeWifiSSID = "";
 String homeWifiPassword = "";
 String homeWifiSecurity = "wpa2_psk";
+bool mdnsActive = false;
 volatile bool wifiConfigPending = false;
 volatile bool remoteWifiUpdateInProgress = false;
 const char* BOARD_IDENTIFIER = "esp32-unconfigured";
@@ -89,8 +105,28 @@ String deviceAuthToken = "";
 String deviceBootId = "";
 String lastDeviceError = "";
 uint32_t deviceConfigVersion = 1;
-const char* MESH_SSID = "HOME-AUTO-LEADER";
-const char* MESH_PASS = "CHANGE_ME_123"; // Replace locally before flashing; min 8 chars for WPA2
+
+// The current device path is JSON over WSS through the custom MQTT backend.
+// The ESP32 discovers the latest Cloudflare URL from the public discovery row;
+// it never connects directly to Mosquitto and never receives broker credentials.
+const char* DISCOVERY_SUPABASE_URL = "";
+const char* DISCOVERY_SUPABASE_ANON_KEY = "";
+const char* DISCOVERY_TABLE = "app_discovery";
+const char* DEVICE_WS_PATH = "/device";
+const char* DEVICE_WS_TOKEN = "";
+// First-boot home Wi-Fi is injected during enrollment so the board can come
+// online without a local setup page. NVS remains authoritative after boot,
+// and a new enrollment token deliberately re-seeds these values.
+const char* HOME_WIFI_SSID = "";
+const char* HOME_WIFI_PASSWORD = "";
+const char* HOME_WIFI_SECURITY = "wpa2_psk";
+// Changes whenever Admin generates a new firmware file. This lets a deliberate
+// re-enrollment replace stale Wi-Fi values already stored in NVS.
+const char* HOME_WIFI_SEED = "";
+// Mesh credentials are injected during one-time enrollment. An unprovisioned
+// template must not start an open/default installation network.
+const char* MESH_SSID = "";
+const char* MESH_PASS = "";
 IPAddress AP_IP(192, 168, 4, 1);
 IPAddress AP_GATEWAY(192, 168, 4, 1);
 IPAddress AP_SUBNET(255, 255, 255, 0);
@@ -105,7 +141,7 @@ unsigned long lastDebounceTime[NUM_DEVICES] = {0, 0, 0, 0};
 const unsigned long DEBOUNCE_DELAY = 50;
 unsigned long lastSerialDumpTime = 0;
 const unsigned long SERIAL_DUMP_INTERVAL = 60000;
-WiFiMulti wifiMulti;
+WebSocketsClient deviceWebSocket;
 WebServer server(80);
 Preferences preferences;
 SemaphoreHandle_t preferencesMutex = nullptr;
@@ -114,6 +150,7 @@ SemaphoreHandle_t relayMutex = nullptr;
 TaskHandle_t cloudSyncTaskHandle = nullptr;
 TaskHandle_t cloudPollTaskHandle = nullptr;
 TaskHandle_t deviceAgentTaskHandle = nullptr;
+TaskHandle_t deviceGatewayTaskHandle = nullptr;
 volatile bool cloudDevicesReady = false;
 // Cloud polling is a fallback for commands issued while the browser is not
 // connected to the local controller. Local REST commands remain immediate;
@@ -166,12 +203,30 @@ struct MeshDeviceCache {
 #define MAX_MESH_DEVICE_CACHE (MAX_MESH_NODES * NUM_DEVICES)
 MeshDeviceCache meshDeviceCache[MAX_MESH_DEVICE_CACHE];
 int meshCacheCount = 0;
+volatile bool pendingMeshRestart = false;
+unsigned long pendingMeshRestartAt = 0;
+String pendingMeshRestartCommand = "";
 unsigned long lastWifiRetry     = 0;  const unsigned long WIFI_RETRY_INTERVAL      = 3000;   // Station reconnect attempts (was: every loop!)
 unsigned long lastLeaderWifiTry = 0;  const unsigned long LEADER_WIFI_RETRY_INTERVAL = 30000; // Leader home-Wi-Fi probes (non-blocking begin)
+unsigned long lastHomeWifiBegin = 0;
+unsigned long homeWifiAttemptStartedAt = 0;
+bool homeWifiAttemptInProgress = false;
+const unsigned long HOME_WIFI_ATTEMPT_TIMEOUT = 12000;
+const unsigned long HOME_WIFI_BEGIN_GUARD = 15000;
 unsigned long lastRoleEval      = 0;  const unsigned long ROLE_EVAL_INTERVAL       = 5000;   // Role decision cadence
 unsigned long lastMemberJoin    = 0;  const unsigned long MESH_JOIN_INTERVAL       = 25000;  // Member -> leader announce
 unsigned long lastHomeWifiProbe = 0;  const unsigned long HOME_WIFI_PROBE_INTERVAL = 60000;  // Member checks if home Wi-Fi returned
 unsigned long leaderUptimeMillis = 0;
+String deviceGatewayHost = "";
+uint16_t deviceGatewayPort = 443;
+String deviceGatewayPath = "";
+String deviceGatewayHeaders = "";
+bool deviceGatewayTls = true;
+volatile bool deviceGatewayConnected = false;
+unsigned long lastDeviceGatewayDiscovery = 0;
+const unsigned long DEVICE_GATEWAY_DISCOVERY_INTERVAL = 300000;
+const unsigned long DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL = 1000;
+const unsigned long DEVICE_GATEWAY_CONNECTED_RECONNECT_INTERVAL = 5000;
 void setRelay(int index, bool on, bool saveToNVS = true);
 bool updateDeviceInDB(int index, bool state);
 bool updateFeedbackInDB(int index, bool feedback);
@@ -196,6 +251,7 @@ bool tryJoinMeshLeader();
 void becomeLeader();
 void becomeMember();
 bool isHomeWifiConnected();
+void maintainMdns();
 String getSelfIp();
 int findMeshNode(const String& nodeId);
 bool meshNodeActive(const String& nodeId);
@@ -209,6 +265,14 @@ void saveOfflineQueue();
 void cloudSyncTask(void* parameter);
 void cloudPollTask(void* parameter);
 void configureHttp(HTTPClient& http, uint16_t connectTimeout = 2500, uint16_t requestTimeout = 4000);
+bool isDeviceGatewayConfigured();
+bool fetchDeviceGatewayUrl(String& backendUrl);
+bool parseDeviceGatewayUrl(const String& backendUrl, String& host, uint16_t& port, bool& tls);
+void handleDeviceGatewayEvent(WStype_t type, uint8_t* payload, size_t length);
+void handleDeviceGatewayMessage(uint8_t* payload, size_t length);
+bool applyDeviceGatewayCommand(const String& topic, const String& payload);
+void startDeviceGateway(const String& backendUrl);
+void deviceGatewayTask(void* parameter);
 bool isCloudConfigured();
 bool isDirectCloudConfigured();
 bool isDeviceAgentConfigured();
@@ -218,31 +282,62 @@ void applyDeviceSnapshot(JsonDocument& response, bool applyRelayStates);
 void applyAlarmSnapshot(JsonDocument& response);
 void applyScheduleSnapshot(JsonDocument& response);
 void loadHomeWifiCredentials();
+void beginHomeWifiConnection(const char* reason = nullptr);
+void diagnoseHomeWifiFailure();
 void applyPendingWifiConfiguration();
 bool sendDeviceHeartbeat();
 bool pollRemoteCommands();
-bool pollRemoteConfiguration(bool forceFetch = false);
-bool applyRemoteWifiConfiguration(const String& ssid, const String& security, const String& password, uint32_t configVersion);
+bool postDeviceCommandResult(const String& commandId, const String& status, const String& message);
+bool pollRemoteConfiguration(bool forceFetch = false, const String& commandId = "");
+bool applyRemoteWifiConfiguration(const String& ssid, const String& security, const String& password, uint32_t configVersion, const String& commandId = "");
 void logResetReason();
 void deviceAgentTask(void* parameter);
 bool deviceAgentPost(const String& payload, DynamicJsonDocument& response);
 bool reportDeviceConfigStatus(int version, const String& status, const String& error = "");
-bool acknowledgeDeviceCommand(const String& commandId, const String& status, const String& error = "");
+bool acknowledgeDeviceCommand(const String& commandId, const String& status, const String& error = "", const String& targetBoardIdentifier = "");
 bool applyRemoteWifiConfiguration(JsonObject configuration);
+bool decryptDeviceConfigEnvelope(JsonObject envelope, DynamicJsonDocument& configOut);
+String meshRestartSignature(const String& commandId, const String& targetBoardIdentifier);
+bool meshRestartSignatureMatches(const String& supplied, const String& expected);
+bool meshRestartQueued(const String& commandId);
+bool meshRestartForwarded(const String& commandId);
+bool markMeshRestartForwarded(const String& commandId);
+bool storePendingMeshRestart(const String& commandId, const String& targetBoardIdentifier, uint32_t expiresAtEpoch);
+bool setPendingMeshRestartAccepted(const String& commandId);
+bool removePendingMeshRestart(const String& commandId);
+void processPendingMeshRestartAcks();
+bool forwardMeshRestart(const String& commandId, const String& targetBoardIdentifier, uint32_t expiresAtEpoch = 0);
 void processDeviceAgentResponse(JsonDocument& response);
 bool decryptDeviceConfigEnvelope(JsonObject envelope, DynamicJsonDocument& configOut);
 bool cloudStateSupersedesQueue(const PendingUpdate& queued, const String& cloudChangedAt);
 bool getPendingRelayUpdate(int index, PendingUpdate& result);
 bool discardPendingRelayUpdate(const PendingUpdate& expected);
 bool isHomeWifiConnected() {
-  return homeWifiSSID.length() > 0 && WiFi.status() == WL_CONNECTED &&
-         WiFi.SSID() == homeWifiSSID;
+  const bool connected = homeWifiSSID.length() > 0 && WiFi.status() == WL_CONNECTED &&
+                         WiFi.SSID() == homeWifiSSID;
+  if (connected) homeWifiAttemptInProgress = false;
+  return connected;
+}
+void maintainMdns() {
+  const bool shouldAdvertise = isHomeWifiConnected();
+  if (shouldAdvertise && !mdnsActive) {
+    if (MDNS.begin("home-automation")) {
+      MDNS.addService("http", "tcp", 80);
+      mdnsActive = true;
+      Serial.println("-> Local discovery active at http://home-automation.local");
+    } else {
+      Serial.println("WARNING: mDNS startup failed; use the ESP32 local IP from the serial log.");
+    }
+  } else if (!shouldAdvertise && mdnsActive) {
+    MDNS.end();
+    mdnsActive = false;
+  }
 }
 bool isDirectCloudConfigured() {
   return strlen(SUPABASE_BASE) > 0 && strlen(SUPABASE_SERVICE_KEY) > 0;
 }
 bool isDeviceAgentConfigured() {
-  return strlen(DEVICE_AGENT_URL) > 0 && strlen(DEVICE_TOKEN) >= 32 &&
+  return strlen(DEVICE_AGENT_URL) > 0 && deviceAuthToken.length() >= 32 &&
          String(BOARD_IDENTIFIER) != "esp32-unconfigured";
 }
 bool isCloudConfigured() {
@@ -257,30 +352,145 @@ void logResetReason() {
     Serial.println("!! Brownout reset detected. Check the external 5V supply, relay current, wiring, and decoupling.");
   }
 }
+void configureTaskWatchdogForTls() {
+  // CA-validated TLS can spend several seconds in mbedTLS elliptic-curve
+  // arithmetic without yielding. Keep the watchdog as a safety net, but give
+  // the cloud worker enough time to finish a bounded HTTPS handshake.
+  esp_task_wdt_config_t config = {};
+  config.timeout_ms = 120000;
+  config.idle_core_mask = 0x3;
+  config.trigger_panic = true;
+  esp_err_t result = esp_task_wdt_reconfigure(&config);
+  if (result == ESP_ERR_INVALID_STATE) result = esp_task_wdt_init(&config);
+  if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) {
+    Serial.printf("WARNING: Could not extend TLS watchdog window (error %d).\n", (int)result);
+  }
+}
 void loadHomeWifiCredentials() {
+  bool loadedFromEnrollmentFirmware = false;
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   homeWifiSSID = preferences.getString("wifi_ssid", "");
   homeWifiPassword = preferences.getString("wifi_pass", "");
-  homeWifiSecurity = preferences.getString("wifi_sec", "");
+  // The security mode is explicit. Never treat an empty passphrase as proof
+  // that the network is open; older boards must be migrated deliberately.
+  homeWifiSecurity = preferences.getString("wifi_sec", "wpa2_psk");
   if (homeWifiSecurity != "open" && homeWifiSecurity != "wpa2_psk") {
-    homeWifiSecurity = homeWifiPassword.length() ? "wpa2_psk" : "open";
+    homeWifiSecurity = "wpa2_psk";
   }
-  deviceConfigVersion = max((uint32_t)1, preferences.getUInt("cfg_ver", 1));
+  const String bakedWifiSSID = String(HOME_WIFI_SSID);
+  const String bakedWifiSecurity = String(HOME_WIFI_SECURITY) == "open" ? "open" : "wpa2_psk";
+  const String wifiSeedToken = preferences.getString("wifi_seed", "");
+  const bool seedBakedWifi = strlen(HOME_WIFI_SSID) > 0 &&
+    (homeWifiSSID.length() == 0 || homeWifiSSID != bakedWifiSSID ||
+     (strlen(HOME_WIFI_SEED) > 0 && wifiSeedToken != String(HOME_WIFI_SEED)));
+  if (seedBakedWifi) {
+    loadedFromEnrollmentFirmware = true;
+    homeWifiSSID = bakedWifiSSID;
+    homeWifiPassword = bakedWifiSecurity == "open" ? "" : String(HOME_WIFI_PASSWORD);
+    homeWifiSecurity = bakedWifiSecurity;
+    preferences.putString("wifi_ssid", homeWifiSSID);
+    preferences.putString("wifi_pass", homeWifiPassword);
+    preferences.putString("wifi_sec", homeWifiSecurity);
+    if (strlen(HOME_WIFI_SEED) > 0) preferences.putString("wifi_seed", String(HOME_WIFI_SEED));
+  }
+  const uint32_t savedConfigVersion = preferences.getUInt("cfg_ver", 1);
+  deviceConfigVersion = savedConfigVersion < 1 ? 1 : savedConfigVersion;
+  // An interrupted configuration attempt must not override active settings.
+  // Staged values are re-fetched from the server after reconnect.
+  preferences.remove("p_ssid");
+  preferences.remove("p_pass");
+  preferences.remove("p_sec");
+  preferences.remove("p_ver");
   deviceAuthToken = preferences.getString("device_token", "");
-  if (deviceAuthToken.length() == 0 && strlen(DEVICE_AUTH_TOKEN) > 0) {
+  if (strlen(DEVICE_TOKEN) > 0 && String(DEVICE_TOKEN) != deviceAuthToken) {
+    // A controlled credential rotation is delivered in replacement firmware.
+    // Reset only the registration marker; the active Wi-Fi cache remains usable.
+    deviceAuthToken = String(DEVICE_TOKEN);
+    preferences.putString("device_token", deviceAuthToken);
+    preferences.putBool("wifi_registered", false);
+    preferences.putBool("device_registered", false);
+    deviceConfigVersion = 1;
+    preferences.putUInt("cfg_ver", deviceConfigVersion);
+  } else if (deviceAuthToken.length() == 0 && strlen(DEVICE_AUTH_TOKEN) > 0) {
     deviceAuthToken = String(DEVICE_AUTH_TOKEN);
     preferences.putString("device_token", deviceAuthToken);
   }
   uint32_t bootCount = preferences.getUInt("boot_count", 0) + 1;
   preferences.putUInt("boot_count", bootCount);
   deviceBootId = String(BOARD_IDENTIFIER) + "-" + String(bootCount);
+
+  // Make an accepted mesh restart survive power loss during the short window
+  // between the signed HTTP acknowledgement and ESP.restart().
+  String savedMeshRestart = preferences.getString("mesh_rst_pending", "");
+  uint32_t requestedOnBoot = preferences.getUInt("mesh_rst_boot", bootCount);
+  if (savedMeshRestart.length() > 0) {
+    if (bootCount > requestedOnBoot) {
+      // A reboot occurred after acceptance; do not reboot again if the leader retries.
+      preferences.remove("mesh_rst_pending");
+      preferences.remove("mesh_rst_boot");
+      pendingMeshRestart = false;
+      pendingMeshRestartCommand = "";
+    } else {
+      pendingMeshRestartCommand = savedMeshRestart;
+      pendingMeshRestartAt = millis();
+      pendingMeshRestart = true;
+    }
+  }
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  if (loadedFromEnrollmentFirmware) {
+    Serial.printf("-> Home Wi-Fi source: generated enrollment firmware (%s)\n", homeWifiSSID.c_str());
+  } else if (homeWifiSSID.length()) {
+    Serial.printf("-> Home Wi-Fi source: saved NVS credentials (%s)\n", homeWifiSSID.c_str());
+  } else {
+    Serial.println("-> Home Wi-Fi source: none");
+  }
   Serial.printf("-> Home Wi-Fi credentials: %s\n",
                 homeWifiSSID.length() ? "saved" : "not configured");
   Serial.printf("-> Device management API: %s\n",
                 deviceAuthToken.length() ? "configured" : "not provisioned (remote management disabled)");
   Serial.printf("-> Supabase cloud sync: %s\n",
                 isCloudConfigured() ? "configured" : "disabled (legacy cloud key not configured)");
+}
+void beginHomeWifiConnection(const char* reason) {
+  if (!homeWifiSSID.length() || isHomeWifiConnected()) return;
+  const unsigned long now = millis();
+  if (homeWifiAttemptInProgress) {
+    if (now - homeWifiAttemptStartedAt < HOME_WIFI_ATTEMPT_TIMEOUT) return;
+    Serial.println("-> Previous home Wi-Fi attempt timed out; releasing the station before retrying.");
+    WiFi.disconnect(false, false);
+    homeWifiAttemptInProgress = false;
+  }
+  if (lastHomeWifiBegin != 0 && now - lastHomeWifiBegin < HOME_WIFI_BEGIN_GUARD) return;
+  if (reason && strlen(reason)) {
+    Serial.printf("-> Home Wi-Fi attempt (%s): %s\n", reason, homeWifiSSID.c_str());
+  }
+  if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str());
+  else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+  lastHomeWifiBegin = now;
+  homeWifiAttemptStartedAt = now;
+  homeWifiAttemptInProgress = true;
+}
+void diagnoseHomeWifiFailure() {
+  if (!homeWifiSSID.length()) return;
+  homeWifiAttemptInProgress = false;
+  const wl_status_t status = WiFi.status();
+  Serial.printf("!! Home Wi-Fi did not connect. status=%d, configured SSID=%s\n",
+                (int)status, homeWifiSSID.c_str());
+  Serial.println("-> Scanning the ESP32-visible 2.4 GHz networks for the configured SSID...");
+  const int count = WiFi.scanNetworks(false, true);
+  bool found = false;
+  for (int i = 0; i < count; ++i) {
+    if (WiFi.SSID(i) != homeWifiSSID) continue;
+    found = true;
+    Serial.printf("-> Configured SSID is visible: RSSI=%d dBm, channel=%d, auth=%d\n",
+                  WiFi.RSSI(i), WiFi.channel(i), (int)WiFi.encryptionType(i));
+  }
+  WiFi.scanDelete();
+  if (!found) {
+    Serial.println("!! Configured SSID is not visible to the ESP32. Use the router's 2.4 GHz SSID; ESP32 does not support a 5 GHz-only network.");
+  } else {
+    Serial.println("!! Configured SSID is visible. Check the WPA2 password/security mode and ensure the router permits 2.4 GHz clients.");
+  }
 }
 String getSelfIp() {
   if (localRole == ROLE_LEADER) return WiFi.softAPIP().toString();
@@ -296,6 +506,244 @@ unsigned long nodeIdHashDelay() {
   const char* p = BOARD_IDENTIFIER;
   while (*p) { h ^= (unsigned char)(*p++); h *= 16777619u; }
   return 1000 + (h % 3000); // 1s - 4s
+}
+bool isDeviceGatewayConfigured() {
+  return strlen(DISCOVERY_SUPABASE_URL) > 0 &&
+         strlen(DISCOVERY_SUPABASE_ANON_KEY) > 0 &&
+         strlen(DEVICE_WS_TOKEN) > 0 &&
+         String(BOARD_IDENTIFIER) != "esp32-unconfigured";
+}
+bool parseDeviceGatewayUrl(const String& backendUrl, String& host, uint16_t& port, bool& tls) {
+  String url = backendUrl;
+  url.trim();
+  tls = false;
+  if (url.startsWith("https://")) {
+    tls = true;
+    url.remove(0, 8);
+    port = 443;
+  } else if (url.startsWith("http://")) {
+    url.remove(0, 7);
+    port = 80;
+  } else {
+    return false;
+  }
+
+  const int pathStart = url.indexOf('/');
+  String authority = pathStart >= 0 ? url.substring(0, pathStart) : url;
+  authority.trim();
+  if (!authority.length()) return false;
+
+  const int colon = authority.lastIndexOf(':');
+  if (colon > 0 && authority.indexOf(']') < 0) {
+    const String portText = authority.substring(colon + 1);
+    for (size_t i = 0; i < portText.length(); ++i) {
+      if (!isDigit(portText[i])) return false;
+    }
+    const int parsedPort = portText.toInt();
+    if (parsedPort < 1 || parsedPort > 65535) return false;
+    port = (uint16_t)parsedPort;
+    authority = authority.substring(0, colon);
+  }
+  host = authority;
+  return host.length() > 0;
+}
+bool fetchDeviceGatewayUrl(String& backendUrl) {
+  backendUrl = "";
+  if (!isDeviceGatewayConfigured() || WiFi.status() != WL_CONNECTED) return false;
+
+  String discoveryBase = String(DISCOVERY_SUPABASE_URL);
+  while (discoveryBase.endsWith("/")) discoveryBase.remove(discoveryBase.length() - 1);
+  String url = discoveryBase + "/rest/v1/" + String(DISCOVERY_TABLE) +
+               "?id=eq.true&select=backend_url&limit=1";
+
+  VikaTechSecureClient secureClient;
+  secureClient.useBuiltinCACertBundle();
+  secureClient.setHandshakeTimeout(8);
+  HTTPClient http;
+  if (!http.begin(secureClient, url)) return false;
+  configureHttp(http, 3500, 6500);
+  http.addHeader("apikey", DISCOVERY_SUPABASE_ANON_KEY);
+  http.addHeader("Authorization", "Bearer " + String(DISCOVERY_SUPABASE_ANON_KEY));
+  http.addHeader("Accept", "application/json");
+  const int code = http.GET();
+  String body = (code >= 200 && code < 300) ? http.getString() : "";
+  http.end();
+  secureClient.stop();
+  if (code < 200 || code >= 300 || !body.length()) return false;
+
+  DynamicJsonDocument response(1536);
+  if (deserializeJson(response, body)) return false;
+  JsonArray rows = response.as<JsonArray>();
+  if (rows.isNull() || rows.size() == 0) return false;
+  const char* discovered = rows[0]["backend_url"] | "";
+  if (!discovered || !strlen(discovered)) return false;
+  String candidate = String(discovered);
+  candidate.trim();
+  String ignoredHost;
+  uint16_t ignoredPort = 0;
+  bool ignoredTls = false;
+  if (!parseDeviceGatewayUrl(candidate, ignoredHost, ignoredPort, ignoredTls)) return false;
+  backendUrl = candidate;
+  return true;
+}
+void startDeviceGateway(const String& backendUrl) {
+  String host;
+  uint16_t port = 443;
+  bool tls = true;
+  if (!parseDeviceGatewayUrl(backendUrl, host, port, tls)) return;
+
+  if (deviceWebSocket.isConnected()) deviceWebSocket.disconnect();
+  deviceGatewayHost = host;
+  deviceGatewayPort = port;
+  deviceGatewayTls = tls;
+  deviceGatewayPath = String(DEVICE_WS_PATH) + "?board=" + String(BOARD_IDENTIFIER);
+  // WebSocketsClient appends the final CRLF itself. Do not include a trailing
+  // CRLF here or the HTTP upgrade ends before the library's User-Agent header.
+  deviceGatewayHeaders = String("X-Device-Token: ") + String(DEVICE_WS_TOKEN);
+  deviceWebSocket.setExtraHeaders(deviceGatewayHeaders.c_str());
+  // Retry quickly while the gateway is unavailable. Once connected, the
+  // normal 5-second interval is restored for any later disconnect.
+  deviceWebSocket.setReconnectInterval(DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL);
+  // The backend sends JSON heartbeat messages. The library heartbeat is not
+  // used because overlapping heartbeat/send frames can corrupt JSON gateways.
+  deviceWebSocket.disableHeartbeat();
+  if (deviceGatewayTls) {
+    // The backend uses Cloudflare's public certificate. beginSSL() is the
+    // Links2004/arduinoWebSockets API used by its known-good ESP32 example.
+    deviceWebSocket.beginSSL(deviceGatewayHost.c_str(), deviceGatewayPort,
+                             deviceGatewayPath.c_str(), "", "arduino");
+  } else {
+    deviceWebSocket.begin(deviceGatewayHost.c_str(), deviceGatewayPort,
+                          deviceGatewayPath.c_str(), "arduino");
+  }
+  Serial.printf("-> Device gateway starting: %s://%s:%u%s\n",
+                deviceGatewayTls ? "wss" : "ws", deviceGatewayHost.c_str(),
+                deviceGatewayPort, deviceGatewayPath.c_str());
+}
+bool applyDeviceGatewayCommand(const String& topic, const String& payload) {
+  const String prefix = String("home/") + BOARD_IDENTIFIER + "/device/";
+  const String suffix = "/set";
+  if (!topic.startsWith(prefix) || !topic.endsWith(suffix)) return false;
+
+  const String relayText = topic.substring(prefix.length(), topic.length() - suffix.length());
+  if (!relayText.length()) return false;
+  for (size_t i = 0; i < relayText.length(); i++) {
+    if (!isDigit(relayText[i])) return false;
+  }
+  const int relayIndex = relayText.toInt();
+  if (relayIndex < 0 || relayIndex >= NUM_DEVICES) {
+    Serial.printf("!! WSS command rejected: invalid relay index %d\n", relayIndex);
+    return false;
+  }
+
+  DynamicJsonDocument doc(768);
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error || !doc["state"].is<bool>()) {
+    Serial.println("!! WSS command rejected: invalid JSON/state payload");
+    return false;
+  }
+  const bool targetState = doc["state"].as<bool>();
+  const String commandId = doc["command_id"].as<String>();
+  Serial.printf("<< WSS command | relay=%d | state=%s | id=%s\n",
+                relayIndex, targetState ? "ON" : "OFF", commandId.c_str());
+  bool currentState;
+  if (relayMutex) xSemaphoreTake(relayMutex, portMAX_DELAY);
+  currentState = isRelayOn[relayIndex];
+  if (relayMutex) xSemaphoreGive(relayMutex);
+  if (currentState == targetState) {
+    Serial.printf("-> WSS command already applied | relay=%d\n", relayIndex);
+    return true;
+  }
+  // Mirror the local REST path: queue the state so the cloud worker converges
+  // even when a retained MQTT command arrives after a reconnect.
+  enqueueOfflineUpdate(relayIndex, targetState, false);
+  setRelay(relayIndex, targetState);
+  Serial.printf("-> WSS command applied | relay=%d | state=%s\n",
+                relayIndex, targetState ? "ON" : "OFF");
+  return true;
+}
+void handleDeviceGatewayMessage(uint8_t* payload, size_t length) {
+  DynamicJsonDocument message(4096);
+  if (deserializeJson(message, payload, length)) {
+    Serial.println("!! WSS message rejected: invalid JSON");
+    return;
+  }
+  const String type = message["type"].as<String>();
+  if (type == "heartbeat") {
+    String pong = "{\"type\":\"pong\"}";
+    if (!deviceWebSocket.sendTXT(pong)) Serial.println("!! WSS pong send failed");
+    return;
+  }
+  if (type != "mqtt") return;
+  const String topic = message["topic"].as<String>();
+  const String commandPayload = message["payload"].as<String>();
+  applyDeviceGatewayCommand(topic, commandPayload);
+}
+void handleDeviceGatewayEvent(WStype_t type, uint8_t* payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED:
+      deviceGatewayConnected = true;
+      deviceWebSocket.setReconnectInterval(DEVICE_GATEWAY_CONNECTED_RECONNECT_INTERVAL);
+      Serial.printf("-> WSS device gateway connected: %s\n", deviceWebSocket.getUrl().c_str());
+      break;
+    case WStype_DISCONNECTED:
+      deviceGatewayConnected = false;
+      deviceWebSocket.setReconnectInterval(DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL);
+      // A Quick Tunnel hostname may change when the tunnel restarts. Refresh
+      // discovery immediately instead of retrying the stale hostname for 5m.
+      lastDeviceGatewayDiscovery = millis() - DEVICE_GATEWAY_DISCOVERY_INTERVAL;
+      Serial.println("-> WSS device gateway disconnected; reconnecting.");
+      break;
+    case WStype_TEXT:
+      handleDeviceGatewayMessage(payload, length);
+      break;
+    case WStype_ERROR:
+      deviceGatewayConnected = false;
+      deviceWebSocket.setReconnectInterval(DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL);
+      lastDeviceGatewayDiscovery = millis() - DEVICE_GATEWAY_DISCOVERY_INTERVAL;
+      Serial.println("!! WSS device gateway error.");
+      break;
+    default:
+      break;
+  }
+}
+void deviceGatewayTask(void* parameter) {
+  (void)parameter;
+  bool ntpRequested = false;
+  for (;;) {
+    if (!isDeviceGatewayConfigured() || !isHomeWifiConnected()) {
+      if (deviceGatewayConnected) deviceWebSocket.disconnect();
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+    if (time(nullptr) < 100000) {
+      if (!ntpRequested) {
+        configTime(0, 0, "pool.ntp.org", "time.google.com");
+        ntpRequested = true;
+      }
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+
+    const bool discoveryDue = deviceGatewayHost.length() == 0 ||
+      millis() - lastDeviceGatewayDiscovery >= DEVICE_GATEWAY_DISCOVERY_INTERVAL;
+    if (discoveryDue) {
+      lastDeviceGatewayDiscovery = millis();
+      String discoveredUrl;
+      if (fetchDeviceGatewayUrl(discoveredUrl)) {
+        String discoveredHost;
+        uint16_t discoveredPort = 443;
+        bool discoveredTls = true;
+        parseDeviceGatewayUrl(discoveredUrl, discoveredHost, discoveredPort, discoveredTls);
+        if (discoveredHost != deviceGatewayHost || discoveredPort != deviceGatewayPort ||
+            discoveredTls != deviceGatewayTls || !deviceGatewayPath.length()) {
+          startDeviceGateway(discoveredUrl);
+        }
+      }
+    }
+    if (deviceGatewayHost.length()) deviceWebSocket.loop();
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
 }
 void setRelay(int index, bool on, bool saveToNVS) {
   if (index < 0 || index >= NUM_DEVICES) return;
@@ -410,6 +858,247 @@ void handleToggleAllMesh(bool on) {
   String out = "{\"success\":true,\"action\":\"all_" + String(on ? "on" : "off") + "\",\"membersReached\":" + String(reached) + "}";
   server.send(200, "application/json", out);
 }
+String meshRestartSignature(const String& commandId, const String& targetBoardIdentifier) {
+  if (strlen(MESH_PASS) < 8 || commandId.length() == 0 || targetBoardIdentifier.length() == 0) return "";
+  const String message = commandId + "|" + targetBoardIdentifier;
+  const mbedtls_md_info_t* mdInfo = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  if (!mdInfo) return "";
+  unsigned char digest[32];
+  if (mbedtls_md_hmac(mdInfo,
+      reinterpret_cast<const unsigned char*>(MESH_PASS), strlen(MESH_PASS),
+      reinterpret_cast<const unsigned char*>(message.c_str()), message.length(), digest) != 0) return "";
+  char hexDigest[65];
+  for (size_t i = 0; i < sizeof(digest); ++i) sprintf(hexDigest + (i * 2), "%02x", digest[i]);
+  hexDigest[64] = '\0';
+  return String(hexDigest);
+}
+
+bool meshRestartSignatureMatches(const String& supplied, const String& expected) {
+  if (supplied.length() != 64 || expected.length() != 64) return false;
+  unsigned char diff = 0;
+  for (size_t i = 0; i < 64; ++i) diff |= static_cast<unsigned char>(supplied[i] ^ expected[i]);
+  return diff == 0;
+}
+
+String readPendingMeshRestartQueue() {
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  String value = preferences.getString("mesh_rst_q", "[]");
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  return value;
+}
+
+bool meshRestartQueued(const String& commandId) {
+  DynamicJsonDocument doc(2048);
+  if (deserializeJson(doc, readPendingMeshRestartQueue()) || !doc.is<JsonArray>()) return false;
+  for (JsonObject item : doc.as<JsonArray>()) {
+    if (String(item["id"] | "") == commandId) return true;
+  }
+  return false;
+}
+
+bool meshRestartForwarded(const String& commandId) {
+  DynamicJsonDocument doc(2048);
+  if (deserializeJson(doc, readPendingMeshRestartQueue()) || !doc.is<JsonArray>()) return false;
+  for (JsonObject item : doc.as<JsonArray>()) {
+    if (String(item["id"] | "") == commandId) return item["forwarded"] | false;
+  }
+  return false;
+}
+
+bool markMeshRestartForwarded(const String& commandId) {
+  DynamicJsonDocument doc(2048);
+  if (deserializeJson(doc, readPendingMeshRestartQueue()) || !doc.is<JsonArray>()) return false;
+  bool found = false;
+  for (JsonObject item : doc.as<JsonArray>()) {
+    if (String(item["id"] | "") == commandId) {
+      item["forwarded"] = true;
+      found = true;
+    }
+  }
+  if (!found) return false;
+  String serialized;
+  if (serializeJson(doc, serialized) == 0) return false;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  size_t written = preferences.putString("mesh_rst_q", serialized);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  return written > 0;
+}
+
+bool storePendingMeshRestart(const String& commandId, const String& targetBoardIdentifier, uint32_t expiresAtEpoch) {
+  DynamicJsonDocument doc(2048);
+  String raw = readPendingMeshRestartQueue();
+  if (deserializeJson(doc, raw) || !doc.is<JsonArray>()) {
+    doc.clear();
+    doc.to<JsonArray>();
+  }
+  JsonArray rows = doc.as<JsonArray>();
+  for (JsonObject item : rows) {
+    if (String(item["id"] | "") == commandId) return true;
+  }
+  if (rows.size() >= MAX_MESH_NODES) return false;
+  JsonObject item = rows.createNestedObject();
+  item["id"] = commandId;
+  item["target_board_identifier"] = targetBoardIdentifier;
+  item["forwarded"] = false;
+  item["accepted_acknowledged"] = false;
+  item["expires_at_epoch"] = expiresAtEpoch;
+  String serialized;
+  if (serializeJson(doc, serialized) == 0) return false;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  size_t written = preferences.putString("mesh_rst_q", serialized);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  return written > 0;
+}
+
+bool setPendingMeshRestartAccepted(const String& commandId) {
+  DynamicJsonDocument doc(2048);
+  if (deserializeJson(doc, readPendingMeshRestartQueue()) || !doc.is<JsonArray>()) return false;
+  bool found = false;
+  for (JsonObject item : doc.as<JsonArray>()) {
+    if (String(item["id"] | "") == commandId) {
+      item["accepted_acknowledged"] = true;
+      found = true;
+    }
+  }
+  if (!found) return false;
+  String serialized;
+  if (serializeJson(doc, serialized) == 0) return false;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  size_t written = preferences.putString("mesh_rst_q", serialized);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  return written > 0;
+}
+
+bool removePendingMeshRestart(const String& commandId) {
+  DynamicJsonDocument source(2048);
+  if (deserializeJson(source, readPendingMeshRestartQueue()) || !source.is<JsonArray>()) return false;
+  DynamicJsonDocument next(2048);
+  JsonArray remaining = next.to<JsonArray>();
+  bool removed = false;
+  for (JsonObject item : source.as<JsonArray>()) {
+    if (String(item["id"] | "") == commandId) { removed = true; continue; }
+    JsonObject copy = remaining.createNestedObject();
+    copy.set(item);
+  }
+  if (!removed) return true;
+  String serialized;
+  if (serializeJson(next, serialized) == 0) return false;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  size_t written = preferences.putString("mesh_rst_q", serialized);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+  return written > 0;
+}
+
+void processPendingMeshRestartAcks() {
+  DynamicJsonDocument doc(2048);
+  if (deserializeJson(doc, readPendingMeshRestartQueue()) || !doc.is<JsonArray>()) return;
+  struct PendingMeshItem { String id; String target; uint32_t expiresAtEpoch; bool forwarded; bool accepted; };
+  PendingMeshItem pending[MAX_MESH_NODES];
+  int count = 0;
+  for (JsonObject item : doc.as<JsonArray>()) {
+    if (count >= MAX_MESH_NODES) break;
+    pending[count].id = item["id"] | "";
+    pending[count].target = item["target_board_identifier"] | "";
+    pending[count].expiresAtEpoch = item["expires_at_epoch"] | 0;
+    pending[count].forwarded = item["forwarded"] | false;
+    pending[count].accepted = item["accepted_acknowledged"] | false;
+    if (pending[count].id.length() && pending[count].target.length()) count++;
+  }
+  const time_t nowEpoch = time(nullptr);
+  for (int i = 0; i < count; ++i) {
+    if (pending[i].expiresAtEpoch > 0 && nowEpoch > 100000 &&
+        static_cast<uint32_t>(nowEpoch) >= pending[i].expiresAtEpoch) {
+      Serial.println("-> Removing expired mesh restart from the durable queue: " + pending[i].id);
+      removePendingMeshRestart(pending[i].id);
+      continue;
+    }
+    if (!pending[i].forwarded) {
+      // A power cut may have happened after persisting but before dispatch.
+      // Try delivery again only for an entry not confirmed by the member.
+      forwardMeshRestart(pending[i].id, pending[i].target, pending[i].expiresAtEpoch);
+      continue;
+    }
+    if (!pending[i].accepted) {
+      if (acknowledgeDeviceCommand(pending[i].id, "accepted",
+            "Restart request was accepted by the authenticated mesh member.",
+            pending[i].target)) {
+        setPendingMeshRestartAccepted(pending[i].id);
+        pending[i].accepted = true;
+      }
+    }
+    // The forwarder marks the node inactive at acceptance. It becomes active
+    // again only after the member sends a fresh join/report after reboot.
+    if (pending[i].accepted && meshNodeActive(pending[i].target)) {
+      if (acknowledgeDeviceCommand(pending[i].id, "completed",
+            "The selected mesh member rejoined after its restart.",
+            pending[i].target)) {
+        removePendingMeshRestart(pending[i].id);
+        Serial.println("-> Mesh member restart completed: " + pending[i].target);
+      }
+    }
+  }
+}
+
+bool forwardMeshRestart(const String& commandId, const String& targetBoardIdentifier, uint32_t expiresAtEpoch) {
+  if (!commandId.length() || !targetBoardIdentifier.length() ||
+      targetBoardIdentifier == String(BOARD_IDENTIFIER) || localRole != ROLE_LEADER) return false;
+  const bool alreadyQueued = meshRestartQueued(commandId);
+  if (alreadyQueued && meshRestartForwarded(commandId)) return true;
+
+  const int slot = findMeshNode(targetBoardIdentifier);
+  if (slot < 0 || millis() - meshNodes[slot].lastSeen > 45000) return false;
+  if (!alreadyQueued && !storePendingMeshRestart(commandId, targetBoardIdentifier, expiresAtEpoch)) {
+    Serial.println("-> Could not persist mesh restart state; refusing to restart member.");
+    return false;
+  }
+
+  DynamicJsonDocument requestDoc(512);
+  requestDoc["command_id"] = commandId;
+  requestDoc["board_identifier"] = targetBoardIdentifier;
+  requestDoc["signature"] = meshRestartSignature(commandId, targetBoardIdentifier);
+  String payload;
+  serializeJson(requestDoc, payload);
+
+  HTTPClient http;
+  http.begin("http://" + meshNodes[slot].ip + "/api/mesh/restart");
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(1800);
+  const int code = http.POST(payload);
+  const String responseBody = code >= 200 && code < 300 ? http.getString() : "";
+  http.end();
+
+  DynamicJsonDocument result(256);
+  const bool accepted = (code == 202 || code == 200) &&
+    !deserializeJson(result, responseBody) && (result["success"] | false);
+  if (!accepted) {
+    removePendingMeshRestart(commandId);
+    Serial.printf("-> Mesh restart forward failed for %s (HTTP %d).\\n",
+                  targetBoardIdentifier.c_str(), code);
+    return false;
+  }
+
+  // Record successful HTTP acceptance before the cloud acknowledgement. If the
+  // gateway reboots now, it must not reissue a new restart to this member.
+  if (!markMeshRestartForwarded(commandId)) {
+    Serial.println("-> Member accepted the restart, but delivery state could not be persisted; duplicate-safe retry will continue.");
+  }
+
+  // Mark inactive before making the cloud acknowledgement call, so a member
+  // rejoin during that HTTPS call cannot be mistaken for pre-restart presence.
+  const int currentSlot = findMeshNode(targetBoardIdentifier);
+  if (currentSlot >= 0) {
+    meshNodes[currentSlot].active = false;
+    if (meshNodeCount > 0) meshNodeCount--;
+  }
+  if (acknowledgeDeviceCommand(commandId, "accepted",
+        "Restart request was forwarded to the exact mesh member.",
+        targetBoardIdentifier)) {
+    setPendingMeshRestartAccepted(commandId);
+  }
+  Serial.println("-> Signed restart command forwarded to mesh member " + targetBoardIdentifier);
+  return true;
+}
+
 void setupWebServer() {
   server.onNotFound([]() {
     if (server.method() == HTTP_OPTIONS) {
@@ -418,6 +1107,11 @@ void setupWebServer() {
     } else {
       server.send(404, "text/plain", "Not Found");
     }
+  });
+  server.on("/", HTTP_GET, []() {
+    handleCORS();
+    server.send(200, "application/json",
+      "{\"service\":\"VikaTech ESP32\",\"status\":\"ok\",\"setup\":\"managed from the admin panel\"}");
   });
   server.on("/api/status", HTTP_GET, []() {
     handleCORS();
@@ -526,6 +1220,69 @@ void setupWebServer() {
     }
     server.send(200, "application/json", "{\"success\":true}");
   });
+
+  server.on("/api/mesh/restart", HTTP_POST, []() {
+    handleCORS();
+    if (localRole != ROLE_MEMBER) {
+      server.send(409, "application/json", "{\"success\":false,\"error\":\"Target is not a mesh member\"}");
+      return;
+    }
+    DynamicJsonDocument req(512);
+    if (!server.hasArg("plain") || deserializeJson(req, server.arg("plain"))) {
+      server.send(400, "application/json", "{\"success\":false,\"error\":\"Invalid restart payload\"}");
+      return;
+    }
+    const String commandId = req["command_id"] | "";
+    const String targetBoardIdentifier = req["board_identifier"] | "";
+    const String suppliedSignature = req["signature"] | "";
+    bool validCommandId = commandId.length() == 36;
+    for (int i = 0; i < 36 && validCommandId; ++i) {
+      const char ch = commandId[i];
+      const bool dashPosition = (i == 8 || i == 13 || i == 18 || i == 23);
+      const bool isHex = (ch >= '0' && ch <= '9') ||
+        (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
+      if (dashPosition ? ch != '-' : !isHex) validCommandId = false;
+    }
+    if (!validCommandId || targetBoardIdentifier != String(BOARD_IDENTIFIER)) {
+      server.send(403, "application/json", "{\"success\":false,\"error\":\"Command target does not match this board\"}");
+      return;
+    }
+    const String expectedSignature = meshRestartSignature(commandId, targetBoardIdentifier);
+    if (!meshRestartSignatureMatches(suppliedSignature, expectedSignature)) {
+      server.send(401, "application/json", "{\"success\":false,\"error\":\"Invalid mesh command signature\"}");
+      return;
+    }
+
+    String lastCommand;
+    String pendingCommand;
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    lastCommand = preferences.getString("mesh_rst_last", "");
+    pendingCommand = preferences.getString("mesh_rst_pending", "");
+    if (pendingCommand == commandId) {
+      // The same accepted request is still queued in this boot; resume execution.
+      pendingMeshRestartCommand = commandId;
+      pendingMeshRestartAt = millis();
+      pendingMeshRestart = true;
+      if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+      server.send(202, "application/json", "{\"success\":true,\"duplicate\":true,\"pending\":true}");
+      return;
+    }
+    if (lastCommand == commandId) {
+      if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+      server.send(202, "application/json", "{\"success\":true,\"duplicate\":true}");
+      return;
+    }
+    const uint32_t currentBoot = preferences.getUInt("boot_count", 0);
+    preferences.putString("mesh_rst_last", commandId);
+    preferences.putString("mesh_rst_pending", commandId);
+    preferences.putUInt("mesh_rst_boot", currentBoot);
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+
+    pendingMeshRestartCommand = commandId;
+    pendingMeshRestartAt = millis();
+    pendingMeshRestart = true;
+    server.send(202, "application/json", "{\"success\":true,\"accepted\":true}");
+  });
   server.on("/api/mesh/nodes", HTTP_GET, []() {
     handleCORS();
     DynamicJsonDocument doc(1024);
@@ -547,77 +1304,6 @@ void setupWebServer() {
     String res;
     serializeJson(arr, res);
     server.send(200, "application/json", res);
-  });
-  server.on("/setup", HTTP_GET, []() {
-    handleCORS();
-    const char* setupPage = R"rawliteral(
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VikaTech Device Setup</title>
-<style>
-:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#090d12;color:#eef4f8}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:18px;background:radial-gradient(circle at top,#143529 0,#090d12 56%)}
-main{width:min(100%,520px);border:1px solid #293843;border-radius:24px;padding:24px;background:#111920;box-shadow:0 24px 70px #0008}
-.brand{color:#45d483;font-size:11px;font-weight:900;letter-spacing:.2em;text-transform:uppercase}
-h1{font-size:26px;line-height:1.15;margin:10px 0}p{color:#aebcc6;font-size:13px;line-height:1.6}
-label{display:block;margin-top:16px;font-size:12px;font-weight:800}input,select{width:100%;min-height:48px;margin-top:7px;border-radius:12px;border:1px solid #34434e;background:#0a1016;color:#f8fafc;padding:0 13px;font:inherit;font-size:14px;outline:none}
-input:focus,select:focus{border-color:#43d483}.passwordRow{display:flex;gap:8px}.passwordRow input{flex:1;min-width:0}.passwordRow button{margin-top:7px;border-radius:12px;border:1px solid #34434e;background:#17242c;color:#fff;padding:0 12px}
-button.submit{width:100%;min-height:50px;margin-top:22px;border:0;border-radius:13px;background:#38cd79;color:#06130b;font-size:13px;font-weight:900}
-.message{margin-top:16px;padding:12px;border:1px solid #34434e;border-radius:12px;font-size:12px;line-height:1.6;overflow-wrap:anywhere}.good{border-color:#238754;color:#9ff2bd}.bad{border-color:#ac4747;color:#ffb6b6}.muted{font-size:11px}
-</style></head><body><main><div class="brand">VikaTech · Device Commissioning</div><h1>Connect this ESP32 to home Wi-Fi</h1>
-<p>This setup page is served by the device locally. The SSID is required. Select Open Network only when the router has no password.</p>
-<form id="wifiForm">
-<label for="ssid">Wi-Fi name (SSID) *</label><input id="ssid" name="ssid" maxlength="32" required autocomplete="off" placeholder="Enter the router or hotspot name">
-<label for="security">Wi-Fi security *</label><select id="security" name="security"><option value="wpa2_psk">WPA2-PSK · Password protected</option><option value="open">None · Open network</option></select>
-<div id="passwordWrap"><label for="password">Wi-Fi password *</label><div class="passwordRow"><input id="password" name="password" type="password" minlength="8" maxlength="63" autocomplete="new-password" placeholder="8–63 characters"><button type="button" id="showPassword">Show</button></div></div>
-<button class="submit" id="submit" type="submit">Save and connect</button></form>
-<div id="message" class="message" role="status">Connect your phone to the VikaTech ESP32 setup network, then open <b>http://192.168.4.1/setup</b>.</div>
-<p class="muted">Your router password is sent only to this local ESP32 setup endpoint. After the device connects, future changes can be managed securely from the VikaTech Admin Panel.</p>
-<script>
-const form=document.getElementById('wifiForm'),security=document.getElementById('security'),password=document.getElementById('password'),wrap=document.getElementById('passwordWrap'),message=document.getElementById('message'),submit=document.getElementById('submit');
-function updateSecurity(){const open=security.value==='open';wrap.hidden=open;password.required=!open;if(open)password.value=''}
-security.addEventListener('change',updateSecurity);updateSecurity();
-document.getElementById('showPassword').addEventListener('click',()=>{password.type=password.type==='password'?'text':'password';document.getElementById('showPassword').textContent=password.type==='password'?'Show':'Hide'});
-async function checkConnection(){try{const r=await fetch('/api/status',{cache:'no-store'});const d=await r.json();if(d.stationConnected){message.className='message good';message.textContent='Connected to home Wi-Fi. You can now return to the Admin Panel and refresh the hardware list.';submit.disabled=false;submit.textContent='Save and connect';return true}}catch(e){}return false}
-form.addEventListener('submit',async(event)=>{event.preventDefault();message.className='message';message.textContent='Saving settings on the ESP32 and starting Wi-Fi connection…';submit.disabled=true;submit.textContent='Connecting…';
-try{const response=await fetch('/api/wifi/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:document.getElementById('ssid').value,security:security.value,password:security.value==='open'?'':password.value})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not save Wi-Fi configuration');message.textContent='Settings saved. Checking the actual Wi-Fi connection…';let n=0;const timer=setInterval(async()=>{n++;if(await checkConnection()){clearInterval(timer);return}if(n>=20){clearInterval(timer);message.className='message bad';message.textContent='The ESP32 has not confirmed a home Wi-Fi connection yet. Keep this page open and check the SSID/password, then retry. Previously saved settings remain available for recovery.';submit.disabled=false;submit.textContent='Retry connection'}},1500)}catch(error){message.className='message bad';message.textContent=error.message||'Setup failed';submit.disabled=false;submit.textContent='Retry connection'}});
-</script></main></body></html>
-)rawliteral";
-    server.send(200, "text/html; charset=utf-8", setupPage);
-  });
-  server.on("/api/wifi/config", HTTP_POST, []() {
-    handleCORS();
-    if (!server.hasArg("plain")) {
-      server.send(400, "application/json", "{\"success\":false,\"error\":\"Missing request body\"}");
-      return;
-    }
-    DynamicJsonDocument req(512);
-    DeserializationError err = deserializeJson(req, server.arg("plain"));
-    if (err || !req["ssid"].is<const char*>()) {
-      server.send(400, "application/json", "{\"success\":false,\"error\":\"Invalid Wi-Fi configuration\"}");
-      return;
-    }
-    String newSSID = req["ssid"].as<String>();
-    String newPassword = req["password"] | "";
-    String newSecurity = req["security"] | (newPassword.length() ? "wpa2_psk" : "open");
-    newSSID.trim();
-    if (newSSID.length() == 0 || newSSID.length() > 32 ||
-        (newSecurity != "open" && newSecurity != "wpa2_psk") ||
-        (newSecurity == "wpa2_psk" && (newPassword.length() < 8 || newPassword.length() > 63)) ||
-        (newSecurity == "open" && newPassword.length() != 0)) {
-      server.send(400, "application/json",
-        "{\"success\":false,\"error\":\"SSID, security mode, or password is invalid\"}");
-      return;
-    }
-    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
-    homeWifiSSID = newSSID;
-    homeWifiPassword = newPassword;
-    homeWifiSecurity = newSecurity;
-    preferences.putString("wifi_ssid", homeWifiSSID);
-    preferences.putString("wifi_pass", homeWifiPassword);
-    preferences.putString("wifi_sec", homeWifiSecurity);
-    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-    wifiConfigPending = true;
-    server.send(200, "application/json",
-      "{\"success\":true,\"message\":\"Wi-Fi saved. Connecting in background; local control remains available.\"}");
   });
   server.begin();
   Serial.println("-> Local IP REST API enabled on Port 80 (no web dashboard).");
@@ -701,6 +1387,7 @@ void pruneStaleMeshNodes() {
   }
 }
 bool tryJoinMeshLeader() {
+  if (strlen(MESH_SSID) == 0 || strlen(MESH_PASS) < 8) return false;
   Serial.println("-> Scanning for existing mesh leader...");
   int n = WiFi.scanNetworks();
   bool found = false;
@@ -732,6 +1419,11 @@ bool tryJoinMeshLeader() {
   return true;
 }
 void becomeLeader() {
+  if (strlen(MESH_SSID) == 0 || strlen(MESH_PASS) < 8) {
+    localRole = ROLE_IDLE;
+    Serial.println("-> Mesh is not provisioned; refusing to start a default or open AP.");
+    return;
+  }
   if (localRole != ROLE_LEADER) {
     Serial.println("==> ROLE: LEADER (broadcasting " + String(MESH_SSID) + ")");
   }
@@ -752,7 +1444,7 @@ void becomeLeader() {
   Serial.print("-> SoftAP active. IP: ");
   Serial.println(WiFi.softAPIP());
   if (homeWifiSSID.length() > 0) {
-    if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str()); else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+    beginHomeWifiConnection("leader AP");
     lastLeaderWifiTry = millis();
     Serial.println("-> Attempting home Wi-Fi in background; local AP remains enabled.");
   }
@@ -1023,11 +1715,15 @@ bool flushOfflineQueue() {
 void setup() {
   Serial.begin(115200);
   delay(500);
+  configureTaskWatchdogForTls();
   logResetReason();
   Serial.println("\n===========================================");
   Serial.println("  ESP32 Dual-Plane Mesh Node (4 Devices)");
   Serial.println("===========================================");
-  setCpuFrequencyMhz(160);
+  // CA-validated HTTPS handshakes are CPU-heavy on the ESP32. Keep the
+  // standard 240 MHz clock so the device-agent task can finish TLS work
+  // without starving the task watchdog.
+  setCpuFrequencyMhz(240);
   preferencesMutex = xSemaphoreCreateMutex();
   offlineQueueMutex = xSemaphoreCreateMutex();
   relayMutex = xSemaphoreCreateMutex();
@@ -1060,15 +1756,14 @@ void setup() {
   WiFi.setAutoReconnect(true);     // let the stack handle clean drops silently
   WiFi.mode(WIFI_STA);
   WiFi.setTxPower(WIFI_POWER_15dBm);
+  deviceWebSocket.onEvent(handleDeviceGatewayEvent);
   if (homeWifiSSID.length() > 0) {
     Serial.print("-> Connecting to Home Wi-Fi: ");
     Serial.println(homeWifiSSID);
-    if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str());
-    else wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+    beginHomeWifiConnection("boot");
 
     unsigned long wifiStart = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 8000) {
-      if (homeWifiSecurity != "open") wifiMulti.run();
       delay(250);
     }
     if (WiFi.status() == WL_CONNECTED) {
@@ -1076,11 +1771,13 @@ void setup() {
       Serial.println(WiFi.localIP());
     } else {
       Serial.println("-> Home Wi-Fi unavailable; local AP will start.");
+      diagnoseHomeWifiFailure();
     }
   } else {
     Serial.println("-> No Home Wi-Fi credentials configured; skipping STA scans.");
   }
   setupWebServer();
+  maintainMdns();
   if (!isHomeWifiConnected()) {
     Serial.println("-> Home Wi-Fi unavailable at boot. Starting local mode...");
     lastRoleEval = millis() - ROLE_EVAL_INTERVAL;
@@ -1115,7 +1812,7 @@ void setup() {
     }
   }
 
-  if (strlen(DEVICE_AGENT_URL) > 0 && strlen(DEVICE_TOKEN) >= 32) {
+  if (isDeviceAgentConfigured()) {
     BaseType_t agentTaskCreated = xTaskCreatePinnedToCore(
       deviceAgentTask,
       "device_agent",
@@ -1132,6 +1829,25 @@ void setup() {
     }
   } else {
     Serial.println("-> Device agent not provisioned; remote config/restart unavailable until enrollment firmware is flashed.");
+  }
+
+  if (isDeviceGatewayConfigured()) {
+    BaseType_t gatewayTaskCreated = xTaskCreatePinnedToCore(
+      deviceGatewayTask,
+      "device_gateway",
+      12288,
+      nullptr,
+      1,
+      &deviceGatewayTaskHandle,
+      0
+    );
+    if (gatewayTaskCreated != pdPASS) {
+      Serial.println("ERROR: WSS device gateway task failed to start; remote relay control is disabled.");
+    } else {
+      Serial.println("-> WSS device gateway task started; MQTT credentials are not used on the ESP32.");
+    }
+  } else {
+    Serial.println("-> WSS device gateway not provisioned; discovery/token settings are missing.");
   }
   Serial.println("===========================================\n");
 }
@@ -1150,6 +1866,11 @@ void applyPendingWifiConfiguration() {
 }
 void loop() {
   server.handleClient();
+  maintainMdns();
+  if (pendingMeshRestart && millis() - pendingMeshRestartAt >= 650) {
+    Serial.println("-> Signed remote mesh restart executing now.");
+    ESP.restart();
+  }
   if (!remoteWifiUpdateInProgress) applyPendingWifiConfiguration();
   for (int i = 0; i < NUM_DEVICES; i++) {
     bool currentRead = digitalRead(INPUT_PINS[i]);
@@ -1172,9 +1893,9 @@ void loop() {
                         ",\"feedback_on\":" + String(isSwitchOn ? "true" : "false") + "}";
           http.POST(body);
           http.end();
-        }
-        enqueueOfflineUpdate(i, isSwitchOn, true);
-      }
+         }
+         enqueueOfflineUpdate(i, isSwitchOn, true);
+       }
     }
     lastInputRead[i] = currentRead;
   }
@@ -1185,12 +1906,12 @@ void loop() {
           millis() - lastLeaderWifiTry >= LEADER_WIFI_RETRY_INTERVAL) {
         lastLeaderWifiTry = millis();
         Serial.println("-> Retrying home Wi-Fi while preserving local AP...");
-        if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str()); else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
+        beginHomeWifiConnection("leader retry");
       }
     } else if (localRole == ROLE_IDLE && homeWifiSSID.length() > 0 &&
                millis() - lastWifiRetry >= WIFI_RETRY_INTERVAL) {
       lastWifiRetry = millis();
-      wifiMulti.run();
+      beginHomeWifiConnection("retry");
     }
   }
   if (millis() - lastSerialDumpTime >= SERIAL_DUMP_INTERVAL) {
@@ -1612,7 +2333,7 @@ bool logActivityInDB(int index, bool state, const String& triggeredBy) {
   Serial.printf("Activity log insert failed for device %d (HTTP %d).\\n", index, code);
   return false;
 }
-bool applyRemoteWifiConfiguration(const String& ssid, const String& security, const String& password, uint32_t configVersion) {
+bool applyRemoteWifiConfiguration(const String& ssid, const String& security, const String& password, uint32_t configVersion, const String& commandId) {
   if (ssid.length() == 0 || ssid.length() > 32 ||
       (security != "open" && security != "wpa2_psk") ||
       (security == "wpa2_psk" && (password.length() < 8 || password.length() > 63)) ||
@@ -1622,6 +2343,9 @@ bool applyRemoteWifiConfiguration(const String& ssid, const String& security, co
   }
 
   if (ssid == homeWifiSSID && security == homeWifiSecurity && password == homeWifiPassword) {
+    if (commandId.length()) {
+      postDeviceCommandResult(commandId, "accepted", "Wi-Fi settings already match; confirming the current connection and cache.");
+    }
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     deviceConfigVersion = configVersion;
     preferences.putUInt("cfg_ver", deviceConfigVersion);
@@ -1642,7 +2366,8 @@ bool applyRemoteWifiConfiguration(const String& ssid, const String& security, co
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
 
   Serial.println("-> Testing staged Wi-Fi configuration before committing it.");
-  WiFi.begin(ssid.c_str(), password.c_str());
+    if (security == "open") WiFi.begin(ssid.c_str());
+    else WiFi.begin(ssid.c_str(), password.c_str());
   const unsigned long start = millis();
   while (millis() - start < 15000) {
     if (WiFi.status() == WL_CONNECTED && WiFi.SSID() == ssid) break;
@@ -1650,6 +2375,9 @@ bool applyRemoteWifiConfiguration(const String& ssid, const String& security, co
   }
 
   if (WiFi.status() == WL_CONNECTED && WiFi.SSID() == ssid) {
+    if (commandId.length()) {
+      postDeviceCommandResult(commandId, "accepted", "The ESP32 connected to the requested Wi-Fi network; saving the verified configuration.");
+    }
     homeWifiSSID = ssid;
     homeWifiPassword = password;
     homeWifiSecurity = security;
@@ -1664,8 +2392,6 @@ bool applyRemoteWifiConfiguration(const String& ssid, const String& security, co
     preferences.remove("p_sec");
     preferences.remove("p_ver");
     if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-    wifiMulti.APlistClean();
-    wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
     wifiConfigPending = false;
     lastDeviceError = "";
     Serial.println("-> New Wi-Fi connection verified; configuration committed.");
@@ -1688,13 +2414,11 @@ bool applyRemoteWifiConfiguration(const String& ssid, const String& security, co
   preferences.remove("p_sec");
   preferences.remove("p_ver");
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-  wifiMulti.APlistClean();
-  if (homeWifiSSID.length()) wifiMulti.addAP(homeWifiSSID.c_str(), homeWifiPassword.c_str());
   lastDeviceError = "New Wi-Fi connection failed; previous configuration retained";
   return false;
 }
 
-bool pollRemoteConfiguration(bool forceFetch) {
+bool pollRemoteConfiguration(bool forceFetch, const String& commandId) {
   if (!deviceAuthToken.length() || !isHomeWifiConnected()) return false;
   HTTPClient http;
   String url = String(DEVICE_API_BASE) + "/api/esp32/config?version=" + String(deviceConfigVersion);
@@ -1720,7 +2444,7 @@ bool pollRemoteConfiguration(bool forceFetch) {
   String password = cfg["wifiPassword"] | "";
   uint32_t version = cfg["configVersion"] | 0;
   if (version <= deviceConfigVersion) return true;
-  const bool applied = applyRemoteWifiConfiguration(ssid, security, password, version);
+  const bool applied = applyRemoteWifiConfiguration(ssid, security, password, version, commandId);
   if (!applied) Serial.println("-> Remote Wi-Fi config retained as pending; previous network remains configured.");
   return applied;
 }
@@ -1818,8 +2542,9 @@ bool pollRemoteCommands() {
     JsonObject payload = command["payload"].as<JsonObject>();
     const uint32_t requestedVersion = payload["config_version"] | 0;
     bool applied = false;
+    postDeviceCommandResult(commandId, "accepted", "Configuration command received by the selected ESP32. Checking the new Wi-Fi settings.");
     if (requestedVersion > currentVersion) {
-      applied = pollRemoteConfiguration(true);
+      applied = pollRemoteConfiguration(true, commandId);
     } else {
       applied = true; // Already applied: idempotently finish a redelivered command.
     }
@@ -1860,17 +2585,28 @@ void sendHeartbeat() {
 }
 bool deviceAgentPost(const String& payload, DynamicJsonDocument& response) {
   if (WiFi.status() != WL_CONNECTED || strlen(DEVICE_AGENT_URL) == 0 ||
-      strlen(DEVICE_TOKEN) < 32 || String(BOARD_IDENTIFIER) == "esp32-unconfigured") return false;
+      deviceAuthToken.length() < 32 || String(BOARD_IDENTIFIER) == "esp32-unconfigured") return false;
+
+  // CA validation rejects certificates while the ESP32 clock is still near
+  // the Unix epoch. The device-agent task starts NTP independently, but the
+  // cloud worker can reach this function first; wait for a valid clock rather
+  // than producing a misleading HTTP -1/TLS failure.
+  static unsigned long lastNtpWaitLog = 0;
+  if (time(nullptr) < 100000) {
+    if (millis() - lastNtpWaitLog >= 30000) {
+      lastNtpWaitLog = millis();
+      Serial.println("-> Device-agent HTTPS waiting for NTP time before certificate verification.");
+      configTime(0, 0, "pool.ntp.org", "time.google.com");
+    }
+    return false;
+  }
 
   // Never use HTTPClient.begin(url) without a CA: Arduino-ESP32's convenience
   // overload can create an insecure TLS client. Require the core's trusted CA bundle.
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-  WiFiClientSecure secureClient;
-  if (strlen(DEVICE_AGENT_ROOT_CA) < 100) {
-    Serial.println("Device-agent TLS root CA bundle is missing; refusing insecure HTTPS.");
-    return false;
-  }
-  secureClient.setCACert(DEVICE_AGENT_ROOT_CA);
+  VikaTechSecureClient secureClient;
+  secureClient.useBuiltinCACertBundle();
+  secureClient.setHandshakeTimeout(8);
   HTTPClient http;
   if (!http.begin(secureClient, String(DEVICE_AGENT_URL))) {
     Serial.println("Device-agent HTTPS setup failed.");
@@ -1878,14 +2614,20 @@ bool deviceAgentPost(const String& payload, DynamicJsonDocument& response) {
   }
   configureHttp(http, 3500, 6500);
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("Authorization", "Bearer " + String(DEVICE_TOKEN));
+  http.addHeader("Authorization", "Bearer " + deviceAuthToken);
   int code = http.POST(payload);
   String body = (code >= 200 && code < 300) ? http.getString() : "";
+  char transportError[160] = {0};
+  const int transportErrorCode = code < 0
+    ? secureClient.lastError(transportError, sizeof(transportError))
+    : 0;
   http.end();
   secureClient.stop();
 
   if (code < 200 || code >= 300) {
-    Serial.printf("Device-agent HTTPS request failed (HTTP %d).\n", code);
+    Serial.printf("Device-agent HTTPS request failed (HTTP %d, transport %d: %s).\n",
+                  code, transportErrorCode,
+                  transportError[0] ? transportError : "no transport detail");
     return false;
   }
   DeserializationError err = deserializeJson(response, body);
@@ -1932,14 +2674,18 @@ bool reportDeviceConfigStatus(int version, const String& status, const String& e
   return reported;
 }
 
-bool acknowledgeDeviceCommand(const String& commandId, const String& status, const String& error) {
+bool acknowledgeDeviceCommand(const String& commandId, const String& status, const String& error, const String& targetBoardIdentifier) {
   if (!commandId.length()) return false;
-  DynamicJsonDocument requestDoc(512);
+  DynamicJsonDocument requestDoc(768);
   requestDoc["action"] = "ack";
   requestDoc["board_identifier"] = BOARD_IDENTIFIER;
   requestDoc["command_id"] = commandId;
   requestDoc["status"] = status;
-  if (error.length()) requestDoc["error"] = error;
+  if (error.length()) {
+    requestDoc["error"] = error;
+    requestDoc["message"] = error;
+  }
+  if (targetBoardIdentifier.length()) requestDoc["target_board_identifier"] = targetBoardIdentifier;
   String payload;
   serializeJson(requestDoc, payload);
   DynamicJsonDocument response(512);
@@ -2023,7 +2769,7 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
       oldSSID.length() && WiFi.status() == WL_CONNECTED && WiFi.SSID() == oldSSID;
     const String failureMessage = oldNetworkRestored
       ? "New Wi-Fi failed; previous network restored."
-      : "New Wi-Fi failed and the previous network could not be restored; local setup recovery may be required.";
+      : "New Wi-Fi failed and the previous network could not be restored; manual re-enrollment may be required.";
 
     // reportDeviceConfigStatus stores the failure in NVS before attempting the
     // HTTPS report. If rollback also failed, this marker survives until the
@@ -2080,7 +2826,7 @@ bool decryptDeviceConfigEnvelope(JsonObject envelope, DynamicJsonDocument& confi
   const String ivText = envelope["iv"] | "";
   const String ciphertextText = envelope["ciphertext"] | "";
   if (version == 0 || ivText.length() == 0 || ciphertextText.length() == 0 ||
-      strlen(DEVICE_TOKEN) < 32 || String(BOARD_IDENTIFIER) == "esp32-unconfigured") {
+      deviceAuthToken.length() < 32 || String(BOARD_IDENTIFIER) == "esp32-unconfigured") {
     Serial.println("Device-agent configuration envelope is incomplete.");
     return false;
   }
@@ -2093,23 +2839,26 @@ bool decryptDeviceConfigEnvelope(JsonObject envelope, DynamicJsonDocument& confi
       !decodeBase64Url(ciphertextText, ciphertextAndTag, sizeof(ciphertextAndTag), ciphertextAndTagLength) ||
       ciphertextAndTagLength <= 16) {
     Serial.println("Device-agent configuration envelope has invalid Base64 framing.");
+    memset(ciphertextAndTag, 0, sizeof(ciphertextAndTag));
     return false;
   }
 
-  // Must match device-config-crypto.mjs exactly. Board ID and version are
-  // authenticated as GCM additional data to prevent cross-board/replay swaps.
-  String keyMaterial = "vikatech-device-config-v1:" + String(DEVICE_TOKEN);
+  // Must match supabase/functions/_shared/device-config-crypto.mjs exactly.
+  // The authenticated additional data prevents cross-board and cross-version swaps.
+  String keyMaterial = "vikatech-device-config-v1:" + deviceAuthToken;
   uint8_t key[32] = {0};
   const mbedtls_md_info_t* digest = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
   if (!digest || mbedtls_md(digest,
       reinterpret_cast<const unsigned char*>(keyMaterial.c_str()),
       keyMaterial.length(), key) != 0) {
-    Serial.println("Could not derive the device configuration decryption key.");
     memset(key, 0, sizeof(key));
+    memset(ciphertextAndTag, 0, sizeof(ciphertextAndTag));
+    Serial.println("Could not derive the device configuration decryption key.");
     return false;
   }
 
-  String additionalData = "VikaTech-ESP32-Config-v1|" + String(BOARD_IDENTIFIER) + "|" + String(version);
+  const String additionalData = "VikaTech-ESP32-Config-v1|" +
+      String(BOARD_IDENTIFIER) + "|" + String(version);
   const size_t ciphertextLength = ciphertextAndTagLength - 16;
   const unsigned char* tag = ciphertextAndTag + ciphertextLength;
   uint8_t plaintext[2048] = {0};
@@ -2139,8 +2888,8 @@ bool decryptDeviceConfigEnvelope(JsonObject envelope, DynamicJsonDocument& confi
   }
 
   configOut.clear();
-  const DeserializationError parseError = deserializeJson(configOut,
-      reinterpret_cast<const char*>(plaintext), ciphertextLength);
+  const DeserializationError parseError = deserializeJson(
+    configOut, reinterpret_cast<const char*>(plaintext), ciphertextLength);
   memset(plaintext, 0, sizeof(plaintext));
   memset(ciphertextAndTag, 0, sizeof(ciphertextAndTag));
   if (parseError || (uint32_t)(configOut["version"] | 0) != version) {
@@ -2177,10 +2926,16 @@ void processDeviceAgentResponse(JsonDocument& response) {
   applyScheduleSnapshot(response);
   // A restart requested before the previous reboot is acknowledged only after boot.
   String pendingRestart = "";
+  String completedRestartId = "";
+  String lastRestartId = "";
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   pendingRestart = preferences.getString("pending_restart", "");
+  lastRestartId = preferences.getString("last_restart_cmd", "");
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   if (pendingRestart.length() && acknowledgeDeviceCommand(pendingRestart, "completed")) {
+    // The snapshot was read before the acknowledgement, so it may still carry
+    // this command. Do not execute the just-completed restart a second time.
+    completedRestartId = pendingRestart;
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     preferences.remove("pending_restart");
     if (preferencesMutex) xSemaphoreGive(preferencesMutex);
@@ -2188,6 +2943,9 @@ void processDeviceAgentResponse(JsonDocument& response) {
     pendingRestart = "";
   }
 
+  // The agent returns decrypted pending settings in `configuration`. The
+  // `config` object is intentionally metadata-only and never contains a Wi-Fi
+  // passphrase or device credential.
   JsonObject envelope = response["configuration_envelope"].as<JsonObject>();
   if (!envelope.isNull()) {
     const uint32_t envelopeVersion = envelope["config_version"] | 0;
@@ -2196,7 +2954,7 @@ void processDeviceAgentResponse(JsonDocument& response) {
       applyRemoteWifiConfiguration(decryptedConfig.as<JsonObject>());
     } else if (envelopeVersion > 0) {
       reportDeviceConfigStatus(envelopeVersion, "failed",
-        "The device could not authenticate/decrypt the configuration envelope. Check firmware version and the device credential.");
+        "The device could not authenticate/decrypt the configuration envelope. Check firmware and device credential.");
     }
   }
 
@@ -2211,18 +2969,27 @@ void processDeviceAgentResponse(JsonDocument& response) {
     reportDeviceConfigStatus(serverConfigVersion, "applied", "");
   }
 
+  if (localRole == ROLE_LEADER) processPendingMeshRestartAcks();
+
   JsonArray commands = response["commands"].as<JsonArray>();
   for (JsonObject command : commands) {
     String commandId = command["id"] | "";
     String type = command["command_type"] | "";
     String targetBoard = command["board_identifier"] | "";
-    // Fail closed if a gateway ever receives a command for another mesh node.
-    // Cross-board forwarding is not implemented in this firmware path.
-    if (targetBoard.length() == 0 || targetBoard != String(BOARD_IDENTIFIER)) {
-      Serial.println("-> Ignoring remote command without an exact board identity match.");
+    if (targetBoard.length() == 0 || commandId.length() == 0 || type != "restart") {
+      Serial.println("-> Ignoring malformed remote command.");
       continue;
     }
-    if (type != "restart" || commandId.length() == 0 || commandId == pendingRestart) continue;
+    if (targetBoard != String(BOARD_IDENTIFIER)) {
+      if (localRole == ROLE_LEADER) {
+        const uint32_t expiresAtEpoch = command["expires_at_epoch"] | 0;
+        forwardMeshRestart(commandId, targetBoard, expiresAtEpoch);
+      } else {
+        Serial.println("-> Ignoring command addressed to another mesh board.");
+      }
+      continue;
+    }
+    if (commandId == pendingRestart || commandId == completedRestartId || commandId == lastRestartId) continue;
 
     Serial.println("-> Remote restart command received; confirming before reboot.");
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
@@ -2236,6 +3003,9 @@ void processDeviceAgentResponse(JsonDocument& response) {
       Serial.println("Remote restart acknowledgement failed; command will be retried.");
       continue;
     }
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    preferences.putString("last_restart_cmd", commandId);
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
     delay(350);
     ESP.restart();
     return;
@@ -2256,9 +3026,9 @@ bool requestDeviceAgentSnapshot(DynamicJsonDocument& response) {
   requestDoc["action"] = "poll";
   requestDoc["board_identifier"] = BOARD_IDENTIFIER;
 
-  // One-time bootstrap: let the server cache the network already used by this
-  // ESP32. The device-agent encrypts the passphrase before storing it. Never
-  // include this field again after the server confirms registration.
+  // The first authenticated poll may include the current passphrase so the
+  // server can register an existing installation. Later polls include only
+  // non-secret network and boot metadata.
   bool wifiRegistered = false;
   int appliedVersion = 0;
   String currentWifiSSID;
@@ -2271,12 +3041,15 @@ bool requestDeviceAgentSnapshot(DynamicJsonDocument& response) {
   currentWifiPassword = homeWifiPassword;
   currentWifiSecurity = homeWifiSecurity;
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-  if (!wifiRegistered && currentWifiSSID.length()) {
+  if (currentWifiSSID.length()) {
     requestDoc["current_wifi_ssid"] = currentWifiSSID;
     requestDoc["current_wifi_security"] = currentWifiSecurity;
-    if (currentWifiSecurity == "wpa2_psk") requestDoc["current_wifi_password"] = currentWifiPassword;
+    if (!wifiRegistered && currentWifiSecurity == "wpa2_psk") requestDoc["current_wifi_password"] = currentWifiPassword;
   }
   requestDoc["applied_config_version"] = appliedVersion;
+  requestDoc["boot_id"] = deviceBootId;
+  requestDoc["uptime_ms"] = millis();
+  requestDoc["ip"] = WiFi.localIP().toString();
   requestDoc["mesh_gateway"] = localRole == ROLE_LEADER;
 
   if (localRole == ROLE_LEADER) {
@@ -2471,7 +3244,7 @@ void deviceAgentTask(void* parameter) {
   bool deviceAgentNtpRequested = false;
   for (;;) {
     if (WiFi.status() != WL_CONNECTED || String(BOARD_IDENTIFIER) == "esp32-unconfigured" ||
-        strlen(DEVICE_AGENT_URL) == 0 || strlen(DEVICE_TOKEN) < 32) {
+        !isDeviceAgentConfigured()) {
       vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
     }
@@ -2507,9 +3280,9 @@ void cloudSyncTask(void* parameter) {
   unsigned long lastCloudHeartbeat = 0;
   unsigned long nextQueueAttempt = 0;
   unsigned long queueRetryDelay = 2000;
-  unsigned long lastDeviceHeartbeatAttempt = 0;
-  unsigned long lastDeviceCommandPoll = 0;
-  unsigned long lastDeviceConfigPoll = 0;
+  unsigned long lastDeviceHeartbeatAttempt = millis() - 15000;
+  unsigned long lastDeviceCommandPoll = millis() - 5000;
+  unsigned long lastDeviceConfigPoll = millis() - 30000;
   loadScheduleCache();
   for (;;) {
     runLocalSchedules();

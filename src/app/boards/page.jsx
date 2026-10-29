@@ -338,11 +338,12 @@ export default function BoardsPage() {
             className="max-h-[82vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl backdrop-blur-xl animate-fade-up max-md:w-full max-md:max-h-[85vh] max-md:rounded-t-[24px] max-md:rounded-b-none max-md:border-t max-md:border-x-0 max-md:border-b-0 max-md:pb-10 max-md:animate-slide-up max-md:shadow-none flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Drag Handle for Mobile */}
-            <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto mb-5 shrink-0 active:cursor-grabbing" />
-            <h2 className="mb-[18px] text-lg font-extrabold text-text">
-              Add Board
-            </h2>
+            <div data-sheet-drag-zone="1" className="shrink-0 touch-none">
+              <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto mb-5 shrink-0 active:cursor-grabbing" />
+              <h2 className="mb-[18px] text-lg font-extrabold text-text">
+                Add Board
+              </h2>
+            </div>
             <form onSubmit={addBoard} className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-extrabold tracking-wide text-text-muted">

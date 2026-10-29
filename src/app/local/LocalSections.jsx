@@ -28,13 +28,13 @@ export function Guidance() {
         [
           "1",
           "Join device Wi-Fi",
-          "Connect to the HOME-AUTO-LEADER network.",
+          "If the board is not on your router yet, connect to its setup network shown on the device setup page.",
           Radio,
         ],
         [
           "2",
           "Return to VikaTech",
-          "Keep your device connected to that network.",
+          "For router mode, keep your phone or computer on the same home Wi-Fi as the ESP32.",
           ShieldCheck,
         ],
         [
@@ -101,16 +101,6 @@ export function ConnectionSection({
                 ? "Local control is ready."
                 : "Connect to the HOME-AUTO-LEADER Wi-Fi network to control devices locally."}
           </p>
-          {state === "connected" && localUrl && (
-            <a
-              href={localUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-2 inline-block break-all text-sm font-bold text-(--accent) underline underline-offset-4"
-            >
-              Open ESP32 at {localUrl}
-            </a>
-          )}
           <div className="mt-3">
             <StatusBadge state={state}>
               {state === "checking"
