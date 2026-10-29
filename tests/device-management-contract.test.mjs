@@ -53,6 +53,7 @@ test("Admin hardware cards open a dedicated tracker for the exact queued restart
   const restartApi = await read("src/app/api/admin/devices/[boardId]/restart/route.js");
   assert.match(fleet, /router\.push\(/);
   assert.match(fleet, /\/restart\?commandId=/);
+  assert.match(fleet, /\/update/);
   assert.match(fleet, /deliveryMode/);
   assert.match(tracker, /requestedCommandId/);
   assert.match(tracker, /commandId/);
