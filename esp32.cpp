@@ -2901,6 +2901,11 @@ void processDeviceAgentResponse(JsonDocument& response) {
 
   // The device-agent returns an AES-GCM envelope bound to this board and
   // configuration version. Authenticate/decrypt it before applying any secret.
+  int localConfigVersionForEnvelope = 0;
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  localConfigVersionForEnvelope = preferences.getInt("cfg_ver", 0);
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+
   bool configurationEnvelopeFailed = false;
   JsonObject configurationEnvelope = response["configuration_envelope"].as<JsonObject>();
   if (!configurationEnvelope.isNull()) {
@@ -2920,7 +2925,7 @@ void processDeviceAgentResponse(JsonDocument& response) {
       Serial.println("-> Refused Wi-Fi update because its encrypted envelope was invalid.");
     }
   } else if (serverConfigVersion > 0 &&
-             serverConfigVersion > preferences.getInt("cfg_ver", 0) &&
+             serverConfigVersion > localConfigVersionForEnvelope &&
              (response["server_config_status"] == "pending" ||
               response["server_config_status"] == "sending" ||
               response["server_config_status"] == "checking_wifi" ||
