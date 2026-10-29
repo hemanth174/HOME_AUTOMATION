@@ -83,7 +83,6 @@ export async function GET(request, { params }) {
     commandsResult.error,
     runtimeResult.error,
     activitiesResult.error,
-    auditResult.error,
   ].find(Boolean);
   if (failedQuery) {
     const migrationRequired = /device_config_events|device_commands|device_runtime_configs|column .* does not exist|schema cache/i.test(failedQuery.message || '');
@@ -187,6 +186,9 @@ export async function GET(request, { params }) {
       wifiSecurity: runtime.applied_wifi_security || runtime.wifi_security || 'wpa2_psk',
     } : null,
     events: events.slice(0, 250),
+    warnings: auditResult.error
+      ? ['Administrative audit history is unavailable; command, configuration, and relay events are still shown.']
+      : [],
     fetchedAt: new Date().toISOString(),
   }, { headers: { 'Cache-Control': 'no-store, private' } });
 }
