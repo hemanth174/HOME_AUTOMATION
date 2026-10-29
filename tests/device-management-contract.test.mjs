@@ -82,3 +82,29 @@ test("existing Wi-Fi tracker remains responsive and requires explicit open/WPA2 
   assert.match(configuration, /requiresProvisioning/);
   assert.match(configuration, /status: 409/);
 });
+
+test("Wi-Fi configuration writes use compare-and-set to avoid concurrent admin races", async () => {
+  const configuration = await read("src/app/api/admin/devices/[boardId]/configuration/route.js");
+  assert.match(configuration, /\.eq\('config_version', currentVersion\)/);
+  assert.match(configuration, /\.eq\('user_id', loaded\.board\.user_id\)/);
+  assert.match(configuration, /\.is\('revoked_at', null\)/);
+  assert.match(configuration, /CONFIGURATION_CHANGED/);
+  assert.match(configuration, /\.maybeSingle\(\)/);
+});
+
+test("device-agent config expiry and delivery claims are version-guarded", async () => {
+  const edge = await read("supabase/functions/device-agent/index.ts");
+  assert.match(edge, /config_version=eq\." \+ encodeURIComponent\(String\(currentVersion\)\)/);
+  assert.match(edge, /config_update_status=in\.\(pending,sending,checking_wifi,applying\)/);
+  assert.match(edge, /config_update_status=eq\.pending&revoked_at=is\.null/);
+  assert.match(edge, /configuration_changed_during_expiry_check/);
+  assert.match(edge, /configuration_changed_during_delivery_claim/);
+});
+
+test("late configuration acknowledgements cannot overwrite a newer or terminal status", async () => {
+  const edge = await read("supabase/functions/device-agent/index.ts");
+  assert.match(edge, /config_update_status=eq\." \+ encodeURIComponent\(currentStatus\)/);
+  assert.match(edge, /configuration_status_changed_during_ack/);
+  assert.match(edge, /terminal_status_won_race/);
+});
+
