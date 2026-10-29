@@ -143,6 +143,9 @@ export async function POST(request, { params }) {
   }
 
   const currentVersion = Number(loaded.config.config_version || 0);
+  if (!Number.isSafeInteger(currentVersion) || currentVersion < 0 || currentVersion >= 2147483647) {
+    return NextResponse.json({ error: 'Configuration version is invalid or has reached its supported limit. Contact VikaTech support.' }, { status: 409 });
+  }
   const nextVersion = currentVersion + 1;
   const now = new Date().toISOString();
   const { data: saved, error } = await auth.admin.from('device_runtime_configs')
@@ -158,9 +161,20 @@ export async function POST(request, { params }) {
       updated_at: now,
     })
     .eq('board_id', boardId)
+    .eq('user_id', loaded.board.user_id)
+    .eq('config_version', currentVersion)
+    .is('revoked_at', null)
     .select('board_id, wifi_ssid, wifi_security, config_version, applied_config_version, config_update_status, config_requested_at')
-    .single();
-  if (error || !saved) return NextResponse.json({ error: error?.message || 'Could not save configuration' }, { status: 500 });
+    .maybeSingle();
+  if (error) {
+    return NextResponse.json({ error: 'Could not save configuration: ' + error.message }, { status: 500 });
+  }
+  if (!saved) {
+    return NextResponse.json({
+      error: 'This device configuration changed during the update, or the device credential was revoked. Refresh the tracker and try again.',
+      code: 'CONFIGURATION_CHANGED',
+    }, { status: 409 });
+  }
 
   await auth.admin.from('device_config_events').insert({
     board_id: boardId,

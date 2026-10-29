@@ -307,6 +307,7 @@ bool setPendingMeshRestartAccepted(const String& commandId);
 bool removePendingMeshRestart(const String& commandId);
 void processPendingMeshRestartAcks();
 bool forwardMeshRestart(const String& commandId, const String& targetBoardIdentifier, uint32_t expiresAtEpoch = 0);
+bool decryptDeviceConfigEnvelope(JsonObject envelope, uint32_t expectedVersion, DynamicJsonDocument& decrypted);
 void processDeviceAgentResponse(JsonDocument& response);
 bool decryptDeviceConfigEnvelope(JsonObject envelope, DynamicJsonDocument& configOut);
 bool cloudStateSupersedesQueue(const PendingUpdate& queued, const String& cloudChangedAt);
@@ -684,7 +685,7 @@ void handleDeviceGatewayEvent(WStype_t type, uint8_t* payload, size_t length) {
     case WStype_CONNECTED:
       deviceGatewayConnected = true;
       deviceWebSocket.setReconnectInterval(DEVICE_GATEWAY_CONNECTED_RECONNECT_INTERVAL);
-      Serial.printf("-> WSS device gateway connected: %s\n", deviceWebSocket.getUrl().c_str());
+      Serial.println("-> WSS device gateway connected.");
       break;
     case WStype_DISCONNECTED:
       deviceGatewayConnected = false;
@@ -2910,6 +2911,7 @@ void processDeviceAgentResponse(JsonDocument& response) {
   failedMessage = preferences.getString("failed_cfg_msg", "The ESP32 could not apply the Wi-Fi configuration.");
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   const int serverConfigVersion = response["server_config_version"] | 0;
+  const String serverConfigStatus = response["server_config_status"] | "";
   if (failedVersion > 0 && serverConfigVersion > failedVersion) {
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     preferences.remove("failed_cfg_ver");
@@ -2962,8 +2964,8 @@ void processDeviceAgentResponse(JsonDocument& response) {
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   cachedConfigVersion = preferences.getInt("cfg_ver", 0);
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-  const String serverConfigStatus = response["server_config_status"] | "";
-  if (serverConfigVersion > 0 && cachedConfigVersion == serverConfigVersion &&
+  if (!configurationEnvelopeFailed && serverConfigVersion > 0 &&
+      cachedConfigVersion == serverConfigVersion &&
       (serverConfigStatus == "pending" || serverConfigStatus == "sending" ||
        serverConfigStatus == "checking_wifi" || serverConfigStatus == "applying")) {
     reportDeviceConfigStatus(serverConfigVersion, "applied", "");

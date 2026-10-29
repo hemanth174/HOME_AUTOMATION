@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import {
   Activity, AlertCircle, CheckCircle2, CircleHelp, Clock3, Cpu, Download, ExternalLink,
@@ -20,6 +21,7 @@ function ago(value) {
 }
 
 export default function DeviceFleet() {
+  const router = useRouter();
   const [accessToken, setAccessToken] = useState("");
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -178,8 +180,13 @@ export default function DeviceFleet() {
         [device.id]: { commandId: data.command.id, status: data.command.status, polling: true, startedAt: Date.now(), timedOut: false, error: "" },
       }));
       setNotice(data.deliveryMode === "mesh_gateway"
-        ? "Restart queued through the mesh leader. Waiting for the selected member to reboot and rejoin."
-        : "Restart queued. Waiting for the ESP32 to acknowledge and reconnect.");
+        ? "Restart queued through the mesh leader. Opening the selected member's live restart tracker."
+        : "Restart queued. Opening the live restart tracker.");
+      router.push(
+        "/admin/devices/" + encodeURIComponent(device.id) + "/restart?commandId=" +
+        encodeURIComponent(data.command.id) + "&deliveryMode=" +
+        encodeURIComponent(data.deliveryMode || "direct")
+      );
     } catch (error) {
       setNotice(error.message || "Could not queue restart");
     } finally {
@@ -228,8 +235,16 @@ export default function DeviceFleet() {
   };
 
   const openWifiEditor = (device, mode) => {
-    if (mode === "update" && !device.config.directOnline) {
-      setNotice("Connect to this board directly before changing its Wi-Fi settings.");
+    if (mode === "update") {
+      if (!device.provisioned) {
+        setNotice("Prepare and flash enrollment firmware before updating Wi-Fi remotely.");
+        return;
+      }
+      if (!device.config.directOnline) {
+        setNotice("Connect to this board directly before changing its Wi-Fi settings.");
+        return;
+      }
+      router.push("/admin/devices/" + encodeURIComponent(device.id) + "/update");
       return;
     }
     setWifiEditor({ deviceId: device.id, mode });
