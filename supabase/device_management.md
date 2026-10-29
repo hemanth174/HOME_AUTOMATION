@@ -27,6 +27,8 @@ supabase secrets set PROVISIONING_ENCRYPTION_KEY="PASTE_THE_GENERATED_RANDOM_VAL
 
 Set the same PROVISIONING_ENCRYPTION_KEY in the Vercel project server environment and redeploy Vercel. Never prefix this secret with NEXT_PUBLIC_.
 
+The latest `supabase/functions/device-agent/index.ts` imports `supabase/functions/_shared/device-config-crypto.mjs`. Deploy the whole function with that shared file present; do not copy only `index.ts` into the Supabase Dashboard editor. The repository test command is `npm run test:device-management`. A GitHub Actions workflow runs those contract tests and compiles `esp32.cpp` against Arduino-ESP32 core 3.1.0.
+
 ## First-time board enrollment
 
 1. In VikaTech, open Admin Panel → Hardware.
@@ -40,8 +42,10 @@ After that one-time flash and enrollment, supported Wi-Fi configuration updates 
 
 ## Remote Wi-Fi configuration
 
-- The password is encrypted server-side using AES-256-GCM before storage in device_runtime_configs.encrypted_wifi_password.
-- The device-agent uses the matching server-only encryption key to decrypt the value in memory and transmits the configuration over CA-validated HTTPS.
+- The Wi-Fi password is encrypted at rest with AES-256-GCM before storage in `device_runtime_configs.encrypted_wifi_password`. The Edge Function decrypts it only in memory.
+- Before a configuration payload leaves the Edge Function, it is encrypted again with AES-256-GCM using a key derived from the unique device token. The authenticated additional data binds the envelope to the board identifier and config version. Only that board's matching token can decrypt it.
+- The encrypted envelope is transmitted over CA-validated HTTPS. TLS remains required; application-level encryption is an additional safeguard, not a replacement for transport security.
+- The ESP32 verifies the GCM authentication tag and board/version binding before parsing or applying the configuration. Authentication failure is reported and the settings are not applied.
 - The ESP32 tests the selected SSID and then attempts a connection before it saves the accepted settings and config_version to NVS.
 - On a failed attempt it tries to reconnect using the last known-good settings and reports a failure when connectivity is restored.
 - Open-network mode is explicit. An empty password does not implicitly change a WPA2 configuration to an open network.
