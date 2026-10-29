@@ -11,6 +11,9 @@
 #include <esp_system.h>
 #include <esp_task_wdt.h>
 #include <mbedtls/md.h>
+#include <mbedtls/base64.h>
+#include <mbedtls/gcm.h>
+#include <vector>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
@@ -256,6 +259,7 @@ bool setPendingMeshRestartAccepted(const String& commandId);
 bool removePendingMeshRestart(const String& commandId);
 void processPendingMeshRestartAcks();
 bool forwardMeshRestart(const String& commandId, const String& targetBoardIdentifier, uint32_t expiresAtEpoch = 0);
+bool decryptDeviceConfigEnvelope(JsonObject envelope, uint32_t expectedVersion, DynamicJsonDocument& decrypted);
 void processDeviceAgentResponse(JsonDocument& response);
 bool cloudStateSupersedesQueue(const PendingUpdate& queued, const String& cloudChangedAt);
 bool getPendingRelayUpdate(int index, PendingUpdate& result);
@@ -2748,6 +2752,110 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
   return true;
 }
 
+bool decodeDeviceBase64Url(const String& value, std::vector<uint8_t>& output) {
+  if (value.length() == 0 || value.length() > 8192) return false;
+  String normalized = value;
+  normalized.replace('-', '+');
+  normalized.replace('_', '/');
+  while ((normalized.length() % 4) != 0) normalized += '=';
+
+  const size_t capacity = (normalized.length() * 3) / 4 + 4;
+  std::vector<uint8_t> decoded(capacity);
+  size_t decodedLength = 0;
+  int result = mbedtls_base64_decode(
+    decoded.data(), decoded.size(), &decodedLength,
+    reinterpret_cast<const unsigned char*>(normalized.c_str()),
+    normalized.length()
+  );
+  if (result != 0 || decodedLength == 0) return false;
+  decoded.resize(decodedLength);
+  output.swap(decoded);
+  return true;
+}
+
+bool decryptDeviceConfigEnvelope(
+  JsonObject envelope,
+  uint32_t expectedVersion,
+  DynamicJsonDocument& decrypted
+) {
+  const String scheme = envelope["scheme"] | "";
+  const int schemaVersion = envelope["schema_version"] | 0;
+  const uint32_t envelopeVersion = envelope["config_version"] | 0;
+  const String ivText = envelope["iv"] | "";
+  const String ciphertextText = envelope["ciphertext"] | "";
+
+  if (scheme != "A256GCM" || schemaVersion != 1 ||
+      expectedVersion == 0 || envelopeVersion != expectedVersion ||
+      String(BOARD_IDENTIFIER) == "esp32-unconfigured" ||
+      deviceAuthToken.length() < 32 || ivText.length() == 0 || ciphertextText.length() == 0) {
+    Serial.println("-> Configuration envelope metadata did not match this board or version.");
+    return false;
+  }
+
+  std::vector<uint8_t> iv;
+  std::vector<uint8_t> ciphertextAndTag;
+  if (!decodeDeviceBase64Url(ivText, iv) ||
+      !decodeDeviceBase64Url(ciphertextText, ciphertextAndTag) ||
+      iv.size() != 12 || ciphertextAndTag.size() <= 16) {
+    Serial.println("-> Configuration envelope encoding is invalid.");
+    return false;
+  }
+
+  // This derivation and AAD must match supabase/functions/_shared/device-config-crypto.mjs.
+  const String keyMaterial = "vikatech-device-config-v1:" + deviceAuthToken;
+  uint8_t key[32] = {0};
+  const mbedtls_md_info_t* sha256 = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  if (!sha256 || mbedtls_md(
+        sha256,
+        reinterpret_cast<const unsigned char*>(keyMaterial.c_str()),
+        keyMaterial.length(),
+        key
+      ) != 0) {
+    Serial.println("-> Could not derive device-specific configuration key.");
+    return false;
+  }
+
+  const String additionalData = "VikaTech-ESP32-Config-v1|" +
+    String(BOARD_IDENTIFIER) + "|" + String(expectedVersion);
+  const size_t tagLength = 16;
+  const size_t ciphertextLength = ciphertextAndTag.size() - tagLength;
+  const uint8_t* tag = ciphertextAndTag.data() + ciphertextLength;
+  std::vector<uint8_t> plaintext(ciphertextLength + 1, 0);
+
+  mbedtls_gcm_context context;
+  mbedtls_gcm_init(&context);
+  int result = mbedtls_gcm_setkey(&context, MBEDTLS_CIPHER_ID_AES, key, 256);
+  if (result == 0) {
+    result = mbedtls_gcm_auth_decrypt(
+      &context,
+      ciphertextLength,
+      iv.data(), iv.size(),
+      reinterpret_cast<const unsigned char*>(additionalData.c_str()),
+      additionalData.length(),
+      tag, tagLength,
+      ciphertextAndTag.data(),
+      plaintext.data()
+    );
+  }
+  mbedtls_gcm_free(&context);
+  memset(key, 0, sizeof(key));
+
+  if (result != 0) {
+    Serial.println("-> Configuration envelope authentication failed; settings were not applied.");
+    return false;
+  }
+
+  plaintext[ciphertextLength] = 0;
+  DeserializationError parseError = deserializeJson(decrypted, plaintext.data(), ciphertextLength);
+  if (parseError || !decrypted.is<JsonObject>() ||
+      (decrypted["version"] | 0) != expectedVersion) {
+    decrypted.clear();
+    Serial.println("-> Decrypted configuration JSON or version is invalid.");
+    return false;
+  }
+  return true;
+}
+
 void processDeviceAgentResponse(JsonDocument& response) {
   // Report a configuration failure saved locally during an outage/failed rollback.
   // A newer server version supersedes the old failure marker.
@@ -2791,18 +2899,45 @@ void processDeviceAgentResponse(JsonDocument& response) {
     pendingRestart = "";
   }
 
-  // The agent returns decrypted pending settings in `configuration`. The
-  // `config` object is intentionally metadata-only and never contains a Wi-Fi
-  // passphrase or device credential.
-  JsonObject configuration = response["configuration"].as<JsonObject>();
-  if (!configuration.isNull()) applyRemoteWifiConfiguration(configuration);
+  // The device-agent returns an AES-GCM envelope bound to this board and
+  // configuration version. Authenticate/decrypt it before applying any secret.
+  bool configurationEnvelopeFailed = false;
+  JsonObject configurationEnvelope = response["configuration_envelope"].as<JsonObject>();
+  if (!configurationEnvelope.isNull()) {
+    DynamicJsonDocument decryptedConfiguration(2048);
+    if (decryptDeviceConfigEnvelope(
+          configurationEnvelope,
+          static_cast<uint32_t>(serverConfigVersion),
+          decryptedConfiguration
+        )) {
+      applyRemoteWifiConfiguration(decryptedConfiguration.as<JsonObject>());
+    } else {
+      configurationEnvelopeFailed = true;
+      lastDeviceError = "Encrypted Wi-Fi configuration could not be authenticated.";
+      if (serverConfigVersion > 0) {
+        reportDeviceConfigStatus(serverConfigVersion, "failed", lastDeviceError);
+      }
+      Serial.println("-> Refused Wi-Fi update because its encrypted envelope was invalid.");
+    }
+  } else if (serverConfigVersion > 0 &&
+             serverConfigVersion > preferences.getInt("cfg_ver", 0) &&
+             (response["server_config_status"] == "pending" ||
+              response["server_config_status"] == "sending" ||
+              response["server_config_status"] == "checking_wifi" ||
+              response["server_config_status"] == "applying")) {
+    configurationEnvelopeFailed = true;
+    lastDeviceError = "Device-agent marked a Wi-Fi update pending but returned no encrypted configuration.";
+    reportDeviceConfigStatus(serverConfigVersion, "failed", lastDeviceError);
+    Serial.println("-> Refused an incomplete device-agent configuration response.");
+  }
 
   int cachedConfigVersion = 0;
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   cachedConfigVersion = preferences.getInt("cfg_ver", 0);
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   const String serverConfigStatus = response["server_config_status"] | "";
-  if (serverConfigVersion > 0 && cachedConfigVersion == serverConfigVersion &&
+  if (!configurationEnvelopeFailed && serverConfigVersion > 0 &&
+      cachedConfigVersion == serverConfigVersion &&
       (serverConfigStatus == "pending" || serverConfigStatus == "sending" ||
        serverConfigStatus == "checking_wifi" || serverConfigStatus == "applying")) {
     reportDeviceConfigStatus(serverConfigVersion, "applied", "");
