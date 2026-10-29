@@ -6,7 +6,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import {
   Activity, AlertCircle, CheckCircle2, CircleHelp, Clock3, Cpu, Download, ExternalLink,
-  LoaderCircle, Power, RefreshCw, Settings2, Wifi, WifiOff,
+  FileClock, LoaderCircle, Power, RefreshCw, Settings2, Wifi, WifiOff,
 } from "lucide-react";
 import AdminConfirmDrawer from "./AdminConfirmDrawer";
 import DeviceWifiDrawer from "./DeviceWifiDrawer";
@@ -364,7 +364,7 @@ export default function DeviceFleet() {
             </div>
             <h2 className="mt-2 text-xl font-black sm:text-2xl">Customer hardware</h2>
             <p className="mt-1 max-w-2xl text-xs font-semibold leading-5 text-text-muted">
-              Manage ESP32 boards, update Wi-Fi configuration, and request a software restart for an individual board.
+              Manage ESP32 boards, view device logs, update Wi-Fi settings, and restart an individual board.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
@@ -531,17 +531,25 @@ export default function DeviceFleet() {
                     </>
                   )}
                 </div>
+                <div className="mt-2 grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
+                  <button type="button"
+                    onClick={() => router.push("/admin/devices/" + encodeURIComponent(device.id) + "/logs")}
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border px-3 py-2.5 text-xs font-black hover:border-accent hover:text-accent">
+                    <FileClock size={14} /> View device logs
+                  </button>
+                  {!needsEnrollment && (
+                    <button type="button" onClick={() => revokeDevice(device)} disabled={Boolean(busyAction)}
+                      className="inline-flex min-h-11 items-center justify-center rounded-xl border border-red-400/40 px-3 py-2.5 text-[10px] font-black text-red-500 disabled:opacity-50">
+                      {busyAction === "revoke" ? "Revoking credential…" : "Revoke device credential"}
+                    </button>
+                  )}
+                </div>
                 {needsEnrollment && (
                   <p className="mt-2 text-[10px] leading-4 text-text-muted">
                     {device.credentialRevoked ? "The previous device credential was revoked. " : "Enrollment requires one initial USB flash. "}Remote restart and configuration are unavailable until replacement firmware checks in.
                   </p>
                 )}
-                {!needsEnrollment && (
-                  <button type="button" onClick={() => revokeDevice(device)} disabled={Boolean(busyAction)}
-                    className="mt-2 inline-flex min-h-9 items-center justify-center rounded-lg border border-red-400/40 px-3 text-[10px] font-black text-red-500 disabled:opacity-50">
-                    {busyAction === "revoke" ? "Revoking credential…" : "Revoke device credential"}
-                  </button>
-                )}
+
 
               </article>
             );
