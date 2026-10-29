@@ -20,6 +20,7 @@ on:
     branches:
       - main
       - feat/device-fleet-remote-management
+      - fix/device-management-hardening-final
 
 permissions:
   contents: read
