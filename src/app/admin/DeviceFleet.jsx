@@ -168,7 +168,8 @@ export default function DeviceFleet() {
         ...previous,
         [device.id]: { commandId: data.command.id, status: data.command.status, polling: true, startedAt: Date.now(), timedOut: false, error: "" },
       }));
-      setNotice("Restart queued. Waiting for the ESP32 to acknowledge and reconnect.");
+      setNotice("Restart queued. Opening the live restart tracker.");
+      router.push("/admin/devices/" + device.id + "/restart?commandId=" + encodeURIComponent(data.command.id));
     } catch (error) {
       setNotice(error.message || "Could not queue restart");
     } finally {
