@@ -1,0 +1,59 @@
+name: VikaTech device-management checks
+
+on:
+  pull_request:
+    paths:
+      - "esp32.cpp"
+      - "supabase/**"
+      - "src/app/admin/**"
+      - "src/app/api/admin/devices/**"
+      - "src/lib/provisioningServer.js"
+      - "tests/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/device-management.yml"
+  push:
+    branches:
+      - main
+      - feat/device-fleet-remote-management
+
+permissions:
+  contents: read
+
+jobs:
+  contract-tests:
+    name: Device-agent and encryption contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:device-management
+
+  esp32-firmware-compile:
+    name: Compile ESP32 device-agent firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install ESP32 core and ArduinoJson
+        run: |
+          arduino-cli config init
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.1.0 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli lib install "ArduinoJson@6.21.5"
+      - name: Compile the repository firmware source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sketch_dir="$RUNNER_TEMP/VikaTechESP32"
+          mkdir -p "$sketch_dir"
+          printf '#include "%s/esp32.cpp"\n' "$GITHUB_WORKSPACE" > "$sketch_dir/VikaTechESP32.ino"
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32 \
+            --warnings all \
+            --build-path "$RUNNER_TEMP/VikaTechESP32-build" \
+            "$sketch_dir"
