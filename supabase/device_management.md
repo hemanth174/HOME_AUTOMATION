@@ -52,6 +52,27 @@ The admin API queues a row in device_commands with a five-minute expiry. The dev
 
 Boards visible only through the local mesh are shown as mesh-reachable. Remote Wi-Fi configuration stays disabled until the target board checks in directly, because the leader must not apply another board's Wi-Fi configuration. A restart can be routed through a fresh mesh gateway: the device-agent assigns the command to one gateway using gateway_board_id, the leader forwards a signed request to the exact target node, the target validates its board identifier and HMAC, and the command is marked complete only after the target rejoins the mesh. Commands routed through a gateway are filtered out of the target's direct polling snapshot to avoid duplicate execution.
 
+## Restart progress tracker
+
+From Admin Panel -> Hardware, select the exact device card and confirm **Restart this ESP32**. After the server queues the command, the Admin Panel opens `/admin/devices/{boardId}/restart` with the returned command ID and delivery mode.
+
+- Direct mode is marked successful only when the command is completed and the board has a fresh direct device-agent check-in.
+- Mesh-gateway mode waits for the selected member to return to the mesh or a direct connection. A healthy leader by itself is not proof that the selected member restarted.
+- The tracker polls command and configuration status; it does not re-submit the restart command when the user refreshes or leaves the page.
+- If the command fails or expires, review the board's latest status and command history before requesting another restart.
+
+## Run checks before deployment
+
+From the repository root, run:
+
+```bash
+npm ci
+npm run test:device-management
+npm run build
+```
+
+The GitHub Actions workflow also compiles `esp32.cpp` with Arduino-ESP32 core 3.x. After merging a frontend-only tracker change, no new SQL migration or Edge Function deployment is required beyond the device-management migration and `device-agent` deployment described above. If those have not yet been deployed to this Supabase project, complete the pre-deployment steps first.
+
 ## Important security notes
 
 - Never put the Supabase service-role key in shipped firmware or browser code. The device-agent function keeps it server-side and scopes operations to the authenticated device's board and customer.
