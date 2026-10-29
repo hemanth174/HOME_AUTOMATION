@@ -290,7 +290,11 @@ async function poll(request: Request, body: Record<string, unknown>) {
     const expiryMessage = "Configuration delivery expired before the ESP32 confirmed application.";
     const expiredAt = new Date().toISOString();
     const expiredRows = await rest(
-      `device_runtime_configs?board_id=eq.${encodeURIComponent(boardId)}&config_update_status=in.(pending,sending,checking_wifi,applying)`,
+      "device_runtime_configs?board_id=eq." + encodeURIComponent(boardId) +
+        "&user_id=eq." + encodeURIComponent(userId) +
+        "&config_version=eq." + encodeURIComponent(String(currentVersion)) +
+        "&config_update_status=in.(pending,sending,checking_wifi,applying)" +
+        "&revoked_at=is.null",
       {
         method: "PATCH",
         headers: { Prefer: "return=representation" },
@@ -306,6 +310,14 @@ async function poll(request: Request, body: Record<string, unknown>) {
       config.last_error = expiryMessage;
       deliveryStatus = "failed";
       await writeConfigEvent(config, "failed", expiryMessage, "device-agent");
+    } else {
+      // A newer admin configuration or device acknowledgement won the race.
+      // Do not continue this stale poll using its cached version/status.
+      return json({
+        ok: true,
+        retry: true,
+        reason: "configuration_changed_during_expiry_check",
+      });
     }
   }
 
@@ -325,11 +337,32 @@ async function poll(request: Request, body: Record<string, unknown>) {
       wifi_security: config.wifi_security,
       wifi_password: password,
     };
-    if (deliveryStatus !== "sending") {
-      await rest(
-        "device_runtime_configs?board_id=eq." + encodeURIComponent(boardId),
-        { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ config_update_status: "sending" }) },
+    if (deliveryStatus === "pending") {
+      const sendingRows = await rest(
+        "device_runtime_configs?board_id=eq." + encodeURIComponent(boardId) +
+          "&user_id=eq." + encodeURIComponent(userId) +
+          "&config_version=eq." + encodeURIComponent(String(currentVersion)) +
+          "&config_update_status=eq.pending&revoked_at=is.null",
+        {
+          method: "PATCH",
+          headers: { Prefer: "return=representation" },
+          body: JSON.stringify({
+            config_update_status: "sending",
+            updated_at: new Date().toISOString(),
+          }),
+        },
       );
+      if (!Array.isArray(sendingRows) || sendingRows.length === 0) {
+        // Another admin saved a newer version or the board's status advanced.
+        // Never deliver the stale snapshot's payload; retry from a fresh poll.
+        return json({
+          ok: true,
+          retry: true,
+          reason: "configuration_changed_during_delivery_claim",
+        });
+      }
+      config.config_update_status = "sending";
+      deliveryStatus = "sending";
       await writeConfigEvent(config, "sending", "ESP32 checked in and received the pending configuration.", "device");
     }
   }
@@ -488,8 +521,16 @@ async function updateConfigStatus(device: { config: Record<string, unknown> }, b
 
   const currentStatus = String(device.config.config_update_status || "pending");
   const terminalStatus = currentStatus === "applied" || currentStatus === "failed";
-  if (terminalStatus && status !== currentStatus) {
-    return json({ error: "The configuration version already has a terminal result" }, 409);
+  if (terminalStatus) {
+    // A terminal result is immutable. A late retry must not overwrite it,
+    // and must be treated as safely ignored by firmware retry bookkeeping.
+    return json({
+      ok: true,
+      ignored: true,
+      reason: status === currentStatus ? "terminal_status_already_recorded" : "terminal_status_won_race",
+      version,
+      status: currentStatus,
+    });
   }
   const rank: Record<string, number> = {
     pending: 0, sending: 1, checking_wifi: 2, applying: 3, applied: 4, failed: 4,
@@ -518,10 +559,28 @@ async function updateConfigStatus(device: { config: Record<string, unknown> }, b
     patch.applied_config_version = version;
     patch.config_applied_at = new Date().toISOString();
   }
-  await rest(
-    `device_runtime_configs?board_id=eq.${encodeURIComponent(String(device.config.board_id))}`,
-    { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(patch) },
+  const statusRows = await rest(
+    "device_runtime_configs?board_id=eq." + encodeURIComponent(String(device.config.board_id)) +
+      "&user_id=eq." + encodeURIComponent(String(device.config.user_id)) +
+      "&config_version=eq." + encodeURIComponent(String(version)) +
+      "&config_update_status=eq." + encodeURIComponent(currentStatus) +
+      "&revoked_at=is.null",
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch),
+    },
   );
+  if (!Array.isArray(statusRows) || statusRows.length === 0) {
+    // A new version or an earlier acknowledgement won the compare-and-set.
+    // Do not write an event for a status that was not committed.
+    return json({
+      ok: true,
+      ignored: true,
+      reason: "configuration_status_changed_during_ack",
+      version,
+    });
+  }
   const messages: Record<string, string> = {
     checking_wifi: "ESP32 is checking whether the configured Wi-Fi network is visible.",
     applying: "ESP32 is attempting the new network and staging the settings.",
