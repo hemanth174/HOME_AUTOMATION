@@ -9,7 +9,8 @@
     "announce-feature": "node scripts/announce-feature.mjs",
     "start": "next start",
     "lint": "eslint",
-    "clean": "node -e \"try{require('fs').rmSync('.next',{recursive:true,force:true});console.log('next cache cleared')}catch(e){console.log('nothing to clean')}\""
+    "clean": "node -e \"try{require('fs').rmSync('.next',{recursive:true,force:true});console.log('next cache cleared')}catch(e){console.log('nothing to clean')}\"",
+    "test:device-management": "node --test tests/device-config-envelope.test.mjs tests/device-management-contract.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.2",
