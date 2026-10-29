@@ -36,6 +36,8 @@ supabase secrets set PROVISIONING_ENCRYPTION_KEY="PASTE_THE_GENERATED_RANDOM_VAL
 
 Set the same PROVISIONING_ENCRYPTION_KEY in the Vercel project server environment and redeploy Vercel. Never prefix this secret with NEXT_PUBLIC_.
 
+The latest `supabase/functions/device-agent/index.ts` imports `supabase/functions/_shared/device-config-crypto.mjs`. Deploy the whole function with that shared file present; do not copy only `index.ts` into the Supabase Dashboard editor. The repository test command is `npm run test:device-management`. A GitHub Actions workflow runs those contract tests and compiles `esp32.cpp` against Arduino-ESP32 core 3.1.0.
+
 ## First-time board enrollment
 
 1. In VikaTech, open Admin Panel -> Hardware.

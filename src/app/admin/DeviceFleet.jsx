@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
-  Activity, AlertCircle, CheckCircle2, CircleHelp, Clock3, Cpu, Download,
+  Activity, AlertCircle, CheckCircle2, CircleHelp, Clock3, Cpu, Download, ExternalLink,
   LoaderCircle, Power, RefreshCw, Settings2, Wifi, WifiOff,
 } from "lucide-react";
 import AdminConfirmDrawer from "./AdminConfirmDrawer";
@@ -366,6 +366,9 @@ export default function DeviceFleet() {
               className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 text-xs font-black hover:border-accent disabled:opacity-50 sm:px-4">
               <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} /> Refresh
             </button>
+            <Link href="/" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-accent px-4 text-xs font-black text-[var(--btn-text)] hover:brightness-105">
+              <ExternalLink size={14} /> Back to VikaTech site
+            </Link>
           </div>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
