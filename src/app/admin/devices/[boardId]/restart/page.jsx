@@ -215,7 +215,7 @@ export default function DeviceRestartTrackerPage() {
     } finally {
       pollInFlight.current = false;
     }
-  }, [accessToken, boardId, commandId, addEvent]);
+  }, [accessToken, boardId, commandId, deliveryMode, addEvent]);
 
   useEffect(() => {
     if (!accessToken || !boardId || !commandId) return undefined;
