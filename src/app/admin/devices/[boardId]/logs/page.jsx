@@ -74,6 +74,7 @@ export default function DeviceLogsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [hint, setHint] = useState("");
+  const [warnings, setWarnings] = useState([]);
   const [fetchedAt, setFetchedAt] = useState(null);
 
   useEffect(() => {
@@ -109,6 +110,7 @@ export default function DeviceLogsPage() {
       setBoard(data.board || null);
       setRuntime(data.runtime || null);
       setEvents(data.events || []);
+      setWarnings(Array.isArray(data.warnings) ? data.warnings : []);
       setFetchedAt(data.fetchedAt || new Date().toISOString());
       setError("");
       setHint("");
@@ -187,6 +189,7 @@ export default function DeviceLogsPage() {
         </section>
 
         {runtime?.lastError && <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-400/30 bg-red-400/5 p-3 text-xs leading-5 text-red-500"><CircleAlert size={15} className="mt-0.5 shrink-0" /><span className="break-words">{runtime.lastError}</span></div>}
+        {warnings.map((warning) => <div key={warning} role="status" className="rounded-xl border border-amber-400/30 bg-amber-400/5 p-3 text-xs leading-5 text-amber-600">{warning}</div>)}
         {error && <div role="alert" className="rounded-xl border border-red-400/30 bg-red-400/5 p-3 text-xs leading-5 text-red-500"><p className="font-black">Could not refresh device logs</p><p className="mt-1 break-words">{error}</p>{hint && <p className="mt-2 break-words text-text-muted">{hint}</p>}<button onClick={() => loadLogs()} className="mt-2 underline">Retry</button></div>}
 
         <section className="overflow-hidden rounded-2xl border border-border bg-card">
