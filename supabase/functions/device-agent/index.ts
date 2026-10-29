@@ -1,3 +1,4 @@
+import { encryptDeviceConfigEnvelope } from "../_shared/device-config-crypto.mjs";
 const SUPABASE_URL = (Deno.env.get("SUPABASE_URL") || "").replace(/\/$/, "");
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const PROVISIONING_ENCRYPTION_KEY = Deno.env.get("PROVISIONING_ENCRYPTION_KEY") || "";
@@ -445,6 +446,17 @@ async function poll(request: Request, body: Record<string, unknown>) {
     }
   }
 
+  // Encrypt pending Wi-Fi configuration for this exact device. Do not send
+  // the plaintext password in the JSON body, even though HTTPS is required.
+  const configurationEnvelope = configuration
+    ? await encryptDeviceConfigEnvelope(
+        bearer,
+        String(board.board_identifier || ""),
+        currentVersion,
+        configuration,
+      )
+    : null;
+
   return json({
     ok: true,
     board_identifier: board.board_identifier,
@@ -457,7 +469,7 @@ async function poll(request: Request, body: Record<string, unknown>) {
     devices: Array.isArray(snapshot.devices) ? snapshot.devices : [],
     alarms: Array.isArray(snapshot.alarms) ? snapshot.alarms : [],
     schedules: Array.isArray(snapshot.schedules) ? snapshot.schedules : [],
-    config: configuration,
+    configuration_envelope: configurationEnvelope,
     commands,
   });
 }
