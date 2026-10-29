@@ -99,12 +99,13 @@ test("device-agent config expiry and delivery claims are version-guarded", async
   assert.match(edge, /config_update_status=eq\.pending&revoked_at=is\.null/);
   assert.match(edge, /configuration_changed_during_expiry_check/);
   assert.match(edge, /configuration_changed_during_delivery_claim/);
+  assert.match(edge, /configuration_changed_before_envelope_delivery/);
 });
 
 test("late configuration acknowledgements cannot overwrite a newer or terminal status", async () => {
   const edge = await read("supabase/functions/device-agent/index.ts");
   assert.match(edge, /config_update_status=eq\." \+ encodeURIComponent\(currentStatus\)/);
-  assert.match(edge, /configuration_status_changed_during_ack/);
+  assert.match(edge, /CONFIGURATION_STATUS_RACE/);
   assert.match(edge, /terminal_status_won_race/);
 });
 
