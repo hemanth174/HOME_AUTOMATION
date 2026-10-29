@@ -479,6 +479,28 @@ async function poll(request: Request, body: Record<string, unknown>) {
     }
   }
 
+  // A configuration can be edited while this poll performs device discovery
+  // and mesh routing. Before issuing its secret, re-check the exact version.
+  // Never send an envelope from a stale snapshot after a newer admin save.
+  if (configuration) {
+    const latestRows = await rest(
+      "device_runtime_configs?board_id=eq." + encodeURIComponent(boardId) +
+        "&user_id=eq." + encodeURIComponent(userId) +
+        "&revoked_at=is.null&select=config_version,config_update_status&limit=1",
+    );
+    const latest = Array.isArray(latestRows) ? latestRows[0] : null;
+    const latestVersion = Number(latest?.config_version || 0);
+    const latestStatus = String(latest?.config_update_status || "");
+    if (!latest || latestVersion !== currentVersion ||
+        !["sending", "checking_wifi", "applying"].includes(latestStatus)) {
+      return json({
+        ok: true,
+        retry: true,
+        reason: "configuration_changed_before_envelope_delivery",
+      });
+    }
+  }
+
   // Encrypt pending Wi-Fi configuration for this exact device. Do not send
   // the plaintext password in the JSON body, even though HTTPS is required.
   const configurationEnvelope = configuration
@@ -572,14 +594,39 @@ async function updateConfigStatus(device: { config: Record<string, unknown> }, b
     },
   );
   if (!Array.isArray(statusRows) || statusRows.length === 0) {
-    // A new version or an earlier acknowledgement won the compare-and-set.
-    // Do not write an event for a status that was not committed.
+    // Distinguish a newer configuration version from an acknowledgement race
+    // within this version. Ignore a newer/terminal state, but return a retryable
+    // conflict when this status still needs to advance from the current state.
+    const latestRows = await rest(
+      "device_runtime_configs?board_id=eq." + encodeURIComponent(String(device.config.board_id)) +
+        "&user_id=eq." + encodeURIComponent(String(device.config.user_id)) +
+        "&select=config_version,config_update_status,revoked_at&limit=1",
+    );
+    const latest = Array.isArray(latestRows) ? latestRows[0] : null;
+    if (!latest || latest.revoked_at || Number(latest.config_version) !== version) {
+      return json({
+        ok: true,
+        ignored: true,
+        reason: "configuration_version_changed_during_ack",
+        version,
+      });
+    }
+    const latestStatus = String(latest.config_update_status || "");
+    const latestRank = rank[latestStatus] ?? -1;
+    const requestedRank = rank[status] ?? -1;
+    if (latestStatus === "applied" || latestStatus === "failed" || latestRank >= requestedRank) {
+      return json({
+        ok: true,
+        ignored: true,
+        reason: "newer_configuration_status_won_race",
+        version,
+        status: latestStatus,
+      });
+    }
     return json({
-      ok: true,
-      ignored: true,
-      reason: "configuration_status_changed_during_ack",
-      version,
-    });
+      error: "Configuration status changed while this acknowledgement was being saved. Retry on the next device poll.",
+      code: "CONFIGURATION_STATUS_RACE",
+    }, 409);
   }
   const messages: Record<string, string> = {
     checking_wifi: "ESP32 is checking whether the configured Wi-Fi network is visible.",
