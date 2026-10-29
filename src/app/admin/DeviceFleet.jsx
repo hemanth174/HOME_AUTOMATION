@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import {
   Activity, AlertCircle, CheckCircle2, CircleHelp, Clock3, Cpu, Download, ExternalLink,
