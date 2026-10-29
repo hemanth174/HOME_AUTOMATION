@@ -2,30 +2,51 @@
 
 This migration adds authenticated per-board configuration and remote software-restart commands. It does not actuate the physical EN pin; it requests ESP.restart() from the device-agent firmware.
 
-## Before deployment
+## Deployment order (do this in sequence)
 
-1. Confirm the base VikaTech schema exists, including boards, devices, alarms, schedules, activity_logs, provisioning_records, account_approval_requests, and approval_audit_log.
-2. Apply supabase/device_management.sql in the VikaTech Supabase SQL Editor. It adds configuration, command and event tables, the service-role-only snapshot RPC, and first-seen enrollment tracking.
-3. Configure the exact same PROVISIONING_ENCRYPTION_KEY in Vercel (server environment) and Supabase Edge Function secrets. Use a randomly generated value of at least 32 characters. Do not use a fallback/default key.
-4. Apply the latest version of the migration before deploying the latest Edge Function; it adds separate direct and mesh timestamps plus an expiry time for restart commands. The migration is idempotent and backfills existing direct check-ins.
-5. Remote Wi-Fi configuration requires a fresh direct authenticated check-in from the exact target ESP32. Remote restart can also be routed through a live leader when the target is visible as a fresh member of that leader's local mesh; the leader signs the board-specific request with the shared mesh secret, and the member must verify the signature and its own board identifier before rebooting.
-6. Make sure the Vercel server has NEXT_PUBLIC_SUPABASE_URL set to the VikaTech Supabase project URL. This variable is the public project URL, not a service-role key.
-7. Deploy the device-agent function without Supabase JWT verification because the ESP32 presents a unique random device token in its Bearer header; the function authenticates and scopes that token itself.
+**Do not start with the Admin Panel.** The database schema and Edge Function must be deployed before a board can enroll or receive configuration updates.
 
-Example commands:
+1. Confirm the base VikaTech schema exists: `boards`, `devices`, `alarms`, `schedules`, `activity_logs`, `provisioning_records`, `account_approval_requests`, and `approval_audit_log`.
+2. In the Supabase Dashboard, open **SQL Editor**, create a new query, paste the complete current `supabase/device_management.sql` from this branch, and run it against the intended VikaTech project. Verify the tables and `public.device_agent_snapshot(text, text)` function were created. This file is currently a standalone SQL script, not a file under `supabase/migrations`; do not assume `supabase db push` will apply it automatically.
+3. Generate a random encryption secret locally using the command below. Store it in a password manager. Set the exact same value as `PROVISIONING_ENCRYPTION_KEY` in the Supabase Edge Function secrets and the Vercel server environment. Never commit it, put it in a browser variable, or prefix it with `NEXT_PUBLIC_`.
+4. Confirm the Vercel server has `NEXT_PUBLIC_SUPABASE_URL` set to the intended Supabase project URL and has its existing server-only admin credentials configured. Never put the service-role key into the ESP32 or browser bundle.
+5. Link the local repository to the target Supabase project using the steps below, then deploy `device-agent` with JWT verification disabled. This function authenticates the ESP32 using its unique random bearer token and validates board ownership inside the function.
+6. Verify the function is deployed and inspect its logs for missing environment variables or SQL/RPC errors. Only then prepare the one-time enrollment firmware for an existing board.
+7. Wi-Fi configuration requires a recent direct check-in from that exact ESP32. Remote restart may instead use a live authenticated mesh leader when the selected member is currently visible on that leader's mesh.
+8. After changing the Vercel server environment variables, redeploy the Vercel application. Save the Supabase and Vercel deployments before flashing any customer board.
+
+### Supabase CLI commands
+
+Run these commands from the repository root on your development computer. Replace the project reference with the correct VikaTech project ID; do not paste the project's service key in any command.
 
 ```bash
-# Generate a strong secret locally, then use the same value in both environments.
+# Authenticate the CLI and identify the target project.
+supabase login
+supabase projects list
+
+# Connect this checkout to the intended project.
+supabase link --project-ref YOUR_PROJECT_REF
+
+# Generate a strong random secret. Copy the output into a password manager.
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 
-# Deploy the function with per-device Bearer-token authentication.
+# Set the generated value as a production Edge Function secret.
+supabase secrets set PROVISIONING_ENCRYPTION_KEY="PASTE_THE_GENERATED_RANDOM_VALUE"
+
+# Deploy using the device's custom Bearer-token authentication.
 supabase functions deploy device-agent --no-verify-jwt
 
-# Set this exact secret in Supabase Edge Function secrets.
-supabase secrets set PROVISIONING_ENCRYPTION_KEY="PASTE_THE_GENERATED_RANDOM_VALUE"
+# Confirm configured secret names (this does not print their values).
+supabase secrets list
 ```
 
-Set the same PROVISIONING_ENCRYPTION_KEY in the Vercel project server environment and redeploy Vercel. Never prefix this secret with NEXT_PUBLIC_.
+Supabase injects its project URL and server API keys into the Edge Function runtime; do not attempt to create a custom secret whose name begins with `SUPABASE_`. The deployed `device-agent` uses `SUPABASE_URL` and the existing `SUPABASE_SERVICE_ROLE_KEY` runtime variable server-side. These credentials must never be sent to the ESP32. See the official [Supabase function deployment guide](https://supabase.com/docs/guides/functions/deploy), [secrets guide](https://supabase.com/docs/guides/functions/secrets), and [CLI command reference](https://supabase.com/docs/reference/cli/global-flags).
+
+### Encryption contract
+
+The saved Wi-Fi passphrase is first protected in database storage using AES-256-GCM with `PROVISIONING_ENCRYPTION_KEY`. After authenticating the exact device, the Edge Function decrypts that stored value only in server memory and wraps the pending configuration in a second AES-256-GCM envelope. The envelope key is derived from the per-device token, and its authenticated associated data binds it to `board_identifier` and `config_version`. The ESP32 uses mbedTLS to verify the authentication tag and version before applying the configuration. HTTPS certificate validation protects transport as well; the envelope is an additional device-bound layer.
+
+The current SQL file is idempotent and includes the direct/mesh liveness columns, command expiry, one-active-restart constraint and service-role-only snapshot RPC. Reapply the whole script only after reviewing any SQL errors; do not ignore a failed statement and proceed to firmware enrollment.
 
 ## First-time board enrollment
 
@@ -39,8 +60,9 @@ After that one-time flash and enrollment, supported Wi-Fi configuration updates 
 
 ## Remote Wi-Fi configuration
 
-- The password is encrypted server-side using AES-256-GCM before storage in device_runtime_configs.encrypted_wifi_password.
-- The device-agent uses the matching server-only encryption key to decrypt the value in memory and transmits the configuration over CA-validated HTTPS.
+- The password is encrypted server-side using AES-256-GCM before storage in `device_runtime_configs.encrypted_wifi_password`.
+- After the device's bearer token and board identity are verified, the Edge Function decrypts the stored value only in memory and encrypts the configuration into a second AES-256-GCM envelope bound to the exact board identifier and configuration version.
+- The firmware verifies the envelope's GCM authentication tag and the version before applying anything. The configuration is also delivered over CA-validated HTTPS; plaintext configuration secrets are not returned in the device-agent JSON response.
 - The ESP32 tests the selected SSID and then attempts a connection before it saves the accepted settings and config_version to NVS.
 - On a failed attempt it tries to reconnect using the last known-good settings and reports a failure when connectivity is restored.
 - Open-network mode is explicit. An empty password does not implicitly change a WPA2 configuration to an open network.
