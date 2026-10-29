@@ -83,6 +83,10 @@ From Admin Panel -> Hardware, select the exact device card and confirm **Restart
 - The tracker polls command and configuration status; it does not re-submit the restart command when the user refreshes or leaves the page.
 - If the command fails or expires, review the board's latest status and command history before requesting another restart.
 
+## Acceptance test checklist
+
+Use [ESP32_FEATURE_ACCEPTANCE_TESTS.md](supabase/ESP32_FEATURE_ACCEPTANCE_TESTS.md) for the manual acceptance matrix, result record, desktop/mobile checks, direct/mesh restart tests, Wi-Fi failure/rollback checks, security cases, and the exact Supabase deployment order. The downloadable six-page PDF is provided with this implementation review for printing and recording results.
+
 ## Run checks before deployment
 
 From the repository root, run:
