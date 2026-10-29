@@ -38,6 +38,7 @@ const char* DEVICE_AUTH_TOKEN = "";
 const char* DEVICE_AGENT_URL = "";
 const char* DEVICE_TOKEN = "";
 // Public CA roots used to verify the Supabase Edge Function TLS certificate.
+// Trust anchors included: Google Trust Services GTS Root R4 and ISRG Root X1.
 // This is a trust bundle, not a secret. Keep it current when the upstream CA changes.
 const char* DEVICE_AGENT_ROOT_CA = R"VIKATECH_ROOT_CA(-----BEGIN CERTIFICATE-----
 MIICCTCCAY6gAwIBAgINAgPlwGjvYxqccpBQUjAKBggqhkjOPQQDAzBHMQswCQYD
