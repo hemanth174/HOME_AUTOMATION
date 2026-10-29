@@ -20,6 +20,7 @@ on:
     branches:
       - main
       - feat/device-fleet-remote-management
+      - fix/device-management-hardening-final
 
 permissions:
   contents: read
@@ -66,7 +67,7 @@ jobs:
         run: |
           arduino-cli config init
           arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-          arduino-cli core install esp32:esp32@3.1.0 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.12 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli lib install "ArduinoJson@6.21.5"
       - name: Compile the repository firmware source
         shell: bash
