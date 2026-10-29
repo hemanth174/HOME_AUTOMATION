@@ -2866,6 +2866,7 @@ void processDeviceAgentResponse(JsonDocument& response) {
   failedMessage = preferences.getString("failed_cfg_msg", "The ESP32 could not apply the Wi-Fi configuration.");
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   const int serverConfigVersion = response["server_config_version"] | 0;
+  const String serverConfigStatus = response["server_config_status"] | "";
   if (failedVersion > 0 && serverConfigVersion > failedVersion) {
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     preferences.remove("failed_cfg_ver");
@@ -2926,10 +2927,10 @@ void processDeviceAgentResponse(JsonDocument& response) {
     }
   } else if (serverConfigVersion > 0 &&
              serverConfigVersion > localConfigVersionForEnvelope &&
-             (response["server_config_status"] == "pending" ||
-              response["server_config_status"] == "sending" ||
-              response["server_config_status"] == "checking_wifi" ||
-              response["server_config_status"] == "applying")) {
+             (serverConfigStatus == "pending" ||
+              serverConfigStatus == "sending" ||
+              serverConfigStatus == "checking_wifi" ||
+              serverConfigStatus == "applying")) {
     configurationEnvelopeFailed = true;
     lastDeviceError = "Device-agent marked a Wi-Fi update pending but returned no encrypted configuration.";
     reportDeviceConfigStatus(serverConfigVersion, "failed", lastDeviceError);
@@ -2940,7 +2941,6 @@ void processDeviceAgentResponse(JsonDocument& response) {
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   cachedConfigVersion = preferences.getInt("cfg_ver", 0);
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-  const String serverConfigStatus = response["server_config_status"] | "";
   if (!configurationEnvelopeFailed && serverConfigVersion > 0 &&
       cachedConfigVersion == serverConfigVersion &&
       (serverConfigStatus == "pending" || serverConfigStatus == "sending" ||
