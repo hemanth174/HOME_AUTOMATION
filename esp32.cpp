@@ -13,7 +13,6 @@
 #include <mbedtls/md.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/gcm.h>
-#include <vector>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
@@ -54,6 +53,54 @@ const char* DEVICE_AUTH_TOKEN = "";
 // can replace them; never put a Supabase service-role key in this firmware.
 const char* DEVICE_AGENT_URL = "";
 const char* DEVICE_TOKEN = "";
+// Public CA roots used to verify the Supabase Edge Function TLS certificate.
+// Trust anchors included: Google Trust Services GTS Root R4 and ISRG Root X1.
+// This is a trust bundle, not a secret. Keep it current when the upstream CA changes.
+const char* DEVICE_AGENT_ROOT_CA = R"VIKATECH_ROOT_CA(-----BEGIN CERTIFICATE-----
+MIICCTCCAY6gAwIBAgINAgPlwGjvYxqccpBQUjAKBggqhkjOPQQDAzBHMQswCQYD
+VQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZpY2VzIExMQzEUMBIG
+A1UEAxMLR1RTIFJvb3QgUjQwHhcNMTYwNjIyMDAwMDAwWhcNMzYwNjIyMDAwMDAw
+WjBHMQswCQYDVQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZpY2Vz
+IExMQzEUMBIGA1UEAxMLR1RTIFJvb3QgUjQwdjAQBgcqhkjOPQIBBgUrgQQAIgNi
+AATzdHOnaItgrkO4NcWBMHtLSZ37wWHO5t5GvWvVYRg1rkDdc/eJkTBa6zzuhXyi
+QHY7qca4R9gq55KRanPpsXI5nymfopjTX15YhmUPoYRlBtHci8nHc8iMai/lxKvR
+HYqjQjBAMA4GA1UdDwEB/wQEAwIBhjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQW
+BBSATNbrdP9JNqPV2Py1PsVq8JQdjDAKBggqhkjOPQQDAwNpADBmAjEA6ED/g94D
+9J+uHXqnLrmvT/aDHQ4thQEd0dlq7A/Cr8deVl5c1RxYIigL9zC2L7F8AjEA8GE8
+p/SgguMh1YQdc4acLa/KNJvxn7kjNuK8YAOdgLOaVsjh4rsUecrNIdSUtUlD
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
+TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
+cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
+WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
+ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
+MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAK3oJHP0FDfzm54rVygc
+h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
+0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6U
+A5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+sW
+T8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3qyH
+B5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x+UC
+B5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SHzUv
+KBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahmbWn
+OlFuhjuefXKnEgV4We0+UXgVCwOPjdAvBbI+e0ocS3MFEvzG6uBQE3xDk3SzynTn
+jh8BCNAw1FtxNrQHusEwMFxIt4I7mKZ9YIqioymCzLq9gwQbooMDQaHWBfEbwrbw
+qHyGO0aoSCqI3Haadr8faqU9GY/rOPNk3sgrDQoo//fb4hVC1CLQJ13hef4Y53CI
+rU7m2Ys6xt0nUW7/vGT1M0NPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
+HRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjANBgkq
+hkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V9lZL
+ubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPbk6ZGQ
+3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRcOj/KK
+NFtY2PwByVS5uCbMiogziUwthDyC3+6WVwW6LLv3xLfHTjuCvjHIInNzktHCgKQ5
+ORAzI4JMPJ+GslWYHb4phowim57iaztXOoJwTdwJx4nLCgdNbOhdjsnvzqvHu7Ur
+TkXWStAmzOVyyghqpZXjFaH3pO3JLF+l+/+sKAIuvtd7u+Nxe5AW0wdeRlN8NwdC
+jNPElpzVmbUq4JUagEiuTDkHzsxHpFKVK7q4+63SM1N95R1NbdWhscdCb+ZAJzVc
+oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
+4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA
+mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
+emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
+-----END CERTIFICATE-----
+)VIKATECH_ROOT_CA";
 String deviceAuthToken = "";
 String deviceBootId = "";
 String lastDeviceError = "";
@@ -249,6 +296,7 @@ bool deviceAgentPost(const String& payload, DynamicJsonDocument& response);
 bool reportDeviceConfigStatus(int version, const String& status, const String& error = "");
 bool acknowledgeDeviceCommand(const String& commandId, const String& status, const String& error = "", const String& targetBoardIdentifier = "");
 bool applyRemoteWifiConfiguration(JsonObject configuration);
+bool decryptDeviceConfigEnvelope(JsonObject envelope, DynamicJsonDocument& configOut);
 String meshRestartSignature(const String& commandId, const String& targetBoardIdentifier);
 bool meshRestartSignatureMatches(const String& supplied, const String& expected);
 bool meshRestartQueued(const String& commandId);
@@ -261,6 +309,7 @@ void processPendingMeshRestartAcks();
 bool forwardMeshRestart(const String& commandId, const String& targetBoardIdentifier, uint32_t expiresAtEpoch = 0);
 bool decryptDeviceConfigEnvelope(JsonObject envelope, uint32_t expectedVersion, DynamicJsonDocument& decrypted);
 void processDeviceAgentResponse(JsonDocument& response);
+bool decryptDeviceConfigEnvelope(JsonObject envelope, DynamicJsonDocument& configOut);
 bool cloudStateSupersedesQueue(const PendingUpdate& queued, const String& cloudChangedAt);
 bool getPendingRelayUpdate(int index, PendingUpdate& result);
 bool discardPendingRelayUpdate(const PendingUpdate& expected);
@@ -2752,105 +2801,101 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
   return true;
 }
 
-bool decodeDeviceBase64Url(const String& value, std::vector<uint8_t>& output) {
-  if (value.length() == 0 || value.length() > 8192) return false;
-  String normalized = value;
-  normalized.replace('-', '+');
-  normalized.replace('_', '/');
-  while ((normalized.length() % 4) != 0) normalized += '=';
 
-  const size_t capacity = (normalized.length() * 3) / 4 + 4;
-  std::vector<uint8_t> decoded(capacity);
-  size_t decodedLength = 0;
-  int result = mbedtls_base64_decode(
-    decoded.data(), decoded.size(), &decodedLength,
+static bool decodeBase64Url(const String& encoded, uint8_t* output, size_t outputCapacity, size_t& decodedLength) {
+  String normalized = encoded;
+  normalized.replace("-", "+");
+  normalized.replace("_", "/");
+  while (normalized.length() % 4) normalized += "=";
+  decodedLength = 0;
+  const int rc = mbedtls_base64_decode(
+    output, outputCapacity, &decodedLength,
     reinterpret_cast<const unsigned char*>(normalized.c_str()),
     normalized.length()
   );
-  if (result != 0 || decodedLength == 0) return false;
-  decoded.resize(decodedLength);
-  output.swap(decoded);
-  return true;
+  return rc == 0;
 }
 
-bool decryptDeviceConfigEnvelope(
-  JsonObject envelope,
-  uint32_t expectedVersion,
-  DynamicJsonDocument& decrypted
-) {
-  const String scheme = envelope["scheme"] | "";
-  const int schemaVersion = envelope["schema_version"] | 0;
-  const uint32_t envelopeVersion = envelope["config_version"] | 0;
+bool decryptDeviceConfigEnvelope(JsonObject envelope, DynamicJsonDocument& configOut) {
+  if (String(envelope["scheme"] | "") != "A256GCM" ||
+      (envelope["schema_version"] | 0) != 1) {
+    Serial.println("Device-agent configuration envelope uses an unsupported scheme.");
+    return false;
+  }
+
+  const uint32_t version = envelope["config_version"] | 0;
   const String ivText = envelope["iv"] | "";
   const String ciphertextText = envelope["ciphertext"] | "";
-
-  if (scheme != "A256GCM" || schemaVersion != 1 ||
-      expectedVersion == 0 || envelopeVersion != expectedVersion ||
-      String(BOARD_IDENTIFIER) == "esp32-unconfigured" ||
-      deviceAuthToken.length() < 32 || ivText.length() == 0 || ciphertextText.length() == 0) {
-    Serial.println("-> Configuration envelope metadata did not match this board or version.");
+  if (version == 0 || ivText.length() == 0 || ciphertextText.length() == 0 ||
+      deviceAuthToken.length() < 32 || String(BOARD_IDENTIFIER) == "esp32-unconfigured") {
+    Serial.println("Device-agent configuration envelope is incomplete.");
     return false;
   }
 
-  std::vector<uint8_t> iv;
-  std::vector<uint8_t> ciphertextAndTag;
-  if (!decodeDeviceBase64Url(ivText, iv) ||
-      !decodeDeviceBase64Url(ciphertextText, ciphertextAndTag) ||
-      iv.size() != 12 || ciphertextAndTag.size() <= 16) {
-    Serial.println("-> Configuration envelope encoding is invalid.");
+  uint8_t iv[12] = {0};
+  size_t ivLength = 0;
+  uint8_t ciphertextAndTag[2048] = {0};
+  size_t ciphertextAndTagLength = 0;
+  if (!decodeBase64Url(ivText, iv, sizeof(iv), ivLength) || ivLength != sizeof(iv) ||
+      !decodeBase64Url(ciphertextText, ciphertextAndTag, sizeof(ciphertextAndTag), ciphertextAndTagLength) ||
+      ciphertextAndTagLength <= 16) {
+    Serial.println("Device-agent configuration envelope has invalid Base64 framing.");
+    memset(ciphertextAndTag, 0, sizeof(ciphertextAndTag));
     return false;
   }
 
-  // This derivation and AAD must match supabase/functions/_shared/device-config-crypto.mjs.
-  const String keyMaterial = "vikatech-device-config-v1:" + deviceAuthToken;
+  // Must match supabase/functions/_shared/device-config-crypto.mjs exactly.
+  // The authenticated additional data prevents cross-board and cross-version swaps.
+  String keyMaterial = "vikatech-device-config-v1:" + deviceAuthToken;
   uint8_t key[32] = {0};
-  const mbedtls_md_info_t* sha256 = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-  if (!sha256 || mbedtls_md(
-        sha256,
-        reinterpret_cast<const unsigned char*>(keyMaterial.c_str()),
-        keyMaterial.length(),
-        key
-      ) != 0) {
-    Serial.println("-> Could not derive device-specific configuration key.");
+  const mbedtls_md_info_t* digest = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  if (!digest || mbedtls_md(digest,
+      reinterpret_cast<const unsigned char*>(keyMaterial.c_str()),
+      keyMaterial.length(), key) != 0) {
+    memset(key, 0, sizeof(key));
+    memset(ciphertextAndTag, 0, sizeof(ciphertextAndTag));
+    Serial.println("Could not derive the device configuration decryption key.");
     return false;
   }
 
   const String additionalData = "VikaTech-ESP32-Config-v1|" +
-    String(BOARD_IDENTIFIER) + "|" + String(expectedVersion);
-  const size_t tagLength = 16;
-  const size_t ciphertextLength = ciphertextAndTag.size() - tagLength;
-  const uint8_t* tag = ciphertextAndTag.data() + ciphertextLength;
-  std::vector<uint8_t> plaintext(ciphertextLength + 1, 0);
+      String(BOARD_IDENTIFIER) + "|" + String(version);
+  const size_t ciphertextLength = ciphertextAndTagLength - 16;
+  const unsigned char* tag = ciphertextAndTag + ciphertextLength;
+  uint8_t plaintext[2048] = {0};
 
   mbedtls_gcm_context context;
   mbedtls_gcm_init(&context);
-  int result = mbedtls_gcm_setkey(&context, MBEDTLS_CIPHER_ID_AES, key, 256);
-  if (result == 0) {
-    result = mbedtls_gcm_auth_decrypt(
+  int rc = mbedtls_gcm_setkey(&context, MBEDTLS_CIPHER_ID_AES, key, 256);
+  if (rc == 0) {
+    rc = mbedtls_gcm_auth_decrypt(
       &context,
       ciphertextLength,
-      iv.data(), iv.size(),
-      reinterpret_cast<const unsigned char*>(additionalData.c_str()),
-      additionalData.length(),
-      tag, tagLength,
-      ciphertextAndTag.data(),
-      plaintext.data()
+      iv, sizeof(iv),
+      reinterpret_cast<const unsigned char*>(additionalData.c_str()), additionalData.length(),
+      tag, 16,
+      ciphertextAndTag, plaintext
     );
   }
   mbedtls_gcm_free(&context);
   memset(key, 0, sizeof(key));
+  keyMaterial = "";
 
-  if (result != 0) {
-    Serial.println("-> Configuration envelope authentication failed; settings were not applied.");
+  if (rc != 0) {
+    memset(plaintext, 0, sizeof(plaintext));
+    memset(ciphertextAndTag, 0, sizeof(ciphertextAndTag));
+    Serial.println("Device configuration authentication failed; refusing to apply it.");
     return false;
   }
 
-  plaintext[ciphertextLength] = 0;
-  DeserializationError parseError = deserializeJson(decrypted, plaintext.data(), ciphertextLength);
-  if (parseError || !decrypted.is<JsonObject>() ||
-      (decrypted["version"] | 0) != expectedVersion) {
-    decrypted.clear();
-    Serial.println("-> Decrypted configuration JSON or version is invalid.");
+  configOut.clear();
+  const DeserializationError parseError = deserializeJson(
+    configOut, reinterpret_cast<const char*>(plaintext), ciphertextLength);
+  memset(plaintext, 0, sizeof(plaintext));
+  memset(ciphertextAndTag, 0, sizeof(ciphertextAndTag));
+  if (parseError || (uint32_t)(configOut["version"] | 0) != version) {
+    configOut.clear();
+    Serial.println("Decrypted device configuration failed JSON/version validation.");
     return false;
   }
   return true;
@@ -2900,41 +2945,19 @@ void processDeviceAgentResponse(JsonDocument& response) {
     pendingRestart = "";
   }
 
-  // The device-agent returns an AES-GCM envelope bound to this board and
-  // configuration version. Authenticate/decrypt it before applying any secret.
-  int localConfigVersionForEnvelope = 0;
-  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
-  localConfigVersionForEnvelope = preferences.getInt("cfg_ver", 0);
-  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-
-  bool configurationEnvelopeFailed = false;
-  JsonObject configurationEnvelope = response["configuration_envelope"].as<JsonObject>();
-  if (!configurationEnvelope.isNull()) {
-    DynamicJsonDocument decryptedConfiguration(2048);
-    if (decryptDeviceConfigEnvelope(
-          configurationEnvelope,
-          static_cast<uint32_t>(serverConfigVersion),
-          decryptedConfiguration
-        )) {
-      applyRemoteWifiConfiguration(decryptedConfiguration.as<JsonObject>());
-    } else {
-      configurationEnvelopeFailed = true;
-      lastDeviceError = "Encrypted Wi-Fi configuration could not be authenticated.";
-      if (serverConfigVersion > 0) {
-        reportDeviceConfigStatus(serverConfigVersion, "failed", lastDeviceError);
-      }
-      Serial.println("-> Refused Wi-Fi update because its encrypted envelope was invalid.");
+  // The agent returns decrypted pending settings in `configuration`. The
+  // `config` object is intentionally metadata-only and never contains a Wi-Fi
+  // passphrase or device credential.
+  JsonObject envelope = response["configuration_envelope"].as<JsonObject>();
+  if (!envelope.isNull()) {
+    const uint32_t envelopeVersion = envelope["config_version"] | 0;
+    DynamicJsonDocument decryptedConfig(1536);
+    if (decryptDeviceConfigEnvelope(envelope, decryptedConfig)) {
+      applyRemoteWifiConfiguration(decryptedConfig.as<JsonObject>());
+    } else if (envelopeVersion > 0) {
+      reportDeviceConfigStatus(envelopeVersion, "failed",
+        "The device could not authenticate/decrypt the configuration envelope. Check firmware and device credential.");
     }
-  } else if (serverConfigVersion > 0 &&
-             serverConfigVersion > localConfigVersionForEnvelope &&
-             (serverConfigStatus == "pending" ||
-              serverConfigStatus == "sending" ||
-              serverConfigStatus == "checking_wifi" ||
-              serverConfigStatus == "applying")) {
-    configurationEnvelopeFailed = true;
-    lastDeviceError = "Device-agent marked a Wi-Fi update pending but returned no encrypted configuration.";
-    reportDeviceConfigStatus(serverConfigVersion, "failed", lastDeviceError);
-    Serial.println("-> Refused an incomplete device-agent configuration response.");
   }
 
   int cachedConfigVersion = 0;
@@ -3048,6 +3071,18 @@ bool requestDeviceAgentSnapshot(DynamicJsonDocument& response) {
   const bool ok = deviceAgentPost(payload, response) && (response["ok"] | false);
   if (ok && (response["wifi_config_registered"] | false)) {
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    const bool wasRegistered = preferences.getBool("wifi_registered", false);
+    const String serverStatus = response["server_config_status"] | "";
+    const uint32_t serverVersion = response["server_config_version"] | 0;
+    // A first check-in registers the already-connected network as applied. In
+    // that one case only, persist its initial version locally. A pending admin
+    // update must remain ahead of the local version until its encrypted payload
+    // passes authentication and the new Wi-Fi connection succeeds.
+    if (!wasRegistered && serverStatus == "applied" && serverVersion > 0 &&
+        serverVersion >= preferences.getUInt("cfg_ver", 0)) {
+      preferences.putInt("cfg_ver", (int)serverVersion);
+      deviceConfigVersion = serverVersion;
+    }
     preferences.putBool("wifi_registered", true);
     if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   }

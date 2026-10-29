@@ -30,10 +30,16 @@ supabase link --project-ref YOUR_PROJECT_REF
 # Generate a strong random secret. Copy the output into a password manager.
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 
-# Set the generated value as a production Edge Function secret.
-supabase secrets set PROVISIONING_ENCRYPTION_KEY="PASTE_THE_GENERATED_RANDOM_VALUE"
+# From the repository root, link the CLI to the customer's VikaTech project once.
+supabase login
+supabase link --project-ref YOUR_PROJECT_REF
 
-# Deploy using the device's custom Bearer-token authentication.
+# Apply supabase/device_management.sql in the Supabase Dashboard SQL Editor
+# before deploying the function, or copy it into a timestamped file under
+# supabase/migrations/ and then run: supabase db push
+
+# Deploy the function with per-device Bearer-token authentication.
+# Keep the _shared/device-config-crypto.mjs file alongside the function.
 supabase functions deploy device-agent --no-verify-jwt
 
 # Confirm configured secret names (this does not print their values).
@@ -48,6 +54,8 @@ The saved Wi-Fi passphrase is first protected in database storage using AES-256-
 
 The current SQL file is idempotent and includes the direct/mesh liveness columns, command expiry, one-active-restart constraint and service-role-only snapshot RPC. Reapply the whole script only after reviewing any SQL errors; do not ignore a failed statement and proceed to firmware enrollment.
 
+The latest `supabase/functions/device-agent/index.ts` imports `supabase/functions/_shared/device-config-crypto.mjs`. Deploy the whole function with that shared file present; do not copy only `index.ts` into the Supabase Dashboard editor. The repository test command is `npm run test:device-management`. A GitHub Actions workflow runs those contract tests and compiles `esp32.cpp` against Arduino-ESP32 core 3.1.0.
+
 ## First-time board enrollment
 
 1. In VikaTech, open Admin Panel -> Hardware.
@@ -60,9 +68,10 @@ After that one-time flash and enrollment, supported Wi-Fi configuration updates 
 
 ## Remote Wi-Fi configuration
 
-- The password is encrypted server-side using AES-256-GCM before storage in `device_runtime_configs.encrypted_wifi_password`.
-- After the device's bearer token and board identity are verified, the Edge Function decrypts the stored value only in memory and encrypts the configuration into a second AES-256-GCM envelope bound to the exact board identifier and configuration version.
-- The firmware verifies the envelope's GCM authentication tag and the version before applying anything. The configuration is also delivered over CA-validated HTTPS; plaintext configuration secrets are not returned in the device-agent JSON response.
+- The password is encrypted at rest with AES-256-GCM before storage in `device_runtime_configs.encrypted_wifi_password`. The Edge Function decrypts it only in memory.
+- Before the configuration leaves the Edge Function, it is encrypted again with AES-256-GCM using a key derived from the authenticated board's unique device token. The additional authenticated data binds the envelope to the exact `board_identifier` and `config_version`.
+- The Edge Function returns `configuration_envelope` (`A256GCM`, schema version, config version, random IV, and ciphertext-plus-tag), never a plaintext `config` object containing the Wi-Fi password.
+- The ESP32 derives the same per-board key, authenticates/decrypts the envelope, checks the embedded version, and refuses to apply the settings if authentication fails. HTTPS remains mandatory; application-level encryption is an additional safeguard.
 - The ESP32 tests the selected SSID and then attempts a connection before it saves the accepted settings and config_version to NVS.
 - On a failed attempt it tries to reconnect using the last known-good settings and reports a failure when connectivity is restored.
 - Open-network mode is explicit. An empty password does not implicitly change a WPA2 configuration to an open network.
@@ -103,7 +112,7 @@ The GitHub Actions workflow also compiles `esp32.cpp` with Arduino-ESP32 core 3.
 
 - Never put the Supabase service-role key in shipped firmware or browser code. The device-agent function keeps it server-side and scopes operations to the authenticated device's board and customer.
 - Each board has an independent random token. Only its SHA-256 hash is used to authenticate it from the database; the recoverable token is encrypted server-side for the pre-first-check-in firmware download. Treat the generated firmware file as a secret and restrict access.
-- HTTPS verification requires Arduino-ESP32 core 3.x in this firmware branch. Older cores deliberately refuse device-agent requests instead of disabling certificate validation.
+- HTTPS verification requires Arduino-ESP32 core 3.3.12 in this firmware branch. The GitHub workflow pins this version so the secure WebSocket CA-bundle wrapper and device-agent code compile against the same core. Older cores deliberately refuse device-agent requests instead of disabling certificate validation.
 - The ESP32 Preferences (NVS) stores Wi-Fi credentials for offline startup. This code does not by itself enable encrypted NVS/flash. For production hardware, configure and test ESP32 flash encryption and Secure Boot (and NVS encryption where appropriate) for the exact ESP32 chip and manufacturing workflow.
 - PROVISIONING_ENCRYPTION_KEY rotation requires a planned migration for already stored encrypted values; do not rotate it casually.
 - No live cloud, firmware compilation, or physical relay test is implied by this code change. Validate the migration, secrets, Edge Function deployment, firmware compile, Wi-Fi rollback, restart acknowledgement, and hardware safely before relying on it.

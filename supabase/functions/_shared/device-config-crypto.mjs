@@ -22,8 +22,8 @@ export async function encryptDeviceConfigEnvelope(
     throw new Error("Invalid configuration version for encryption");
   }
 
-  // A board-specific key prevents an envelope intended for one board from
-  // being decrypted by another board. HTTPS provides transport encryption too.
+  // Derive a per-board encryption key from the board's unique bearer token.
+  // TLS is still required; this envelope adds at-rest-to-device protection.
   const keyMaterial = encoder.encode("vikatech-device-config-v1:" + deviceToken);
   const keyBytes = new Uint8Array(await crypto.subtle.digest("SHA-256", keyMaterial));
   const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
