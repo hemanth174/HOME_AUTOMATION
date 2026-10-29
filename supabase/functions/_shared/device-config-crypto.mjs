@@ -7,10 +7,10 @@ function base64Url(bytes: Uint8Array) {
 }
 
 export async function encryptDeviceConfigEnvelope(
-  deviceToken: string,
-  boardIdentifier: string,
-  configVersion: number,
-  configuration: Record<string, unknown>,
+  deviceToken,
+  boardIdentifier,
+  configVersion,
+  configuration,
 ) {
   if (typeof deviceToken !== "string" || deviceToken.length < 32) {
     throw new Error("A valid per-device token is required to encrypt the configuration");
