@@ -636,7 +636,7 @@ void handleDeviceGatewayEvent(WStype_t type, uint8_t* payload, size_t length) {
     case WStype_CONNECTED:
       deviceGatewayConnected = true;
       deviceWebSocket.setReconnectInterval(DEVICE_GATEWAY_CONNECTED_RECONNECT_INTERVAL);
-      Serial.printf("-> WSS device gateway connected: %s\n", deviceWebSocket.getUrl().c_str());
+      Serial.println("-> WSS device gateway connected.");
       break;
     case WStype_DISCONNECTED:
       deviceGatewayConnected = false;
