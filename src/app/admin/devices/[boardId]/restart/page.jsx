@@ -11,11 +11,15 @@ import {
 } from "lucide-react";
 
 const STEPS = [
-  { title: "Validate selected board", description: "Verify this board's identity and recent direct check-in." },
+  { title: "Validate selected board", description: "Verify this board's identity and recent direct or mesh-gateway availability." },
   { title: "Deliver restart command", description: "Queue an authenticated command for this exact board." },
   { title: "Restarting ESP32", description: "The firmware acknowledges the request, then reboots like pressing EN." },
   { title: "Verify reconnection", description: "Wait for the device-agent to check in after the reboot." },
 ];
+
+function targetOnlineForDisplay(config, mode) {
+  return Boolean(config?.directOnline || (mode === "mesh_gateway" && config?.meshOnline));
+}
 
 function timeText(value) {
   if (!value) return "—";
@@ -122,7 +126,7 @@ export default function DeviceRestartTrackerPage() {
 
       const directOnline = Boolean(nextConfig?.directOnline);
       const meshOnline = Boolean(nextConfig?.meshOnline);
-      const targetOnline = deliveryMode === "mesh_gateway" ? meshOnline : directOnline;
+      const targetOnline = directOnline || (deliveryMode === "mesh_gateway" && meshOnline);
       const status = nextCommand.status;
       const statusError = nextCommand.last_error || "";
 
@@ -137,7 +141,7 @@ export default function DeviceRestartTrackerPage() {
 
       if (status === "completed" && targetOnline) {
         const completionMessage = deliveryMode === "mesh_gateway"
-          ? "The ESP32 member restarted and the mesh leader has observed it rejoin the mesh."
+          ? "The ESP32 member restarted and is reachable again, directly or through its authorized mesh gateway."
           : "The ESP32 accepted the restart command, rebooted, and made a fresh authenticated device-agent check-in.";
         setState({
           status: "completed",
@@ -148,7 +152,7 @@ export default function DeviceRestartTrackerPage() {
           "complete",
           "ESP32 restarted successfully",
           deliveryMode === "mesh_gateway"
-            ? "Command acknowledgement and the selected member's return to the mesh were verified."
+            ? "Command acknowledgement and the selected member's return to the device network were verified."
             : "Command acknowledgement and direct device reconnection were verified."
         );
         return;
@@ -243,7 +247,7 @@ export default function DeviceRestartTrackerPage() {
           <div className="min-w-0">
             <p className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[.2em] text-accent"><Power size={14} /> VikaTech device operations</p>
             <h1 className="text-2xl font-black tracking-tight sm:text-4xl">ESP32 restart tracker</h1>
-            <p className="mt-2 break-all font-mono text-[10px] leading-5 text-text-muted">Board ID: {boardId}<br />Command ID: {commandId || "Resolving…"}</p>
+            <p className="mt-2 break-all font-mono text-[10px] leading-5 text-text-muted">Board ID: {boardId}<br />Command ID: {commandId || "Resolving…"}<br />Delivery: {deliveryMode === "mesh_gateway" ? "Mesh gateway" : "Direct device connection"}</p>
           </div>
           <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
             <Link href="/admin" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-card px-4 text-xs font-black hover:border-accent/50"><ArrowLeft size={14} /> Back to Admin Panel</Link>
@@ -288,7 +292,7 @@ export default function DeviceRestartTrackerPage() {
 
             {isComplete && <div className="mt-5 rounded-xl border border-emerald-400/30 bg-emerald-400/5 p-4">
               <div className="flex items-center gap-2 text-sm font-black text-emerald-500"><CheckCircle2 size={18} /> Device came back online</div>
-              <p className="mt-1 text-xs leading-5 text-text-muted">The command was completed and a fresh direct device-agent connection was confirmed.</p>
+              <p className="mt-1 text-xs leading-5 text-text-muted">{deliveryMode === "mesh_gateway" ? "The mesh-routed command completed and the selected device is reachable again." : "The command was completed and a fresh direct device-agent connection was confirmed."}</p>
               <p className="mt-2 text-[10px] text-text-muted">Last seen: {timeText(deviceConfig?.lastSeenAt)}</p>
             </div>}
             {isFailed && <div className="mt-5 rounded-xl border border-red-400/30 bg-red-400/5 p-4">
@@ -310,12 +314,13 @@ export default function DeviceRestartTrackerPage() {
               <p className="mt-3 break-words text-sm font-black">{board?.name || "Loading board…"}</p>
               <p className="mt-1 break-all font-mono text-[10px] text-text-muted">{board?.boardIdentifier || "Resolving board identity"}</p>
               <div className="mt-4 grid grid-cols-2 gap-2">
-                <div className="rounded-xl border border-border bg-background p-3"><p className="text-[10px] text-text-muted">Device status</p><p className="mt-1 flex items-center gap-1.5 text-xs font-black"><span className={"h-2 w-2 rounded-full " + (deviceConfig?.directOnline ? "bg-emerald-500" : "animate-pulse bg-amber-500")} />{deliveryMode === "mesh_gateway"
+                <div className="rounded-xl border border-border bg-background p-3"><p className="text-[10px] text-text-muted">Device status</p><p className="mt-1 flex items-center gap-1.5 text-xs font-black"><span className={"h-2 w-2 rounded-full " + (targetOnlineForDisplay(deviceConfig, deliveryMode) ? "bg-emerald-500" : "animate-pulse bg-amber-500")} />{deliveryMode === "mesh_gateway"
                     ? deviceConfig?.meshOnline ? "Mesh reachable" : "Waiting"
                     : deviceConfig?.directOnline ? "Online" : "Waiting"}</p></div>
                 <div className="rounded-xl border border-border bg-background p-3"><p className="text-[10px] text-text-muted">Command</p><p className="mt-1 break-words text-xs font-black">{command?.status || "Loading"}</p></div>
               </div>
-              {deviceConfig?.meshOnline && !deviceConfig?.directOnline && <p className="mt-3 text-xs leading-5 text-amber-600">The board is visible through the mesh, but only a direct check-in can verify this restart.</p>}
+              {deviceConfig?.meshOnline && !deviceConfig?.directOnline && deliveryMode === "direct" && <p className="mt-3 text-xs leading-5 text-amber-600">The board is visible through the mesh, but this restart is being verified using its direct connection.</p>}
+              {deliveryMode === "mesh_gateway" && <p className="mt-3 text-xs leading-5 text-amber-600">This restart was routed through the mesh leader. The tracker waits for the selected member to return; another board being online is not enough.</p>}
             </section>
 
             <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
