@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import {
-  Activity, AlertCircle, CheckCircle2, CircleHelp, Clock3, Cpu, Download,
+  Activity, AlertCircle, CheckCircle2, CircleHelp, Clock3, Cpu, Download, ExternalLink,
   LoaderCircle, Power, RefreshCw, Settings2, Wifi, WifiOff,
 } from "lucide-react";
 
@@ -296,9 +297,9 @@ export default function DeviceFleet() {
               Manage ESP32 boards, update Wi-Fi configuration, and request a software restart for an individual board.
             </p>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             <select value={filter} onChange={(event) => setFilter(event.target.value)}
-              className="min-h-11 rounded-xl border border-border bg-background px-3 text-xs font-bold outline-none focus:border-accent">
+              className="min-h-11 min-w-0 rounded-xl border border-border bg-background px-3 text-xs font-bold outline-none focus:border-accent">
               <option value="all">All boards</option>
               <option value="online">Online</option>
               <option value="offline">Offline</option>
@@ -308,6 +309,9 @@ export default function DeviceFleet() {
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-xs font-black hover:border-accent disabled:opacity-50">
               <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} /> Refresh
             </button>
+            <Link href="/" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-accent px-4 text-xs font-black text-[var(--btn-text)] hover:brightness-105">
+              <ExternalLink size={14} /> Back to VikaTech site
+            </Link>
           </div>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
