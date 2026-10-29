@@ -79,5 +79,6 @@ test("existing Wi-Fi tracker remains responsive and requires explicit open/WPA2 
   assert.match(tracker, /checking_wifi/);
   assert.match(tracker, /sm:flex-row|sm:grid-cols/);
   assert.match(configuration, /encrypted_wifi_password/);
-  assert.match(configuration, /DEVICE_NOT_DIRECTLY_CONNECTED/);
+  assert.match(configuration, /requiresProvisioning/);
+  assert.match(configuration, /status: 409/);
 });
