@@ -55,7 +55,11 @@ test("admin fleet and configuration tracker remain responsive and provide safe n
   assert.match(tracker, /checking_wifi/);
   assert.match(tracker, /config_version|configuration/i);
   assert.match(tracker, /sm:flex-row|sm:grid-cols/);
-  assert.match(restart, /DEVICE_NOT_DIRECTLY_CONNECTED/);
+  assert.match(restart, /deliveryMode:\s*directOnline\s*\?\s*'direct'\s*:\s*'mesh_gateway'/);
+  assert.match(restart, /last_mesh_seen_at/);
+  const firmware = await read("esp32.cpp");
+  assert.match(firmware, /forwardMeshRestart\(/);
+  assert.match(firmware, /targetBoardIdentifier/);
   assert.match(configuration, /wifiSsid/);
   assert.match(configuration, /encrypted_wifi_password/);
 });
