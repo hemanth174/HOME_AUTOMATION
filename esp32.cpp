@@ -4,6 +4,9 @@
 #include <WiFiClientSecure.h>
 #include <esp_arduino_version.h>
 #include <ArduinoJson.h>
+#include <mbedtls/base64.h>
+#include <mbedtls/gcm.h>
+#include <mbedtls/md.h>
 #include <WebServer.h>
 #include <Preferences.h>
 #include <time.h>
@@ -179,6 +182,7 @@ bool reportDeviceConfigStatus(int version, const String& status, const String& e
 bool acknowledgeDeviceCommand(const String& commandId, const String& status, const String& error = "");
 bool applyRemoteWifiConfiguration(JsonObject configuration);
 void processDeviceAgentResponse(JsonDocument& response);
+bool decryptDeviceConfigEnvelope(JsonObject envelope, DynamicJsonDocument& configOut);
 bool cloudStateSupersedesQueue(const PendingUpdate& queued, const String& cloudChangedAt);
 bool getPendingRelayUpdate(int index, PendingUpdate& result);
 bool discardPendingRelayUpdate(const PendingUpdate& expected);
@@ -1998,6 +2002,103 @@ bool applyRemoteWifiConfiguration(JsonObject configuration) {
   return true;
 }
 
+
+static bool decodeBase64Url(const String& encoded, uint8_t* output, size_t outputCapacity, size_t& decodedLength) {
+  String normalized = encoded;
+  normalized.replace("-", "+");
+  normalized.replace("_", "/");
+  while (normalized.length() % 4) normalized += "=";
+  decodedLength = 0;
+  const int rc = mbedtls_base64_decode(
+    output, outputCapacity, &decodedLength,
+    reinterpret_cast<const unsigned char*>(normalized.c_str()),
+    normalized.length()
+  );
+  return rc == 0;
+}
+
+bool decryptDeviceConfigEnvelope(JsonObject envelope, DynamicJsonDocument& configOut) {
+  if (String(envelope["scheme"] | "") != "A256GCM" ||
+      (envelope["schema_version"] | 0) != 1) {
+    Serial.println("Device-agent configuration envelope uses an unsupported scheme.");
+    return false;
+  }
+
+  const uint32_t version = envelope["config_version"] | 0;
+  const String ivText = envelope["iv"] | "";
+  const String ciphertextText = envelope["ciphertext"] | "";
+  if (version == 0 || ivText.length() == 0 || ciphertextText.length() == 0 ||
+      strlen(DEVICE_TOKEN) < 32 || String(BOARD_IDENTIFIER) == "esp32-unconfigured") {
+    Serial.println("Device-agent configuration envelope is incomplete.");
+    return false;
+  }
+
+  uint8_t iv[12] = {0};
+  size_t ivLength = 0;
+  uint8_t ciphertextAndTag[2048] = {0};
+  size_t ciphertextAndTagLength = 0;
+  if (!decodeBase64Url(ivText, iv, sizeof(iv), ivLength) || ivLength != sizeof(iv) ||
+      !decodeBase64Url(ciphertextText, ciphertextAndTag, sizeof(ciphertextAndTag), ciphertextAndTagLength) ||
+      ciphertextAndTagLength <= 16) {
+    Serial.println("Device-agent configuration envelope has invalid Base64 framing.");
+    return false;
+  }
+
+  // Must match device-config-crypto.mjs exactly. Board ID and version are
+  // authenticated as GCM additional data to prevent cross-board/replay swaps.
+  String keyMaterial = "vikatech-device-config-v1:" + String(DEVICE_TOKEN);
+  uint8_t key[32] = {0};
+  const mbedtls_md_info_t* digest = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  if (!digest || mbedtls_md(digest,
+      reinterpret_cast<const unsigned char*>(keyMaterial.c_str()),
+      keyMaterial.length(), key) != 0) {
+    Serial.println("Could not derive the device configuration decryption key.");
+    memset(key, 0, sizeof(key));
+    return false;
+  }
+
+  String additionalData = "VikaTech-ESP32-Config-v1|" + String(BOARD_IDENTIFIER) + "|" + String(version);
+  const size_t ciphertextLength = ciphertextAndTagLength - 16;
+  const unsigned char* tag = ciphertextAndTag + ciphertextLength;
+  uint8_t plaintext[2048] = {0};
+
+  mbedtls_gcm_context context;
+  mbedtls_gcm_init(&context);
+  int rc = mbedtls_gcm_setkey(&context, MBEDTLS_CIPHER_ID_AES, key, 256);
+  if (rc == 0) {
+    rc = mbedtls_gcm_auth_decrypt(
+      &context,
+      ciphertextLength,
+      iv, sizeof(iv),
+      reinterpret_cast<const unsigned char*>(additionalData.c_str()), additionalData.length(),
+      tag, 16,
+      ciphertextAndTag, plaintext
+    );
+  }
+  mbedtls_gcm_free(&context);
+  memset(key, 0, sizeof(key));
+  keyMaterial = "";
+
+  if (rc != 0) {
+    memset(plaintext, 0, sizeof(plaintext));
+    memset(ciphertextAndTag, 0, sizeof(ciphertextAndTag));
+    Serial.println("Device configuration authentication failed; refusing to apply it.");
+    return false;
+  }
+
+  configOut.clear();
+  const DeserializationError parseError = deserializeJson(configOut,
+      reinterpret_cast<const char*>(plaintext), ciphertextLength);
+  memset(plaintext, 0, sizeof(plaintext));
+  memset(ciphertextAndTag, 0, sizeof(ciphertextAndTag));
+  if (parseError || (uint32_t)(configOut["version"] | 0) != version) {
+    configOut.clear();
+    Serial.println("Decrypted device configuration failed JSON/version validation.");
+    return false;
+  }
+  return true;
+}
+
 void processDeviceAgentResponse(JsonDocument& response) {
   // Report a configuration failure saved locally during an outage/failed rollback.
   // A newer server version supersedes the old failure marker.
@@ -2035,8 +2136,17 @@ void processDeviceAgentResponse(JsonDocument& response) {
     pendingRestart = "";
   }
 
-  JsonObject config = response["config"].as<JsonObject>();
-  if (!config.isNull()) applyRemoteWifiConfiguration(config);
+  JsonObject envelope = response["configuration_envelope"].as<JsonObject>();
+  if (!envelope.isNull()) {
+    const uint32_t envelopeVersion = envelope["config_version"] | 0;
+    DynamicJsonDocument decryptedConfig(1536);
+    if (decryptDeviceConfigEnvelope(envelope, decryptedConfig)) {
+      applyRemoteWifiConfiguration(decryptedConfig.as<JsonObject>());
+    } else if (envelopeVersion > 0) {
+      reportDeviceConfigStatus(envelopeVersion, "failed",
+        "The device could not authenticate/decrypt the configuration envelope. Check firmware version and the device credential.");
+    }
+  }
 
   int cachedConfigVersion = 0;
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
@@ -2134,6 +2244,18 @@ bool requestDeviceAgentSnapshot(DynamicJsonDocument& response) {
   const bool ok = deviceAgentPost(payload, response) && (response["ok"] | false);
   if (ok && (response["wifi_config_registered"] | false)) {
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    const bool wasRegistered = preferences.getBool("wifi_registered", false);
+    const String serverStatus = response["server_config_status"] | "";
+    const uint32_t serverVersion = response["server_config_version"] | 0;
+    // A first check-in registers the already-connected network as applied. In
+    // that one case only, persist its initial version locally. A pending admin
+    // update must remain ahead of the local version until its encrypted payload
+    // passes authentication and the new Wi-Fi connection succeeds.
+    if (!wasRegistered && serverStatus == "applied" && serverVersion > 0 &&
+        serverVersion >= preferences.getUInt("cfg_ver", 0)) {
+      preferences.putInt("cfg_ver", (int)serverVersion);
+      deviceConfigVersion = serverVersion;
+    }
     preferences.putBool("wifi_registered", true);
     if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   }
