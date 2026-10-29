@@ -364,7 +364,7 @@ export default function DeviceFleet() {
             </div>
             <h2 className="mt-2 text-xl font-black sm:text-2xl">Customer hardware</h2>
             <p className="mt-1 max-w-2xl text-xs font-semibold leading-5 text-text-muted">
-              Manage ESP32 boards, update Wi-Fi configuration, and request a software restart for an individual board.
+              Manage ESP32 boards, view device logs, update Wi-Fi settings, and restart an individual board.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
@@ -531,11 +531,6 @@ export default function DeviceFleet() {
                     </>
                   )}
                 </div>
-                {needsEnrollment && (
-                  <p className="mt-2 text-[10px] leading-4 text-text-muted">
-                    {device.credentialRevoked ? "The previous device credential was revoked. " : "Enrollment requires one initial USB flash. "}Remote restart and configuration are unavailable until replacement firmware checks in.
-                  </p>
-                )}
                 <div className="mt-2 grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
                   <button type="button"
                     onClick={() => router.push("/admin/devices/" + encodeURIComponent(device.id) + "/logs")}
@@ -549,6 +544,12 @@ export default function DeviceFleet() {
                     </button>
                   )}
                 </div>
+                {needsEnrollment && (
+                  <p className="mt-2 text-[10px] leading-4 text-text-muted">
+                    {device.credentialRevoked ? "The previous device credential was revoked. " : "Enrollment requires one initial USB flash. "}Remote restart and configuration are unavailable until replacement firmware checks in.
+                  </p>
+                )}
+
 
               </article>
             );
