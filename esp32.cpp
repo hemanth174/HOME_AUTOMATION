@@ -2949,12 +2949,14 @@ void processDeviceAgentResponse(JsonDocument& response) {
   // `config` object is intentionally metadata-only and never contains a Wi-Fi
   // passphrase or device credential.
   JsonObject envelope = response["configuration_envelope"].as<JsonObject>();
+  bool configurationEnvelopeFailed = false;
   if (!envelope.isNull()) {
     const uint32_t envelopeVersion = envelope["config_version"] | 0;
     DynamicJsonDocument decryptedConfig(1536);
     if (decryptDeviceConfigEnvelope(envelope, decryptedConfig)) {
       applyRemoteWifiConfiguration(decryptedConfig.as<JsonObject>());
     } else if (envelopeVersion > 0) {
+      configurationEnvelopeFailed = true;
       reportDeviceConfigStatus(envelopeVersion, "failed",
         "The device could not authenticate/decrypt the configuration envelope. Check firmware and device credential.");
     }
