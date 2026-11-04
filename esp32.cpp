@@ -224,7 +224,7 @@ String deviceGatewayHeaders = "";
 bool deviceGatewayTls = true;
 volatile bool deviceGatewayConnected = false;
 unsigned long lastDeviceGatewayDiscovery = 0;
-const unsigned long DEVICE_GATEWAY_DISCOVERY_INTERVAL = 300000;
+const unsigned long DEVICE_GATEWAY_DISCOVERY_INTERVAL = 30000;
 const unsigned long DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL = 1000;
 const unsigned long DEVICE_GATEWAY_CONNECTED_RECONNECT_INTERVAL = 5000;
 void setRelay(int index, bool on, bool saveToNVS = true);
@@ -3394,6 +3394,7 @@ void cloudPollTask(void* parameter) {
       continue;
     }
     if (!isDeviceAgentConfigured()) pollDatabase();
-    vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL));
+    const unsigned long pollInterval = isDeviceGatewayConfigured() ? POLL_INTERVAL : 1000;
+    vTaskDelay(pdMS_TO_TICKS(pollInterval));
   }
 }
