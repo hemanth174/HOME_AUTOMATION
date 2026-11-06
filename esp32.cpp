@@ -157,6 +157,7 @@ volatile bool cloudDevicesReady = false;
 // keeping this at one second creates tens of thousands of Supabase requests.
 const unsigned long POLL_INTERVAL = 30000;
 const unsigned long HEARTBEAT_INTERVAL = 60000;
+const unsigned long FEEDBACK_RETRY_INTERVAL = 1000;
 struct Alarm { String id; String triggerAt; bool action; bool active; int deviceIndex; };
 #define MAX_ALARMS 20
 Alarm alarms[MAX_ALARMS];
@@ -245,6 +246,7 @@ void setupWebServer();
 void handleDeviceToggle(int rIndex);
 void enqueueOfflineUpdate(int index, bool state, bool isFeedback);
 bool flushOfflineQueue();
+bool hasPendingFeedbackUpdate();
 String getIsoTime();
 void evaluateLocalRole();
 bool tryJoinMeshLeader();
@@ -1611,6 +1613,20 @@ bool getPendingRelayUpdate(int index, PendingUpdate& result) {
   if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
   return found;
 }
+bool hasPendingFeedbackUpdate() {
+  bool found = false;
+  if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
+  for (int i = 0; i < queueCount; i++) {
+    if (offlineQueue[i].pending && offlineQueue[i].isFeedback &&
+        offlineQueue[i].deviceIndex >= 0 &&
+        offlineQueue[i].deviceIndex < NUM_DEVICES) {
+      found = true;
+      break;
+    }
+  }
+  if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
+  return found;
+}
 bool discardPendingRelayUpdate(const PendingUpdate& expected) {
   bool discarded = false;
   if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
@@ -1636,6 +1652,19 @@ bool flushOfflineQueue() {
   PendingUpdate work;
   bool found = false;
   if (offlineQueueMutex) xSemaphoreTake(offlineQueueMutex, portMAX_DELAY);
+  // Physical switch feedback is user-visible telemetry. Send it before
+  // queued relay commands so stale command retries cannot delay the UI.
+  for (int i = 0; i < queueCount; i++) {
+    if (offlineQueue[i].pending && offlineQueue[i].isFeedback &&
+        offlineQueue[i].deviceIndex >= 0 &&
+        offlineQueue[i].deviceIndex < NUM_DEVICES &&
+        deviceUUIDs[offlineQueue[i].deviceIndex] != "") {
+      work = offlineQueue[i];
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
   for (int i = 0; i < queueCount; i++) {
     if (!offlineQueue[i].pending || offlineQueue[i].deviceIndex < 0 ||
         offlineQueue[i].deviceIndex >= NUM_DEVICES ||
@@ -1643,6 +1672,7 @@ bool flushOfflineQueue() {
     work = offlineQueue[i];
     found = true;
     break;
+  }
   }
   if (offlineQueueMutex) xSemaphoreGive(offlineQueueMutex);
   if (!found) return true;
@@ -3348,9 +3378,16 @@ void cloudSyncTask(void* parameter) {
         pollSchedules();
       }
       if ((long)(millis() - nextQueueAttempt) >= 0) {
+        const bool feedbackPending = hasPendingFeedbackUpdate();
         bool queueOk = flushOfflineQueue(); // one update per pass
         if (queueOk) {
-          queueRetryDelay = 2000;
+          queueRetryDelay = feedbackPending
+            ? FEEDBACK_RETRY_INTERVAL
+            : 2000;
+        } else if (feedbackPending) {
+          // Feedback is telemetry, so a transient cloud failure must not
+          // inherit the long exponential backoff used for relay commands.
+          queueRetryDelay = FEEDBACK_RETRY_INTERVAL;
         } else {
           queueRetryDelay = min(queueRetryDelay * 2, (unsigned long)60000);
         }
