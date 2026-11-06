@@ -24,7 +24,9 @@ export function TimePicker12h({ value, onChange }) {
         className={selectClass}
       >
         {Array.from({ length: 12 }, (_, i) => i + 1).map((hour) => (
-          <option key={hour}>{String(hour).padStart(2, "0")}</option>
+          <option key={hour} value={hour}>
+            {String(hour).padStart(2, "0")}
+          </option>
         ))}
       </select>
       <span className="select-none text-lg font-extrabold text-text-muted">:</span>
