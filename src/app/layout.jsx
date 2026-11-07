@@ -23,8 +23,54 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata = {
-  title: "VikaTech",
-  description: "VikaTech Automation Control Panel",
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ||
+      "https://home-automation-mauve-one.vercel.app",
+  ),
+  title: {
+    default: "VikaTech | Smart Home Automation",
+    template: "%s | VikaTech",
+  },
+  description:
+    "VikaTech is a smart home automation platform for reliable cloud and local control of connected devices.",
+  applicationName: "VikaTech",
+  keywords: [
+    "VikaTech",
+    "smart home automation",
+    "ESP32 home automation",
+    "local smart home control",
+  ],
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    siteName: "VikaTech",
+    title: "VikaTech | Smart Home Automation",
+    description:
+      "Reliable cloud and local control for your connected home with VikaTech.",
+    url: "/",
+    images: [
+      {
+        url: "/vikatech-header-logo.png",
+        width: 1200,
+        height: 630,
+        alt: "VikaTech smart home automation",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "VikaTech | Smart Home Automation",
+    description:
+      "Reliable cloud and local control for your connected home with VikaTech.",
+    images: ["/vikatech-header-logo.png"],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    "max-image-preview": "large",
+  },
   manifest: "/manifest.json",
   icons: {
     icon: "/favicon.png",
@@ -66,6 +112,28 @@ export default function RootLayout({ children }) {
         />
       </head>
       <body>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "Organization",
+              name: "VikaTech",
+              url:
+                process.env.NEXT_PUBLIC_SITE_URL ||
+                "https://home-automation-mauve-one.vercel.app",
+              logo: {
+                "@type": "ImageObject",
+                url: `${
+                  process.env.NEXT_PUBLIC_SITE_URL ||
+                  "https://home-automation-mauve-one.vercel.app"
+                }/vikatech-logo.png`,
+              },
+              description:
+                "Smart home automation with reliable cloud and local device control.",
+            }),
+          }}
+        />
         <Script
           src="https://unpkg.com/@dotlottie/player-component@2.7.12/dist/dotlottie-player.mjs"
           type="module"

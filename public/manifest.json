@@ -1,7 +1,7 @@
 {
   "name": "VikaTech",
   "short_name": "VikaTech",
-  "description": "VikaTech Automation Control Panel",
+  "description": "VikaTech smart home automation with reliable cloud and local device control.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#FFFFFF",
