@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import ThemeToggle from "./ThemeToggle";
 
 export default function LandingPageHeader({
@@ -10,28 +11,29 @@ export default function LandingPageHeader({
   cartRef,
   cartShake,
   handleScroll,
-  mobileNavOpen,
   navItems,
   router,
-  setMobileNavOpen,
 }) {
+  const mobileNavRef = useRef(null);
+
+  useEffect(() => {
+    const activeItem = mobileNavRef.current?.querySelector(
+      `[data-nav-id="${activeNav}"]`,
+    );
+    activeItem?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "center",
+    });
+  }, [activeNav]);
+
   return (
     <>
       <header className="fixed top-0 w-full z-50 flex justify-between items-center px-4 md:px-6 py-3 md:py-4 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant">
         <div className="flex items-center gap-2 min-w-0">
-          <button
-            onClick={() => setMobileNavOpen((v) => !v)}
-            aria-label={mobileNavOpen ? "Close menu" : "Open menu"}
-            aria-expanded={mobileNavOpen}
-            className="lg:hidden w-11 h-11 -ml-1 rounded-lg border border-lp-outline-variant bg-lp-surface-low/60 flex items-center justify-center text-white active:scale-95 cursor-pointer shrink-0"
-          >
-            <span className="material-symbols-outlined text-xl">
-              {mobileNavOpen ? "close" : "menu"}
-            </span>
-          </button>
-          <div className="flex h-9 w-28 md:h-11 md:w-36 items-center justify-center overflow-hidden rounded-lg bg-white shadow-sm select-none shrink-0">
+          <div className="flex h-9 w-24 md:h-11 md:w-32 items-center justify-center overflow-hidden rounded-full bg-white shadow-sm select-none shrink-0">
             <img
-              src="/vikatech-logo.png"
+              src="/vikatech-header-logo.png"
               alt="VikaTech"
               className="h-full w-full object-contain"
             />
@@ -109,58 +111,19 @@ export default function LandingPageHeader({
           </button>
         </div>
       </header>
-      {mobileNavOpen && (
-        <div
-          className="lg:hidden fixed inset-0 z-40"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Site navigation"
-        >
-          <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={() => setMobileNavOpen(false)}
-          />
-          <nav className="absolute top-[64px] left-2 right-2 rounded-2xl border border-lp-outline-variant bg-lp-surface-lowest/95 backdrop-blur-xl shadow-2xl p-2 max-h-[70svh] overflow-y-auto">
-            {navItems.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => handleScroll(item.target)}
-                className={`w-full min-h-[48px] flex items-center justify-between px-4 py-3 rounded-xl font-label-caps text-[13px] tracking-wide transition-colors cursor-pointer ${
-                  activeNav === item.id
-                    ? "bg-lp-primary-container/10 text-lp-primary font-bold"
-                    : "text-lp-on-surface-variant hover:bg-white/5 hover:text-white"
-                }`}
-              >
-                <span className="flex items-center gap-3">
-                  <span
-                    className={`h-5 w-1 rounded-full ${activeNav === item.id ? "bg-lp-primary-container" : "bg-transparent"}`}
-                  />
-                  {item.label}
-                </span>
-                <span className="material-symbols-outlined text-base opacity-60">
-                  arrow_forward
-                </span>
-              </button>
-            ))}
-            <button
-              onClick={() => router.push("/login")}
-              className="w-full min-h-[48px] mt-2 px-4 py-3 rounded-xl border border-lp-primary-container/40 text-lp-primary font-label-caps text-[13px] font-bold hover:bg-lp-primary-container/10 transition-all cursor-pointer"
-            >
-              Login
-            </button>
-          </nav>
-        </div>
-      )}
       <div className="lg:hidden fixed top-[64px] left-0 right-0 z-30 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant/60">
         <div
+          ref={mobileNavRef}
           className="flex gap-2 overflow-x-auto px-3 py-2 scrollbar-none"
           style={{ scrollbarWidth: "none" }}
         >
           {navItems.map((item) => (
             <button
               key={item.id}
+              data-nav-id={item.id}
               onClick={() => handleScroll(item.target)}
-              className={`shrink-0 min-h-[36px] px-3.5 rounded-full border text-[11px] font-label-caps font-bold whitespace-nowrap transition-all cursor-pointer ${
+              onMouseEnter={() => handleScroll(item.target)}
+              className={`shrink-0 min-h-[36px] px-3.5 rounded-full border text-[11px] font-label-caps font-bold whitespace-nowrap transition-all cursor-pointer hover:border-lp-primary-container hover:text-lp-primary hover:bg-lp-primary-container/10 ${
                 activeNav === item.id
                   ? "bg-lp-primary-container text-lp-on-primary-container border-lp-primary-container"
                   : "bg-lp-surface-low text-lp-on-surface-variant border-lp-outline-variant"

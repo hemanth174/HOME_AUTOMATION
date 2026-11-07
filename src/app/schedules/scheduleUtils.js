@@ -1,6 +1,16 @@
 export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export const DAY_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+export function getCurrentTime() {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
+
+export function normalizeDays(daysArr) {
+  if (!Array.isArray(daysArr)) return [];
+  return [...new Set(daysArr.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].sort((a, b) => a - b);
+}
+
 export function formatTime(timeStr) {
   const [h, m] = timeStr.split(":");
   const hour = parseInt(h, 10);
@@ -8,22 +18,24 @@ export function formatTime(timeStr) {
 }
 
 export function formatDays(daysArr) {
-  if (!daysArr || daysArr.length === 0) return "No days selected";
-  if (daysArr.length === 7) return "Every day";
-  if ([1, 2, 3, 4, 5].every((d) => daysArr.includes(d)) && daysArr.length === 5) return "Weekdays (Mon – Fri)";
-  if ([0, 6].every((d) => daysArr.includes(d)) && daysArr.length === 2) return "Weekends (Sat & Sun)";
-  return daysArr.map((d) => DAY_NAMES[d]).join(", ");
+  const days = normalizeDays(daysArr);
+  if (days.length === 0) return "No days selected";
+  if (days.length === 7) return "Every day";
+  if ([1, 2, 3, 4, 5].every((d) => days.includes(d)) && days.length === 5) return "Weekdays (Mon – Fri)";
+  if ([0, 6].every((d) => days.includes(d)) && days.length === 2) return "Weekends (Sat & Sun)";
+  return days.map((d) => DAY_NAMES[d]).join(", ");
 }
 
 export function formatNextRun(daysArr, timeStr) {
-  if (!daysArr?.length) return null;
+  const days = normalizeDays(daysArr);
+  if (!days.length) return null;
   const [h, m] = timeStr.split(":").map(Number);
   const now = new Date();
   for (let offset = 0; offset <= 7; offset++) {
     const candidate = new Date(now);
     candidate.setDate(now.getDate() + offset);
     candidate.setHours(h, m, 0, 0);
-    if (daysArr.includes(candidate.getDay()) && candidate > now) {
+    if (days.includes(candidate.getDay()) && candidate > now) {
       return candidate.toLocaleString("en-US", { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
     }
   }

@@ -34,7 +34,6 @@ export default function LandingPage() {
   const [cartShake, setCartShake] = useState(false);
   const [flyItem, setFlyItem] = useState(null);
   const [activeNav, setActiveNav] = useState("home");
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const handleAddToCart = (e, navigateTo) => {
     const rect = cartRef.current?.getBoundingClientRect();
@@ -68,7 +67,6 @@ export default function LandingPage() {
 
   const handleScroll = (id) => {
     setActiveNav(id === "top" ? "home" : id);
-    setMobileNavOpen(false);
     if (id === "top") {
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
@@ -142,10 +140,8 @@ export default function LandingPage() {
         cartRef={cartRef}
         cartShake={cartShake}
         handleScroll={handleScroll}
-        mobileNavOpen={mobileNavOpen}
         navItems={NAV_ITEMS}
         router={router}
-        setMobileNavOpen={setMobileNavOpen}
       />
       {flyItem && (
         <span

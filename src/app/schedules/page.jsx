@@ -79,7 +79,7 @@ export default function SchedulesPage() {
               </button>
             )}
             <button
-              onClick={() => state.setShowModal(true)}
+              onClick={state.openCreateModal}
               className="whitespace-nowrap rounded-lg bg-accent px-4 py-1 text-xs font-extrabold text-(--btn-text) cursor-pointer"
             >
               Add Schedule

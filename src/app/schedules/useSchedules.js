@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { DAY_NAMES, formatTime, validateTime } from "./scheduleUtils";
+import { DAY_NAMES, formatTime, getCurrentTime, normalizeDays, validateTime } from "./scheduleUtils";
 
 const SELECT = "id, time, enabled, days, action, device_id, devices(name, boards(name))";
 
@@ -9,7 +9,7 @@ export default function useSchedules() {
   const [user, setUser] = useState(null), [schedules, setSchedules] = useState([]), [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true), [toast, setToast] = useState("");
   const [showModal, setShowModal] = useState(false), [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
-  const [selectedDevices, setSelectedDevices] = useState([]), [scheduleTime, setScheduleTime] = useState("08:00");
+  const [selectedDevices, setSelectedDevices] = useState([]), [scheduleTime, setScheduleTime] = useState(getCurrentTime);
   const [scheduleDays, setScheduleDays] = useState([]), [scheduleAction, setScheduleAction] = useState(true);
   const [timeConfirmed, setTimeConfirmed] = useState(false), [timeError, setTimeError] = useState("");
   const [editingSchedule, setEditingSchedule] = useState(null);
@@ -30,16 +30,21 @@ export default function useSchedules() {
     return () => supabase.removeChannel(channel);
   }, [user, fetchSchedules]);
 
-  const closeModal = useCallback(() => { setShowModal(false); setScheduleDays([]); setScheduleTime("08:00"); setScheduleAction(true); setTimeConfirmed(false); setTimeError(""); setEditingSchedule(null); setSelectedDevices([]); }, []);
-  const openEditModal = useCallback((schedule) => { setEditingSchedule(schedule); setSelectedDevices([schedule.device_id]); setScheduleTime(schedule.time.substring(0, 5)); setScheduleDays(schedule.days); setScheduleAction(schedule.action); setTimeConfirmed(true); setTimeError(""); setShowModal(true); }, []);
+  const closeModal = useCallback(() => { setShowModal(false); setScheduleDays([]); setScheduleTime(getCurrentTime()); setScheduleAction(true); setTimeConfirmed(false); setTimeError(""); setEditingSchedule(null); setSelectedDevices([]); }, []);
+  const openCreateModal = useCallback(() => { setEditingSchedule(null); setSelectedDevices([]); setScheduleTime(getCurrentTime()); setScheduleDays([]); setScheduleAction(true); setTimeConfirmed(false); setTimeError(""); setShowModal(true); }, []);
+  const openEditModal = useCallback((schedule) => { setEditingSchedule(schedule); setSelectedDevices([schedule.device_id]); setScheduleTime(schedule.time.substring(0, 5)); setScheduleDays(normalizeDays(schedule.days)); setScheduleAction(schedule.action); setTimeConfirmed(true); setTimeError(""); setShowModal(true); }, []);
   const handleTimeChange = useCallback((value) => { setScheduleTime(value); setTimeConfirmed(false); setTimeError(validateTime(value).error); }, []);
-  const toggleDay = useCallback((day) => setScheduleDays((days) => days.includes(day) ? days.filter((d) => d !== day) : [...days, day]), []);
+  const toggleDay = useCallback((day) => setScheduleDays((days) => {
+    if (day === "all") return days.length === 7 ? [] : [0, 1, 2, 3, 4, 5, 6];
+    const numericDay = Number(day);
+    return normalizeDays(days.includes(numericDay) ? days.filter((d) => d !== numericDay) : [...days, numericDay]);
+  }), []);
   const toggleDeviceSelection = useCallback((idOrIds, force) => setSelectedDevices((current) => Array.isArray(idOrIds) ? force ? [...new Set([...current, ...idOrIds])] : current.filter((id) => !idOrIds.includes(id)) : current.includes(idOrIds) ? current.filter((id) => id !== idOrIds) : [...current, idOrIds]), []);
   const scheduleDraftChanged = !editingSchedule ||
     selectedDevices.length !== 1 ||
     selectedDevices[0] !== editingSchedule.device_id ||
     scheduleTime !== editingSchedule.time.substring(0, 5) ||
-    JSON.stringify([...scheduleDays].sort()) !== JSON.stringify([...(editingSchedule.days || [])].sort()) ||
+    JSON.stringify(normalizeDays(scheduleDays)) !== JSON.stringify(normalizeDays(editingSchedule.days)) ||
     scheduleAction !== editingSchedule.action;
   const deleteSchedule = useCallback(async (id) => { const { error } = await supabase.from("schedules").delete().eq("id", id).eq("user_id", user.id); if (error) { setToast(`Could not delete schedule: ${error.message}`); return false; } setSchedules((all) => all.filter((s) => s.id !== id)); setToast("Schedule deleted"); return true; }, [user]);
   const toggleSchedule = useCallback(async (schedule) => { const { error } = await supabase.from("schedules").update({ enabled: !schedule.enabled }).eq("id", schedule.id).eq("user_id", user.id); if (error) { setToast(`Could not ${schedule.enabled ? "disable" : "enable"} schedule: ${error.message}`); return false; } setSchedules((all) => all.map((s) => s.id === schedule.id ? { ...s, enabled: !schedule.enabled } : s)); return true; }, [user]);
@@ -52,13 +57,13 @@ export default function useSchedules() {
     const { valid, error } = validateTime(scheduleTime);
     if (!valid) return setTimeError(error);
     const uniqueDeviceIds = [...new Set(selectedDevices)];
-    const [newH, newM] = scheduleTime.split(":").map(Number), days = [...scheduleDays].sort();
+    const [newH, newM] = scheduleTime.split(":").map(Number), days = normalizeDays(scheduleDays);
     for (const deviceId of uniqueDeviceIds) {
-      const conflicts = schedules.filter((s) => s.device_id === deviceId && s.enabled && (!editingSchedule || s.id !== editingSchedule.id) && s.time.split(":").map(Number)[0] === newH && s.time.split(":").map(Number)[1] === newM && days.some((d) => s.days.includes(d)));
+      const conflicts = schedules.filter((s) => s.device_id === deviceId && s.enabled && (!editingSchedule || s.id !== editingSchedule.id) && s.time.split(":").map(Number)[0] === newH && s.time.split(":").map(Number)[1] === newM && days.some((d) => normalizeDays(s.days).includes(d)));
       if (conflicts.length) {
         const conflict = conflicts.find((s) => s.action === scheduleAction) || conflicts[0];
         const name = devices.find((d) => d.id === deviceId)?.name || "A device";
-        const overlap = days.filter((d) => conflict.days.includes(d)).map((d) => DAY_NAMES[d]).join(", ");
+        const overlap = days.filter((d) => normalizeDays(conflict.days).includes(d)).map((d) => DAY_NAMES[d]).join(", ");
         setToast(`${conflict.action === scheduleAction ? "Duplicate" : "Conflict"}: ${name} already has a schedule to Turn ${conflict.action ? "ON" : "OFF"} at ${formatTime(scheduleTime)} on ${overlap}.${conflict.action === scheduleAction ? "" : " Delete it first."}`);
         return;
       }
@@ -84,5 +89,5 @@ export default function useSchedules() {
     }
   }, [selectedDevices, scheduleDays, timeConfirmed, scheduleTime, schedules, editingSchedule, scheduleAction, devices, user, closeModal, isSaving, scheduleDraftChanged]);
   const deleteAllSchedules = useCallback(async () => { const { error } = await supabase.from("schedules").delete().eq("user_id", user.id); if (error) return setToast(`Could not delete schedules: ${error.message}`); setSchedules([]); setShowDeleteAllModal(false); setToast("All schedules deleted"); }, [user]);
-  return { user, schedules, devices, loading, toast, setToast, showModal, setShowModal, showDeleteAllModal, setShowDeleteAllModal, selectedDevices, scheduleTime, scheduleDays, scheduleAction, setScheduleAction, timeConfirmed, timeError, editingSchedule, isSaving, scheduleDraftChanged, closeModal, openEditModal, handleTimeChange, toggleDay, toggleDeviceSelection, addSchedule, deleteSchedule, toggleSchedule, deleteAllSchedules, confirmTime: () => { const result = validateTime(scheduleTime); setTimeError(result.error); if (result.valid) setTimeConfirmed(true); } };
+  return { user, schedules, devices, loading, toast, setToast, showModal, setShowModal, showDeleteAllModal, setShowDeleteAllModal, selectedDevices, scheduleTime, scheduleDays, scheduleAction, setScheduleAction, timeConfirmed, timeError, editingSchedule, isSaving, scheduleDraftChanged, closeModal, openCreateModal, openEditModal, handleTimeChange, toggleDay, toggleDeviceSelection, addSchedule, deleteSchedule, toggleSchedule, deleteAllSchedules, confirmTime: () => { const result = validateTime(scheduleTime); setTimeError(result.error); if (result.valid) setTimeConfirmed(true); } };
 }

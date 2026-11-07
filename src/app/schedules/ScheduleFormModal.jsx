@@ -97,7 +97,7 @@ export default function ScheduleFormModal({ state }) {
             <label className="text-xs font-extrabold tracking-wide text-text-muted">
               Repeat Days
             </label>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {DAY_NAMES.map((name, idx) => (
                 <button
                   key={name}
@@ -113,6 +113,17 @@ export default function ScheduleFormModal({ state }) {
                   {name[0]}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => toggleDay("all")}
+                className={`rounded-full border px-3 h-[38px] text-xs font-extrabold cursor-pointer ${
+                  scheduleDays.length === 7
+                    ? "border-accent bg-accent text-(--btn-text)"
+                    : "border-border bg-input text-text-muted"
+                }`}
+              >
+                Every day
+              </button>
             </div>
           </div>
 

@@ -12,7 +12,7 @@ import { formatDays, formatNextRun, formatTime } from "./scheduleUtils";
 export default function ScheduleList({ state, onCommand, onDelete }) {
   const {
     schedules,
-    setShowModal,
+    openCreateModal,
     toggleSchedule,
     openEditModal,
     deleteSchedule,
@@ -30,7 +30,7 @@ export default function ScheduleList({ state, onCommand, onDelete }) {
           days of the week at a set time.
         </p>
         <button
-          onClick={() => setShowModal(true)}
+          onClick={openCreateModal}
           className="rounded-xl bg-accent px-5 py-2 text-xs font-extrabold text-(--btn-text) cursor-pointer"
         >
           Add Your First Schedule
