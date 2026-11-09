@@ -7,7 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { isAdminEmail } from "@/lib/admin";
 import {
   ArrowLeft, Check, CheckCircle2, Clock3, Cpu, ExternalLink,
-  LoaderCircle, Power, RefreshCw, ShieldAlert, Wifi, WifiOff, XCircle,
+  LoaderCircle, Power, RefreshCw, RotateCcw, ShieldAlert, Wifi, WifiOff, XCircle,
 } from "lucide-react";
 
 const STEPS = [
