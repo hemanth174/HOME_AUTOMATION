@@ -14,8 +14,14 @@ import {
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const ALARM_LOOKBACK_MS = 2 * 60 * 1000;
-const SCHEDULE_LOOKBACK_MS = 2 * 60 * 1000;
+// `trigger_at` is stored as a UTC instant and the device/client also use a
+// bounded catch-up window. Five minutes tolerates delayed cron invocations
+// without resurrecting alarms that expired hours or days ago.
+const ALARM_LOOKBACK_MS = 5 * 60 * 1000;
+// The external per-minute trigger normally lands on time. Five minutes keeps
+// schedules reliable when a trigger is skipped or delayed; schedule_runs makes
+// repeated catch-up passes idempotent.
+const SCHEDULE_LOOKBACK_MS = 5 * 60 * 1000;
 const ENERGY_INTERVAL_MINUTES = 5;
 
 function formatScheduleTime(time) {
@@ -37,9 +43,13 @@ function groupByUser(rows) {
 }
 
 async function runAlarms(admin, getSettings, now, stats) {
+  // Only alarms inside the catch-up window are loaded. Older unfired alarms are
+  // intentionally left untouched so the UI can keep showing them as expired
+  // instead of firing them hours or days late.
   const { data: alarms, error } = await admin
     .from('alarms')
     .select('id, user_id, trigger_at, action, device_id, devices(name)')
+    .eq('fired', false)
     .gte('trigger_at', new Date(now.getTime() - ALARM_LOOKBACK_MS).toISOString())
     .lte('trigger_at', now.toISOString());
 
@@ -50,22 +60,73 @@ async function runAlarms(admin, getSettings, now, stats) {
 
   for (const alarm of alarms || []) {
     try {
+      // Claim atomically so this cron, the browser executor, and the ESP32
+      // never act on the same alarm. Only the winner gets a row back.
+      const { data: claimedRows, error: claimError } = await admin
+        .from('alarms')
+        .update({ fired: true })
+        .eq('id', alarm.id)
+        .eq('user_id', alarm.user_id)
+        .eq('fired', false)
+        .select('id');
+
+      if (claimError) {
+        stats.errors.push(`alarm ${alarm.id} claim: ${claimError.message}`);
+        continue;
+      }
+      if (!claimedRows?.length) continue;
+
+      // Execute the relay change in the cloud so the ESP32 reconciles it on
+      // its next poll even when no browser is open.
+      const { data: updated, error: updateError } = await admin
+        .from('devices')
+        .update({ is_on: Boolean(alarm.action), last_changed: now.toISOString() })
+        .eq('id', alarm.device_id)
+        .eq('user_id', alarm.user_id)
+        .select('id');
+
+      if (updateError || !updated?.length) {
+        // Release the claim so another executor can retry this alarm.
+        await admin
+          .from('alarms')
+          .update({ fired: false })
+          .eq('id', alarm.id)
+          .eq('user_id', alarm.user_id);
+        stats.errors.push(
+          `alarm ${alarm.id} device update: ${updateError?.message || 'device not found'}`,
+        );
+        continue;
+      }
+
+      const deviceName = alarm.devices?.name || 'Device';
+      const { error: logError } = await admin.from('activity_logs').insert({
+        user_id: alarm.user_id,
+        device_id: alarm.device_id,
+        device_name: deviceName,
+        action: `turned ${alarm.action ? 'ON' : 'OFF'}`,
+        triggered_by: 'Alarm (server)',
+      });
+      if (logError) {
+        stats.errors.push(`alarm ${alarm.id} activity log: ${logError.message}`);
+      }
+
+      stats.alarmRuns += 1;
+
+      // Notifications are optional; execution above must happen regardless.
       const settings = getSettings(alarm.user_id);
       if (!settings.notifications_enabled || !settings.notify_alarm) continue;
-      const deviceName = alarm.devices?.name || 'Device';
-      const action = alarm.action ? 'ON' : 'OFF';
       const result = await dispatchNotification(admin, {
         userId: alarm.user_id,
         type: 'alarm',
         title: 'Alarm fired',
-        body: `${deviceName} turned ${action}.`,
+        body: `${deviceName} turned ${alarm.action ? 'ON' : 'OFF'}.`,
         url: '/alarms',
         dedupeKey: `alarm:${alarm.id}`,
         data: { alarm_id: alarm.id, device_id: alarm.device_id },
       });
       if (result) stats.alarms += 1;
-    } catch (error) {
-      stats.errors.push(`alarm ${alarm.id}: ${error.message}`);
+    } catch (caught) {
+      stats.errors.push(`alarm ${alarm.id}: ${caught.message}`);
     }
   }
 }
@@ -119,13 +180,22 @@ async function executeSchedule(admin, schedule, claim, stats) {
     .from('schedule_runs')
     .update({ executed_at: now.toISOString() })
     .eq('id', claim.id);
+
+  // A one-time schedule must not fire again after its date has passed.
+  if (schedule.run_date) {
+    await admin
+      .from('schedules')
+      .update({ enabled: false })
+      .eq('id', schedule.id)
+      .eq('user_id', schedule.user_id);
+  }
   return true;
 }
 
 async function runSchedules(admin, getSettings, now, stats) {
   const { data: schedules, error } = await admin
     .from('schedules')
-    .select('id, user_id, time, days, action, device_id, enabled, devices(name)')
+    .select('id, user_id, time, days, action, device_id, enabled, run_date, devices(name)')
     .eq('enabled', true);
 
   if (error) {
@@ -168,7 +238,9 @@ async function runSchedules(admin, getSettings, now, stats) {
         }
       }
 
-      const executionFrom = new Date(now.getTime() - SCHEDULE_LOOKBACK_MS);
+      // Offset by one second so occurrences exactly at the lookback boundary
+      // are still returned by the strictly-greater comparison.
+      const executionFrom = new Date(now.getTime() - SCHEDULE_LOOKBACK_MS - 1000);
       const executionOccurrence = getNextScheduleOccurrence(schedule, executionFrom, timeZone);
       if (
         executionOccurrence &&
@@ -298,6 +370,7 @@ export async function GET(request) {
   const now = new Date();
   const stats = {
     alarms: 0,
+    alarmRuns: 0,
     scheduleNotifications: 0,
     scheduleRuns: 0,
     energy: 0,

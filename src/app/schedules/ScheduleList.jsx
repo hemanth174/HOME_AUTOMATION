@@ -7,7 +7,7 @@ import {
   Trash2,
 } from "lucide-react";
 import CardVoiceButton from "@/components/CardVoiceButton";
-import { formatDays, formatNextRun, formatTime } from "./scheduleUtils";
+import { formatDays, formatNextRun, formatScheduleDate, formatTime } from "./scheduleUtils";
 
 export default function ScheduleList({ state, onCommand, onDelete }) {
   const {
@@ -61,12 +61,14 @@ export default function ScheduleList({ state, onCommand, onDelete }) {
                 Turn {schedule.action ? "ON" : "OFF"}
               </div>
               <div className="mt-1 text-xs font-semibold text-text-muted">
-                Days: {formatDays(schedule.days)}
+                {schedule.run_date
+                  ? `Once on ${formatScheduleDate(schedule.run_date)}`
+                  : `Days: ${formatDays(schedule.days)}`}
               </div>
               {schedule.enabled &&
-                formatNextRun(schedule.days, schedule.time) && (
+                formatNextRun(schedule.days, schedule.time, schedule.run_date) && (
                   <div className="mt-1.5 text-[10px] font-extrabold text-accent">
-                    Next run: {formatNextRun(schedule.days, schedule.time)}
+                    Next run: {formatNextRun(schedule.days, schedule.time, schedule.run_date)}
                   </div>
                 )}
             </div>

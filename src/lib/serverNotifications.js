@@ -132,10 +132,24 @@ function parseScheduleTime(time) {
 
 export function getNextScheduleOccurrence(schedule, from, timeZone = 'Asia/Kolkata') {
   const time = parseScheduleTime(schedule?.time);
+  if (!time) return null;
+
+  // A one-time schedule carries an explicit local calendar date. It runs once
+  // on that date regardless of `days`.
+  const runDate = typeof schedule?.run_date === 'string'
+    ? schedule.run_date.slice(0, 10)
+    : null;
+  if (runDate) {
+    const [year, month, day] = runDate.split('-').map(Number);
+    if (!year || !month || !day) return null;
+    const candidate = zonedTimeToUtc(year, month, day, time.hour, time.minute, timeZone);
+    return candidate.getTime() > from.getTime() ? candidate : null;
+  }
+
   const days = Array.isArray(schedule?.days)
     ? new Set(schedule.days.map((day) => Number(day)))
     : null;
-  if (!time || !days?.size) return null;
+  if (!days?.size) return null;
 
   const localNow = getTimeZoneParts(from, timeZone);
   for (let offset = 0; offset <= 8; offset += 1) {

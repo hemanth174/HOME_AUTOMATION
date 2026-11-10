@@ -1,0 +1,52 @@
+name: Notifications cron
+
+# Vercel Hobby can only run crons once per day. This workflow provides the
+# minute-resolution trigger the automation needs: it starts every 5 minutes and
+# pings the endpoint once a minute for the duration of the window.
+#
+# Required repository secrets:
+#   APP_URL      - production origin, e.g. https://example.vercel.app
+#   CRON_SECRET  - same value as the CRON_SECRET environment variable on Vercel
+#
+# For maximum reliability use a dedicated scheduler such as cron-job.org to call
+# the same endpoint every minute instead of (or in addition to) this workflow.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: notifications-cron
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Ping notification cron once a minute
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -u
+          if [ -z "${APP_URL:-}" ]; then
+            echo "APP_URL repository secret is not set" >&2
+            exit 1
+          fi
+
+          auth=()
+          if [ -n "${CRON_SECRET:-}" ]; then
+            auth=(-H "Authorization: Bearer ${CRON_SECRET}")
+          fi
+
+          for attempt in 0 1 2 3 4; do
+            curl -fsS --max-time 60 "${auth[@]}" \
+              "${APP_URL%/}/api/cron/notifications" || echo "notifications ping ${attempt} failed"
+            curl -fsS --max-time 60 "${auth[@]}" \
+              "${APP_URL%/}/api/cron/approval-reminders" || echo "approval reminder ping ${attempt} failed"
+            if [ "${attempt}" -lt 4 ]; then
+              sleep 60
+            fi
+          done

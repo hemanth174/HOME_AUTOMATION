@@ -26,11 +26,67 @@ export function formatDays(daysArr) {
   return days.map((d) => DAY_NAMES[d]).join(", ");
 }
 
-export function formatNextRun(daysArr, timeStr) {
-  const days = normalizeDays(daysArr);
-  if (!days.length) return null;
+export function toDateInputValue(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+export function parseDateInput(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ""));
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+  return date;
+}
+
+export function validateScheduleDate(value) {
+  const date = parseDateInput(value);
+  if (!date) return { valid: false, error: "Please pick a valid date." };
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(date);
+  target.setHours(0, 0, 0, 0);
+  if (target < today) return { valid: false, error: "Date must be today or later." };
+  return { valid: true, error: "", date: target };
+}
+
+export function formatScheduleDate(value) {
+  const date = parseDateInput(value);
+  if (!date) return "";
+  return date.toLocaleDateString("en-US", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+export function weekdayFromDate(value) {
+  const date = parseDateInput(value);
+  return date ? date.getDay() : null;
+}
+
+export function formatNextRun(daysArr, timeStr, runDate = null) {
   const [h, m] = timeStr.split(":").map(Number);
   const now = new Date();
+  if (runDate) {
+    const date = parseDateInput(runDate);
+    if (!date) return null;
+    date.setHours(h, m, 0, 0);
+    if (date <= now) return null;
+    return date.toLocaleString("en-US", { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
+  }
+  const days = normalizeDays(daysArr);
+  if (!days.length) return null;
   for (let offset = 0; offset <= 7; offset++) {
     const candidate = new Date(now);
     candidate.setDate(now.getDate() + offset);
@@ -43,12 +99,18 @@ export function formatNextRun(daysArr, timeStr) {
 }
 
 export function getNextScheduleOccurrenceLocal(schedule, from = new Date()) {
-  if (!Array.isArray(schedule?.days) || !schedule.days.length || !schedule.time) {
-    return null;
-  }
+  if (!schedule?.time) return null;
   const [hour, minute] = String(schedule.time).split(":").map(Number);
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
 
+  if (schedule.run_date) {
+    const date = parseDateInput(schedule.run_date);
+    if (!date) return null;
+    date.setHours(hour, minute, 0, 0);
+    return date > from ? date : null;
+  }
+
+  if (!Array.isArray(schedule?.days) || !schedule.days.length) return null;
   const days = new Set(schedule.days.map(Number));
   for (let offset = 0; offset <= 8; offset += 1) {
     const candidate = new Date(from);

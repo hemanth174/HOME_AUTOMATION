@@ -1,5 +1,5 @@
 "use client";
-import { DAY_FULL, DAY_NAMES, formatDays, formatTime } from "./scheduleUtils";
+import { DAY_FULL, DAY_NAMES, formatDays, formatScheduleDate, formatTime, toDateInputValue } from "./scheduleUtils";
 import { DevicePicker, TimePicker12h } from "./SchedulePickers";
 
 export default function ScheduleFormModal({ state }) {
@@ -11,6 +11,10 @@ export default function ScheduleFormModal({ state }) {
     scheduleDays,
     scheduleTime,
     scheduleAction,
+    scheduleMode,
+    scheduleDate,
+    setScheduleDate,
+    changeScheduleMode,
     timeError,
     timeConfirmed,
     isSaving,
@@ -48,13 +52,19 @@ export default function ScheduleFormModal({ state }) {
                   {selectedDevices.length !== 1 ? "s" : ""}
                 </p>
               )}
-              {scheduleDays.length > 0 && (
+              {scheduleMode === "once" && scheduleDate ? (
+                <p className="text-[11px] font-bold text-accent">
+                  <span className="rounded border p-0.5">
+                    Once · {formatScheduleDate(scheduleDate)}
+                  </span>
+                </p>
+              ) : scheduleDays.length > 0 ? (
                 <p className="text-[11px] font-bold text-accent">
                   <span className="rounded border p-0.5">
                     {formatDays(scheduleDays)}
                   </span>
                 </p>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
@@ -95,37 +105,87 @@ export default function ScheduleFormModal({ state }) {
 
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-extrabold tracking-wide text-text-muted">
-              Repeat Days
+              Repeat
             </label>
-            <div className="flex flex-wrap items-center gap-2">
-              {DAY_NAMES.map((name, idx) => (
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-input p-1">
+              <button
+                type="button"
+                onClick={() => changeScheduleMode("weekly")}
+                className={`rounded-md px-3 py-2 text-xs font-extrabold cursor-pointer transition-colors ${
+                  scheduleMode === "weekly"
+                    ? "bg-accent text-(--btn-text)"
+                    : "text-text-muted hover:text-text"
+                }`}
+              >
+                Repeat weekly
+              </button>
+              <button
+                type="button"
+                onClick={() => changeScheduleMode("once")}
+                className={`rounded-md px-3 py-2 text-xs font-extrabold cursor-pointer transition-colors ${
+                  scheduleMode === "once"
+                    ? "bg-accent text-(--btn-text)"
+                    : "text-text-muted hover:text-text"
+                }`}
+              >
+                One-time
+              </button>
+            </div>
+          </div>
+
+          {scheduleMode === "once" ? (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-extrabold tracking-wide text-text-muted">
+                Date
+              </label>
+              <input
+                type="date"
+                min={toDateInputValue()}
+                value={scheduleDate}
+                onChange={(event) => setScheduleDate(event.target.value)}
+                className="w-full rounded-lg border-[1.5px] border-border bg-input px-3 py-2.5 text-sm font-bold text-text outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
+              />
+              {scheduleDate && (
+                <p className="text-[11px] font-bold text-accent">
+                  Runs once on {formatScheduleDate(scheduleDate)}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-extrabold tracking-wide text-text-muted">
+                Repeat Days
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                {DAY_NAMES.map((name, idx) => (
+                  <button
+                    key={name}
+                    type="button"
+                    title={DAY_FULL[idx]}
+                    onClick={() => toggleDay(idx)}
+                    className={`grid h-[38px] w-[38px] place-items-center rounded-full border text-xs font-extrabold cursor-pointer ${
+                      scheduleDays.includes(idx)
+                        ? "border-accent bg-accent text-(--btn-text)"
+                        : "border-border bg-input text-text-muted"
+                    }`}
+                  >
+                    {name[0]}
+                  </button>
+                ))}
                 <button
-                  key={name}
                   type="button"
-                  title={DAY_FULL[idx]}
-                  onClick={() => toggleDay(idx)}
-                  className={`grid h-[38px] w-[38px] place-items-center rounded-full border text-xs font-extrabold cursor-pointer ${
-                    scheduleDays.includes(idx)
+                  onClick={() => toggleDay("all")}
+                  className={`rounded-full border px-3 h-[38px] text-xs font-extrabold cursor-pointer ${
+                    scheduleDays.length === 7
                       ? "border-accent bg-accent text-(--btn-text)"
                       : "border-border bg-input text-text-muted"
                   }`}
                 >
-                  {name[0]}
+                  Every day
                 </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => toggleDay("all")}
-                className={`rounded-full border px-3 h-[38px] text-xs font-extrabold cursor-pointer ${
-                  scheduleDays.length === 7
-                    ? "border-accent bg-accent text-(--btn-text)"
-                    : "border-border bg-input text-text-muted"
-                }`}
-              >
-                Every day
-              </button>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-extrabold tracking-wide text-text-muted">
@@ -154,7 +214,7 @@ export default function ScheduleFormModal({ state }) {
             </button>
             <button
               type="submit"
-              disabled={Boolean(timeError) || !timeConfirmed || !scheduleDays.length || isSaving || (Boolean(editingSchedule) && !scheduleDraftChanged)}
+              disabled={Boolean(timeError) || !timeConfirmed || (scheduleMode === "weekly" ? !scheduleDays.length : !scheduleDate) || isSaving || (Boolean(editingSchedule) && !scheduleDraftChanged)}
               className="inline-flex min-h-[36px] items-center rounded-lg bg-accent px-5 text-xs font-extrabold text-(--btn-text) cursor-pointer disabled:opacity-40 disabled:cursor-wait"
             >
               {isSaving ? "Saving..." : editingSchedule ? "Save Changes" : "Create Schedule"}

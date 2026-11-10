@@ -259,7 +259,8 @@ begin
       'time', s.time,
       'days', s.days,
       'action', s.action,
-      'enabled', s.enabled
+      'enabled', s.enabled,
+      'run_date', s.run_date
     ) order by s.time), '[]'::jsonb)
     into v_schedules
     from public.schedules s

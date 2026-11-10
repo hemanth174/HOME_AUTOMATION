@@ -11,6 +11,10 @@ import {
 import useLocalConnection from '@/hooks/useLocalConnection';
 
 
+// Mirrors the server executor: alarms older than this are retired instead of
+// firing late when the dashboard reopens after a long gap.
+const ALARM_LOOKBACK_MS = 5 * 60 * 1000;
+
 // Per-origin schedule claims prevent duplicate execution when the dashboard is open
 // in multiple tabs. Web Locks serialize the claim where supported.
 const localScheduleClaims = new Map();
@@ -109,7 +113,7 @@ export default function AlarmExecutor({ user: propUser = null }) {
         const [devRes, alarmRes, schedRes, settingsRes] = await Promise.all([
           supabase.from('devices').select('id, name, relay_index, board_id, is_on, last_changed, boards(board_identifier)').eq('user_id', user.id),
           supabase.from('alarms').select('id, trigger_at, action, fired, device_id').eq('user_id', user.id).eq('fired', false),
-          supabase.from('schedules').select('id, time, days, action, device_id, enabled').eq('user_id', user.id).eq('enabled', true),
+          supabase.from('schedules').select('id, time, days, action, device_id, enabled, run_date').eq('user_id', user.id).eq('enabled', true),
           supabase.from('user_settings').select('notifications_enabled, notify_alarm, notify_schedule, schedule_lead_minutes').eq('user_id', user.id).maybeSingle(),
         ]);
 
@@ -201,7 +205,7 @@ export default function AlarmExecutor({ user: propUser = null }) {
           if (active && !res.error && res.data) dataRef.current.alarms = res.data;
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'schedules', filter: `user_id=eq.${user.id}` }, async () => {
-          const res = await supabase.from('schedules').select('id, time, days, action, device_id, enabled').eq('user_id', user.id).eq('enabled', true);
+          const res = await supabase.from('schedules').select('id, time, days, action, device_id, enabled, run_date').eq('user_id', user.id).eq('enabled', true);
           if (active && !res.error && res.data) dataRef.current.schedules = res.data;
         })
         .subscribe((status) => {
@@ -260,13 +264,8 @@ export default function AlarmExecutor({ user: propUser = null }) {
           );
           const leadMs = leadMinutes * 60 * 1000;
           for (const schedule of schedules) {
-            if (
-              !schedule.enabled ||
-              !Array.isArray(schedule.days) ||
-              !schedule.time
-            ) {
-              continue;
-            }
+            if (!schedule.enabled || !schedule.time) continue;
+            if (!schedule.run_date && !Array.isArray(schedule.days)) continue;
 
             const occurrence = getNextScheduleOccurrenceLocal(
               schedule,
@@ -302,8 +301,15 @@ export default function AlarmExecutor({ user: propUser = null }) {
         // 1. Check recurring schedules. Store a per-day slot claim so opening
         // the same dashboard in another tab does not run that occurrence twice.
         for (const schedule of schedules) {
-          if (!schedule.enabled || !Array.isArray(schedule.days) ||
-              !schedule.days.includes(currentDay) || !schedule.time) continue;
+          if (!schedule.enabled || !schedule.time) continue;
+
+          const runDate = schedule.run_date ? String(schedule.run_date).slice(0, 10) : null;
+          if (runDate) {
+            const todayKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+            if (runDate !== todayKey) continue;
+          } else if (!Array.isArray(schedule.days) || !schedule.days.includes(currentDay)) {
+            continue;
+          }
 
           const schedTime = String(schedule.time).slice(0, 5);
           if (schedTime !== timeString24h) continue;
@@ -344,6 +350,16 @@ export default function AlarmExecutor({ user: propUser = null }) {
             if (dbClaim.status === 'claimed') {
               await releaseScheduleRunInDb(dbClaim.id);
             }
+          } else if (runDate) {
+            // One-time schedules are consumed after their date fires.
+            await supabase
+              .from('schedules')
+              .update({ enabled: false })
+              .eq('id', schedule.id)
+              .eq('user_id', user.id);
+            dataRef.current.schedules = dataRef.current.schedules.filter(
+              (item) => item.id !== schedule.id,
+            );
           }
         }
 
@@ -353,6 +369,9 @@ export default function AlarmExecutor({ user: propUser = null }) {
           if (alarm.fired) continue;
           const triggerTime = new Date(alarm.trigger_at).getTime();
           if (!Number.isFinite(triggerTime) || now.getTime() < triggerTime) continue;
+          // Leave expired alarms unfired so the list keeps showing "Expired";
+          // they must never execute just because the dashboard reopened late.
+          if (now.getTime() - triggerTime > ALARM_LOOKBACK_MS) continue;
 
           const { data: claimedRows, error: claimError } = await supabase
             .from('alarms')
