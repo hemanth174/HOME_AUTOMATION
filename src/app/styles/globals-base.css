@@ -180,6 +180,14 @@ body,
     transition: background-color 0.35s ease, color 0.35s ease, border-color 0.35s ease;
 }
 
+/* View Transitions already animate the complete old/new page snapshots.
+   Disable local theme transitions so cards do not lag behind the curved reveal. */
+html[data-theme-transitioning="true"] *,
+html[data-theme-transitioning="true"] *::before,
+html[data-theme-transitioning="true"] *::after {
+    transition: none !important;
+}
+
 /* Scrollbars are hidden globally (see the no-scrollbar block above);
    these selectors are intentionally left empty so no white thumb can
    reappear on Windows. */
