@@ -16,6 +16,7 @@ import { isAdminEmail } from '@/lib/adminEmails';
 
 const OAUTH_FLAG_KEY = 'vt_oauth_started';
 const LOCAL_FALLBACK_KEY = 'vt_local_fallback';
+const LOCAL_FALLBACK_AT_KEY = 'vt_local_fallback_at';
 
 function consumeOAuthFlag() {
   try {
@@ -47,6 +48,10 @@ export default function MainLayoutWrapper({ children, className = "" }) {
   const [authNonce, setAuthNonce] = useState(0);
   const userRef = useRef(null);
   const [isClientOnline, setIsClientOnline] = useState(true); // Always true initially to match SSR
+  // False until a real probe succeeds. Without this, the /local auto-return
+  // timer starts during the initial "assume online" state and bounces the
+  // user between /local and / while the ESP32 is still connecting.
+  const [onlineConfirmed, setOnlineConfirmed] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const { isLocalConnected, localUrl, isProbing } = useLocalConnection();
 
@@ -103,6 +108,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
         clearTimeout(offlineTimer);
         offlineTimer = null;
         setIsClientOnline(true);
+        setOnlineConfirmed(true);
         return;
       }
       if (offlineTimer) return;
@@ -112,7 +118,10 @@ export default function MainLayoutWrapper({ children, className = "" }) {
       offlineTimer = setTimeout(async () => {
         offlineTimer = null;
         const stillDown = !(await checkInternet(true));
-        if (!cancelled && stillDown) setIsClientOnline(false);
+        if (!cancelled && stillDown) {
+          setOnlineConfirmed(false);
+          setIsClientOnline(false);
+        }
       }, 8000);
     };
 
@@ -158,6 +167,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
     if (!isClientOnline && cleanPath !== '/local' && typeof window !== 'undefined') {
       try {
         sessionStorage.setItem(LOCAL_FALLBACK_KEY, '1');
+        sessionStorage.setItem(LOCAL_FALLBACK_AT_KEY, String(Date.now()));
       } catch {}
       window.location.replace('/local');
     }
@@ -167,26 +177,44 @@ export default function MainLayoutWrapper({ children, className = "" }) {
   // ESP32 is not reachable, return to the cloud dashboard instead of leaving
   // the user stranded on the offline page.
   useEffect(() => {
-    if (cleanPath !== '/local' || !isClientOnline || isProbing) return undefined;
+    // Only act after a real probe confirmed internet. The initial state is
+    // "online" for SSR hydration, which previously caused a reload loop.
+    if (
+      cleanPath !== '/local' ||
+      !isClientOnline ||
+      !onlineConfirmed ||
+      isProbing
+    ) {
+      return undefined;
+    }
     let wasOfflineFallback = false;
+    let fallbackAt = 0;
     try {
       wasOfflineFallback = sessionStorage.getItem(LOCAL_FALLBACK_KEY) === '1';
+      fallbackAt = Number(sessionStorage.getItem(LOCAL_FALLBACK_AT_KEY) || 0);
     } catch {}
     if (!wasOfflineFallback) return undefined;
+    // Do not bounce straight back after an automatic fallback. This gives the
+    // local connection time to establish on slow SoftAP handshakes.
+    if (fallbackAt && Date.now() - fallbackAt < 60000) return undefined;
     if (isLocalConnected) {
       try {
         sessionStorage.removeItem(LOCAL_FALLBACK_KEY);
+        sessionStorage.removeItem(LOCAL_FALLBACK_AT_KEY);
       } catch {}
       return undefined;
     }
+    // Give the ESP32 probe (up to ~5.5s) and the local page time to settle
+    // before deciding the board is unreachable.
     const timer = setTimeout(() => {
       try {
         sessionStorage.removeItem(LOCAL_FALLBACK_KEY);
+        sessionStorage.removeItem(LOCAL_FALLBACK_AT_KEY);
       } catch {}
       window.location.replace('/');
-    }, 6000);
+    }, 15000);
     return () => clearTimeout(timer);
-  }, [cleanPath, isClientOnline, isLocalConnected, isProbing]);
+  }, [cleanPath, isClientOnline, onlineConfirmed, isLocalConnected, isProbing]);
 
   // Disable console logs in production mode
   useEffect(() => {

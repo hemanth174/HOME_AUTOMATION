@@ -250,6 +250,7 @@ bool hasPendingFeedbackUpdate();
 String getIsoTime();
 void evaluateLocalRole();
 bool tryJoinMeshLeader();
+bool meshLeaderVisible();
 void becomeLeader();
 void becomeMember();
 bool isHomeWifiConnected();
@@ -1389,6 +1390,23 @@ void pruneStaleMeshNodes() {
     }
   }
 }
+bool meshLeaderVisible() {
+  if (strlen(MESH_SSID) == 0) return false;
+  int n = WiFi.scanNetworks();
+  bool found = false;
+  String selfApBssid = WiFi.softAPmacAddress();
+  selfApBssid.toUpperCase();
+  for (int i = 0; i < n; i++) {
+    String bssid = WiFi.BSSIDstr(i);
+    bssid.toUpperCase();
+    if (WiFi.SSID(i) == String(MESH_SSID) && bssid != selfApBssid) {
+      found = true;
+      break;
+    }
+  }
+  WiFi.scanDelete();
+  return found;
+}
 bool tryJoinMeshLeader() {
   if (strlen(MESH_SSID) == 0 || strlen(MESH_PASS) < 8) return false;
   Serial.println("-> Scanning for existing mesh leader...");
@@ -1432,11 +1450,11 @@ void becomeLeader() {
   }
   localRole = ROLE_LEADER;
   leaderUptimeMillis = millis();
-  if (WiFi.SSID() == String(MESH_SSID)) WiFi.disconnect(false);
+  // Keep an active home Wi-Fi station link; only drop a previous mesh association.
+  if (WiFi.SSID() == String(MESH_SSID)) WiFi.disconnect(false, false);
   WiFi.mode(WIFI_AP_STA);
   WiFi.setTxPower(WIFI_POWER_15dBm);
-  WiFi.setAutoReconnect(false);
-  WiFi.disconnect(false, false);
+  WiFi.setAutoReconnect(true);
   WiFi.softAPConfig(AP_IP, AP_GATEWAY, AP_SUBNET);
   bool apStarted = WiFi.softAP(MESH_SSID, (strlen(MESH_PASS) >= 8) ? MESH_PASS : NULL);
   if (!apStarted) {
@@ -1473,6 +1491,14 @@ void evaluateLocalRole() {
       WiFi.scanDelete();
       meshNodeCount = 0;
       meshCacheCount = 0;
+      return;
+    }
+    static unsigned long lastHomeLeaderProbe = 0;
+    if (lastHomeLeaderProbe != 0 && millis() - lastHomeLeaderProbe < 30000) return;
+    lastHomeLeaderProbe = millis();
+    if (!meshLeaderVisible()) {
+      Serial.println("-> Home Wi-Fi active with no mesh leader; starting always-on local AP.");
+      becomeLeader();
     }
     return;
   }
@@ -1809,11 +1835,9 @@ void setup() {
   }
   setupWebServer();
   maintainMdns();
-  if (!isHomeWifiConnected()) {
-    Serial.println("-> Home Wi-Fi unavailable at boot. Starting local mode...");
-    lastRoleEval = millis() - ROLE_EVAL_INTERVAL;
-    evaluateLocalRole();
-  }
+  Serial.println("-> Ensuring local mesh/SoftAP is always available...");
+  lastRoleEval = millis() - ROLE_EVAL_INTERVAL;
+  evaluateLocalRole();
   BaseType_t taskCreated = pdFAIL;
   if (preferencesMutex && offlineQueueMutex && relayMutex) {
     taskCreated = xTaskCreatePinnedToCore(
