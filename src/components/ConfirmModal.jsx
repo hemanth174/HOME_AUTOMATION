@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle } from "lucide-react";
 
 export default function ConfirmModal({
@@ -22,9 +23,11 @@ export default function ConfirmModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, busy, onCancel]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
+  // Render into <body> so `position: fixed` is never trapped by an animated
+  // ancestor (e.g. `.dashboard-container` keeps a transform after fade-up).
+  return createPortal(
     <div
       className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm max-md:items-end max-md:p-0"
       onClick={() => {
@@ -76,6 +79,7 @@ export default function ConfirmModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

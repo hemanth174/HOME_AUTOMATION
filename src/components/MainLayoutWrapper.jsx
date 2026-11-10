@@ -15,6 +15,7 @@ import { checkInternet } from '@/lib/netCheck';
 import { isAdminEmail } from '@/lib/adminEmails';
 
 const OAUTH_FLAG_KEY = 'vt_oauth_started';
+const LOCAL_FALLBACK_KEY = 'vt_local_fallback';
 
 function consumeOAuthFlag() {
   try {
@@ -47,7 +48,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
   const userRef = useRef(null);
   const [isClientOnline, setIsClientOnline] = useState(true); // Always true initially to match SSR
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
-  const { isLocalConnected, localUrl } = useLocalConnection();
+  const { isLocalConnected, localUrl, isProbing } = useLocalConnection();
 
   const requiresApproval =
     !isLoginPage &&
@@ -93,36 +94,54 @@ export default function MainLayoutWrapper({ children, className = "" }) {
     let cancelled = false;
     let navTimer = null;
     let pollTimer = null;
+    let offlineTimer = null;
 
-    const evaluate = async () => {
-      const up = await checkInternet();
+    const evaluate = async (force = false) => {
+      const up = await checkInternet(force);
       if (cancelled) return;
-      setIsClientOnline(up);
-
+      if (up) {
+        clearTimeout(offlineTimer);
+        offlineTimer = null;
+        setIsClientOnline(true);
+        return;
+      }
+      if (offlineTimer) return;
+      // Mobile browsers resume before Wi-Fi/data is ready, so a single failed
+      // probe must not switch the app to /local. Confirm with a second forced
+      // probe after a short grace period.
+      offlineTimer = setTimeout(async () => {
+        offlineTimer = null;
+        const stillDown = !(await checkInternet(true));
+        if (!cancelled && stillDown) setIsClientOnline(false);
+      }, 8000);
     };
 
-    evaluate();
+    evaluate(true);
 
     // Connectivity transition events only TRIGGER a verified re-check -
     // they never set state directly (the SoftAP "online" trap).
     const recheckSoon = () => {
       clearTimeout(navTimer);
-      navTimer = setTimeout(evaluate, 400);
+      navTimer = setTimeout(() => evaluate(true), 500);
     };
     window.addEventListener('online', recheckSoon);
     window.addEventListener('offline', recheckSoon);
     window.addEventListener('focus', recheckSoon);
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') recheckSoon();
+      if (document.visibilityState !== 'visible') return;
+      clearTimeout(navTimer);
+      // Give the radio a moment to reconnect after the screen wakes.
+      navTimer = setTimeout(() => evaluate(true), 1200);
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Slow background beat catches silent ISP drops/restore.
-    pollTimer = setInterval(evaluate, 30000);
+    pollTimer = setInterval(() => evaluate(false), 30000);
 
     return () => {
       cancelled = true;
       clearTimeout(navTimer);
+      clearTimeout(offlineTimer);
       clearInterval(pollTimer);
       window.removeEventListener('online', recheckSoon);
       window.removeEventListener('offline', recheckSoon);
@@ -137,9 +156,37 @@ export default function MainLayoutWrapper({ children, className = "" }) {
   // is unreachable. The page then sends relay commands directly to the ESP32.
   useEffect(() => {
     if (!isClientOnline && cleanPath !== '/local' && typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem(LOCAL_FALLBACK_KEY, '1');
+      } catch {}
       window.location.replace('/local');
     }
   }, [isLocalConnected, isClientOnline, cleanPath]);
+
+  // If /local was entered automatically and the internet comes back while the
+  // ESP32 is not reachable, return to the cloud dashboard instead of leaving
+  // the user stranded on the offline page.
+  useEffect(() => {
+    if (cleanPath !== '/local' || !isClientOnline || isProbing) return undefined;
+    let wasOfflineFallback = false;
+    try {
+      wasOfflineFallback = sessionStorage.getItem(LOCAL_FALLBACK_KEY) === '1';
+    } catch {}
+    if (!wasOfflineFallback) return undefined;
+    if (isLocalConnected) {
+      try {
+        sessionStorage.removeItem(LOCAL_FALLBACK_KEY);
+      } catch {}
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      try {
+        sessionStorage.removeItem(LOCAL_FALLBACK_KEY);
+      } catch {}
+      window.location.replace('/');
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [cleanPath, isClientOnline, isLocalConnected, isProbing]);
 
   // Disable console logs in production mode
   useEffect(() => {

@@ -1,18 +1,29 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
-import Toast from '@/components/Toast';
-import Loader from '@/components/Loader';
-import ConfirmModal from '@/components/ConfirmModal';
-import { Edit, LucidePower, LucidePowerOff, Trash, SlidersHorizontal } from 'lucide-react';
-import PresetModal from './PresetModal';
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
+import Toast from "@/components/Toast";
+import Loader from "@/components/Loader";
+import ConfirmModal from "@/components/ConfirmModal";
+import {
+  Edit,
+  LucidePower,
+  LucidePowerOff,
+  Trash,
+  SlidersHorizontal,
+} from "lucide-react";
+import PresetModal from "./PresetModal";
 
-const presetActionsSignature = (actions) => JSON.stringify(
-  Object.entries(actions || {})
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([deviceId, action]) => [deviceId, Boolean(action.included), Boolean(action.is_on)]),
-);
+const presetActionsSignature = (actions) =>
+  JSON.stringify(
+    Object.entries(actions || {})
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([deviceId, action]) => [
+        deviceId,
+        Boolean(action.included),
+        Boolean(action.is_on),
+      ]),
+  );
 
 export default function PresetsPage() {
   const [user, setUser] = useState(null);
@@ -20,7 +31,7 @@ export default function PresetsPage() {
   const [devices, setDevices] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState('');
+  const [toast, setToast] = useState("");
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -28,7 +39,7 @@ export default function PresetsPage() {
   const [editingPreset, setEditingPreset] = useState(null);
 
   // Form
-  const [presetName, setPresetName] = useState('');
+  const [presetName, setPresetName] = useState("");
   const [presetActions, setPresetActions] = useState({});
   const [savedPresetDraft, setSavedPresetDraft] = useState(null);
   const [savingPreset, setSavingPreset] = useState(false);
@@ -36,8 +47,13 @@ export default function PresetsPage() {
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { window.location.href = '/login'; return; }
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        window.location.href = "/login";
+        return;
+      }
       setUser(user);
     };
     init();
@@ -50,60 +66,115 @@ export default function PresetsPage() {
     const fetchData = async () => {
       const startTime = Date.now();
       const [presetsRes, devicesRes] = await Promise.all([
-        supabase.from('presets').select('id, name, actions').eq('user_id', user.id).order('created_at'),
-        supabase.from('devices').select('id, name, is_on, boards(name)').eq('user_id', user.id).order('relay_index'),
+        supabase
+          .from("presets")
+          .select("id, name, actions")
+          .eq("user_id", user.id)
+          .order("created_at"),
+        supabase
+          .from("devices")
+          .select("id, name, is_on, boards(name)")
+          .eq("user_id", user.id)
+          .order("relay_index"),
       ]);
       if (!active) return;
       if (presetsRes.data) {
-        setPresets(presetsRes.data.map(p => {
-          let actions = p.actions;
-          if (typeof actions === 'string') {
-            try { actions = JSON.parse(actions); } catch(e) { actions = []; }
-          }
-          return { ...p, actions };
-        }));
+        setPresets(
+          presetsRes.data.map((p) => {
+            let actions = p.actions;
+            if (typeof actions === "string") {
+              try {
+                actions = JSON.parse(actions);
+              } catch (e) {
+                actions = [];
+              }
+            }
+            return { ...p, actions };
+          }),
+        );
       }
       if (devicesRes.data) setDevices(devicesRes.data);
       const elapsed = Date.now() - startTime;
-      setTimeout(() => { if (active) setLoading(false); }, Math.max(0, 500 - elapsed));
+      setTimeout(
+        () => {
+          if (active) setLoading(false);
+        },
+        Math.max(0, 500 - elapsed),
+      );
     };
     fetchData();
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [user]);
 
   // ── Realtime subscriptions ────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
     const presetsChannel = supabase
-      .channel('presets-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'presets', filter: `user_id=eq.${user.id}` },
+      .channel("presets-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "presets",
+          filter: `user_id=eq.${user.id}`,
+        },
         (payload) => {
           let newPreset = payload.new;
-          if (newPreset && typeof newPreset.actions === 'string') {
-            try { newPreset.actions = JSON.parse(newPreset.actions); } catch(e) { newPreset.actions = []; }
+          if (newPreset && typeof newPreset.actions === "string") {
+            try {
+              newPreset.actions = JSON.parse(newPreset.actions);
+            } catch (e) {
+              newPreset.actions = [];
+            }
           }
-          if (payload.eventType === 'INSERT') {
-            setPresets(prev => prev.some(p => p.id === newPreset.id) ? prev : [...prev, newPreset]);
-          } else if (payload.eventType === 'UPDATE') {
-            setPresets(prev => prev.map(p => p.id === newPreset.id ? newPreset : p));
-          } else if (payload.eventType === 'DELETE') {
-            setPresets(prev => prev.filter(p => p.id !== payload.old.id));
+          if (payload.eventType === "INSERT") {
+            setPresets((prev) =>
+              prev.some((p) => p.id === newPreset.id)
+                ? prev
+                : [...prev, newPreset],
+            );
+          } else if (payload.eventType === "UPDATE") {
+            setPresets((prev) =>
+              prev.map((p) => (p.id === newPreset.id ? newPreset : p)),
+            );
+          } else if (payload.eventType === "DELETE") {
+            setPresets((prev) => prev.filter((p) => p.id !== payload.old.id));
           }
-        }
-      ).subscribe();
+        },
+      )
+      .subscribe();
 
     const devicesChannel = supabase
-      .channel('presets-devices-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'devices', filter: `user_id=eq.${user.id}` },
+      .channel("presets-devices-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "devices",
+          filter: `user_id=eq.${user.id}`,
+        },
         async (payload) => {
-          if (payload.eventType === 'UPDATE') {
-            setDevices(prev => prev.map(d => d.id === payload.new.id ? { ...d, ...payload.new } : d));
+          if (payload.eventType === "UPDATE") {
+            setDevices((prev) =>
+              prev.map((d) =>
+                d.id === payload.new.id ? { ...d, ...payload.new } : d,
+              ),
+            );
           } else {
-            const { data } = await supabase.from('devices').select('id, name, is_on, boards(name)').eq('user_id', user.id).order('relay_index');
+            const { data } = await supabase
+              .from("devices")
+              .select("id, name, is_on, boards(name)")
+              .eq("user_id", user.id)
+              .order("relay_index");
             if (data) setDevices(data);
           }
-        }
-      ).subscribe();
+        },
+      )
+      .subscribe();
 
     return () => {
       supabase.removeChannel(presetsChannel);
@@ -115,8 +186,8 @@ export default function PresetsPage() {
   /** Build a fresh presetActions map from device list, optionally pre-filled from existing preset */
   const buildPresetActions = (deviceList, existingActions = []) => {
     const actions = {};
-    deviceList.forEach(d => {
-      const match = existingActions.find(a => a.device_id === d.id);
+    deviceList.forEach((d) => {
+      const match = existingActions.find((a) => a.device_id === d.id);
       actions[d.id] = {
         included: !!match,
         is_on: match ? match.is_on : true,
@@ -129,7 +200,7 @@ export default function PresetsPage() {
   const closeModal = () => {
     setShowModal(false);
     setEditingPreset(null);
-    setPresetName('');
+    setPresetName("");
     setPresetActions({});
     setSavedPresetDraft(null);
   };
@@ -137,33 +208,40 @@ export default function PresetsPage() {
   const openCreateModal = () => {
     setEditingPreset(null);
     setPresetActions(buildPresetActions(devices));
-    setPresetName('');
+    setPresetName("");
     setSavedPresetDraft(null);
     setShowModal(true);
   };
 
   const openEditModal = (preset) => {
     let actions = preset.actions;
-    if (typeof actions === 'string') {
-      try { actions = JSON.parse(actions); } catch(e) { actions = []; }
+    if (typeof actions === "string") {
+      try {
+        actions = JSON.parse(actions);
+      } catch (e) {
+        actions = [];
+      }
     }
     const nextActions = buildPresetActions(devices, actions || []);
     setEditingPreset(preset);
     setPresetName(preset.name);
     setPresetActions(nextActions);
-    setSavedPresetDraft({ name: preset.name, actions: presetActionsSignature(nextActions) });
+    setSavedPresetDraft({
+      name: preset.name,
+      actions: presetActionsSignature(nextActions),
+    });
     setShowModal(true);
   };
 
   const togglePresetDevice = (deviceId) => {
-    setPresetActions(prev => ({
+    setPresetActions((prev) => ({
       ...prev,
       [deviceId]: { ...prev[deviceId], included: !prev[deviceId].included },
     }));
   };
 
   const togglePresetAction = (deviceId) => {
-    setPresetActions(prev => ({
+    setPresetActions((prev) => ({
       ...prev,
       [deviceId]: { ...prev[deviceId], is_on: !prev[deviceId].is_on },
     }));
@@ -172,37 +250,57 @@ export default function PresetsPage() {
   const savePreset = async (e) => {
     e.preventDefault();
     if (savingPreset || (editingPreset && !presetFormChanged)) return;
-    if (!presetName.trim()) { setToast('Please enter a preset name'); return; }
+    if (!presetName.trim()) {
+      setToast("Please enter a preset name");
+      return;
+    }
     const actions = Object.entries(presetActions)
       .filter(([, v]) => v.included)
       .map(([deviceId, v]) => ({ device_id: deviceId, is_on: v.is_on }));
-    if (actions.length === 0) { setToast('Please include at least one device'); return; }
+    if (actions.length === 0) {
+      setToast("Please include at least one device");
+      return;
+    }
 
     setSavingPreset(true);
     try {
       if (editingPreset) {
         // ── Edit mode: UPDATE existing preset ──────────────────────────────
         const { error } = await supabase
-          .from('presets')
+          .from("presets")
           .update({ name: presetName.trim(), actions })
-          .eq('id', editingPreset.id);
-        if (error) { setToast(error.message); return; }
+          .eq("id", editingPreset.id);
+        if (error) {
+          setToast(error.message);
+          return;
+        }
         // Optimistic local update (realtime will also sync)
-        setPresets(prev => prev.map(p =>
-          p.id === editingPreset.id ? { ...p, name: presetName.trim(), actions } : p
-        ));
+        setPresets((prev) =>
+          prev.map((p) =>
+            p.id === editingPreset.id
+              ? { ...p, name: presetName.trim(), actions }
+              : p,
+          ),
+        );
         closeModal();
-        setToast('Preset updated');
+        setToast("Preset updated");
       } else {
         // ── Create mode: INSERT new preset ────────────────────────────────
         const { error } = await supabase
-          .from('presets')
+          .from("presets")
           .insert({ user_id: user.id, name: presetName.trim(), actions });
-        if (error) { setToast(error.message); return; }
-        const { data } = await supabase.from('presets').select('id, name, actions').eq('user_id', user.id).order('created_at');
+        if (error) {
+          setToast(error.message);
+          return;
+        }
+        const { data } = await supabase
+          .from("presets")
+          .select("id, name, actions")
+          .eq("user_id", user.id)
+          .order("created_at");
         if (data) setPresets(data);
         closeModal();
-        setToast('Preset created');
+        setToast("Preset created");
       }
     } finally {
       setSavingPreset(false);
@@ -218,81 +316,131 @@ export default function PresetsPage() {
 
   const isPresetActive = (preset) => {
     let actions = preset.actions;
-    if (typeof actions === 'string') {
-      try { actions = JSON.parse(actions); } catch(e) { actions = []; }
+    if (typeof actions === "string") {
+      try {
+        actions = JSON.parse(actions);
+      } catch (e) {
+        actions = [];
+      }
     }
     if (!actions?.length) return false;
-    return actions.every(action => {
-      const device = devices.find(d => d.id === action.device_id);
+    return actions.every((action) => {
+      const device = devices.find((d) => d.id === action.device_id);
       return device && device.is_on === action.is_on;
     });
   };
 
   const applyPreset = async (preset, deactivate = false) => {
     let actions = preset.actions;
-    if (typeof actions === 'string') {
-      try { actions = JSON.parse(actions); } catch(e) { actions = []; }
+    if (typeof actions === "string") {
+      try {
+        actions = JSON.parse(actions);
+      } catch (e) {
+        actions = [];
+      }
     }
     actions = actions || [];
     for (const action of actions) {
       const nextState = deactivate ? !action.is_on : action.is_on;
-      await supabase.from('devices').update({ is_on: nextState, last_changed: new Date().toISOString() }).eq('id', action.device_id);
+      await supabase
+        .from("devices")
+        .update({ is_on: nextState, last_changed: new Date().toISOString() })
+        .eq("id", action.device_id);
     }
-    setDevices(prev => prev.map(device => {
-      const action = actions.find(a => a.device_id === device.id);
-      if (!action) return device;
-      return { ...device, is_on: deactivate ? !action.is_on : action.is_on };
-    }));
-    setToast(`${deactivate ? 'Deactivated' : 'Activated'}: ${preset.name}`);
+    setDevices((prev) =>
+      prev.map((device) => {
+        const action = actions.find((a) => a.device_id === device.id);
+        if (!action) return device;
+        return { ...device, is_on: deactivate ? !action.is_on : action.is_on };
+      }),
+    );
+    setToast(`${deactivate ? "Deactivated" : "Activated"}: ${preset.name}`);
   };
 
   const deletePreset = async () => {
     if (!pendingDelete) return;
     setDeleting(true);
-    const { error } = await supabase.from('presets').delete().eq('id', pendingDelete.id);
+    const { error } = await supabase
+      .from("presets")
+      .delete()
+      .eq("id", pendingDelete.id);
     setDeleting(false);
     if (error) {
       setToast(`Could not delete preset: ${error.message}`);
       return;
     }
-    setPresets(prev => prev.filter(p => p.id !== pendingDelete.id));
+    setPresets((prev) => prev.filter((p) => p.id !== pendingDelete.id));
     setPendingDelete(null);
-    setToast('Preset deleted');
+    setToast("Preset deleted");
   };
 
   const allOn = async () => {
     if (devices.length === 0) {
-      setToast('No devices available to turn ON. Please add a board first.');
+      setToast("No devices available to turn ON. Please add a board first.");
       return;
     }
-    const devicesToTurnOn = devices.filter(d => !d.is_on);
-    if (devicesToTurnOn.length === 0) { setToast('All devices are already ON'); return; }
-    setDevices(prev => prev.map(d => ({ ...d, is_on: true })));
-    await Promise.all(devicesToTurnOn.map(async (device) => {
-      await supabase.from('devices').update({ is_on: true, last_changed: new Date().toISOString() }).eq('id', device.id);
-      try {
-        await supabase.from('activity_logs').insert({ user_id: user.id, device_id: device.id, device_name: device.name, action: 'turned ON', triggered_by: 'Preset: All ON' });
-      } catch (e) { console.warn(e); }
-    }));
-    setToast('All devices turned ON');
+    const devicesToTurnOn = devices.filter((d) => !d.is_on);
+    if (devicesToTurnOn.length === 0) {
+      setToast("All devices are already ON");
+      return;
+    }
+    setDevices((prev) => prev.map((d) => ({ ...d, is_on: true })));
+    await Promise.all(
+      devicesToTurnOn.map(async (device) => {
+        await supabase
+          .from("devices")
+          .update({ is_on: true, last_changed: new Date().toISOString() })
+          .eq("id", device.id);
+        try {
+          await supabase.from("activity_logs").insert({
+            user_id: user.id,
+            device_id: device.id,
+            device_name: device.name,
+            action: "turned ON",
+            triggered_by: "Preset: All ON",
+          });
+        } catch (e) {
+          console.warn(e);
+        }
+      }),
+    );
+    setToast("All devices turned ON");
   };
 
   const allOff = async () => {
     if (devices.length === 0) {
-      setToast('No devices available to turn OFF. Please add a board first.');
+      setToast("No devices available to turn OFF. Please add a board first.");
       return;
     }
-    const devicesToTurnOff = devices.filter(d => d.is_on);
-    if (devicesToTurnOff.length === 0) { setToast('All devices are already OFF'); return; }
-    setDevices(prev => prev.map(d => ({ ...d, is_on: false })));
-    await Promise.all(devicesToTurnOff.map(async (device) => {
-      await supabase.from('devices').update({ is_on: false, last_changed: new Date().toISOString() }).eq('id', device.id);
-      try {
-        await supabase.from('activity_logs').insert({ user_id: user.id, device_id: device.id, device_name: device.name, action: 'turned OFF', triggered_by: 'Preset: All OFF' });
-      } catch (e) { console.warn(e); }
-    }));
-    setToast('All devices turned OFF');
+    const devicesToTurnOff = devices.filter((d) => d.is_on);
+    if (devicesToTurnOff.length === 0) {
+      setToast("All devices are already OFF");
+      return;
+    }
+    setDevices((prev) => prev.map((d) => ({ ...d, is_on: false })));
+    await Promise.all(
+      devicesToTurnOff.map(async (device) => {
+        await supabase
+          .from("devices")
+          .update({ is_on: false, last_changed: new Date().toISOString() })
+          .eq("id", device.id);
+        try {
+          await supabase.from("activity_logs").insert({
+            user_id: user.id,
+            device_id: device.id,
+            device_name: device.name,
+            action: "turned OFF",
+            triggered_by: "Preset: All OFF",
+          });
+        } catch (e) {
+          console.warn(e);
+        }
+      }),
+    );
+    setToast("All devices turned OFF");
   };
+
+  const allDevicesOn = devices.length > 0 && devices.every((d) => d.is_on);
 
   if (loading) return <Loader message="Loading presets..." />;
 
@@ -300,30 +448,39 @@ export default function PresetsPage() {
     <>
       <div className="dashboard-container animate-fade-up select-none">
         <div className="flex justify-between items-center mb-5">
-          <h2 className="text-lg font-extrabold text-text tracking-tight">Presets</h2>
-          <button
-            className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-1 text-xs font-extrabold text-[var(--btn-text)] transition-all duration-250 cursor-pointer hover:bg-accent-hover shadow-gold-glow"
-            onClick={openCreateModal}
-          >
-            Add Preset
-          </button>
+          <h2 className="text-lg font-extrabold text-text tracking-tight">
+            Presets
+          </h2>
+          <div className="flex gap-4 items-center">
+           
+              <button
+                className={`inline-flex h-[32px] w-[32px] items-center justify-center rounded-full border transition-all duration-200 cursor-pointer hover:scale-105 active:scale-95 ${
+                  allDevicesOn
+                    ? "border-accent bg-accent text-[var(--btn-text)] shadow-gold-glow"
+                    : "border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]"
+                }`}
+                onClick={allDevicesOn ? allOff : allOn}
+                title={
+                  allDevicesOn ? "Turn all devices OFF" : "Turn all devices ON"
+                }
+                aria-label={
+                  allDevicesOn ? "Turn all devices OFF" : "Turn all devices ON"
+                }
+              >
+                <LucidePower size={17} strokeWidth={2.5} />
+              </button>
+         
+
+            <button
+              className="inline-flex min-h-[30px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-1 text-xs font-extrabold text-[var(--btn-text)] transition-all duration-250 cursor-pointer hover:bg-accent-hover shadow-gold-glow"
+              onClick={openCreateModal}
+            >
+              Add Preset
+            </button>
+          </div>
         </div>
 
         {/* Quick Actions */}
-        <div className="flex gap-2 mb-4">
-          <button
-            className="flex-1 min-h-[36px] inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-card text-xs font-bold text-text transition-all hover:bg-card-alt cursor-pointer"
-            onClick={allOn}
-          >
-            All ON
-          </button>
-          <button
-            className="flex-1 min-h-[36px] inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-card text-xs font-bold text-text transition-all hover:bg-card-alt cursor-pointer"
-            onClick={allOff}
-          >
-            All OFF
-          </button>
-        </div>
 
         {presets.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-[24px] border border-border border-dashed bg-card p-10 text-center animate-scale-in max-w-lg mx-auto select-none gap-4">
@@ -331,9 +488,12 @@ export default function PresetsPage() {
               <SlidersHorizontal size={24} className="stroke-[2.5px]" />
             </div>
             <div className="flex flex-col gap-1">
-              <h3 className="text-base font-extrabold text-text tracking-tight">No Presets Configured</h3>
+              <h3 className="text-base font-extrabold text-text tracking-tight">
+                No Presets Configured
+              </h3>
               <p className="text-xs text-text-muted font-semibold leading-relaxed px-4">
-                Presets let you control multiple devices simultaneously with a single tap. Create one now to automate your routine!
+                Presets let you control multiple devices simultaneously with a
+                single tap. Create one now to automate your routine!
               </p>
             </div>
             <button
@@ -347,45 +507,103 @@ export default function PresetsPage() {
           <div className="flex flex-col gap-3">
             {presets.map((preset) => {
               const active = isPresetActive(preset);
+              const actions = Array.isArray(preset.actions)
+                ? preset.actions
+                : [];
               return (
                 <div
                   key={preset.id}
-                  className={`relative overflow-hidden rounded-[18px] border bg-card p-[18px] shadow-lg transition-all duration-200 hover:-translate-y-px hover:shadow-2xl ${
+                  className={`rounded-[18px] border bg-card p-[14px] shadow-lg transition-all duration-200 hover:-translate-y-px hover:shadow-2xl ${
                     active
-                      ? 'border-accent bg-[linear-gradient(135deg,rgba(201,168,76,0.14),rgba(255,255,255,0.035))]'
-                      : 'border-border hover:border-accent/40'
+                      ? "border-accent bg-[linear-gradient(135deg,rgba(201,168,76,0.14),rgba(255,255,255,0.035))]"
+                      : "border-border hover:border-accent/40"
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-3 max-md:flex-col max-md:items-start w-full">
-                    <div>
-                      <div className="text-sm font-extrabold text-text">{preset.name}</div>
-                      <div className="text-xs font-bold text-text-muted mt-1">
-                        {preset.actions.length} device{preset.actions.length !== 1 ? 's' : ''}
+                  <div className="flex justify-between gap-2.5">
+                    <div className="flex flex-col gap-2 justify-between">
+                      <div className="min-w-0 p-[12px]">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm font-extrabold text-text">
+                            {preset.name}
+                          </span>
+                          {active && (
+                            <span className="shrink-0 rounded-full border border-accent/40 bg-accent-bg px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-accent">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1 text-xs font-bold text-text-muted">
+                          {actions.length} device
+                          {actions.length !== 1 ? "s" : ""}
+                        </div>
+                      </div>
+
+                      <div className="flex min-w-0 flex-wrap gap-1.5">
+                        {actions.length === 0 ? (
+                          <span className="text-xs font-semibold text-text-muted">
+                            No devices
+                          </span>
+                        ) : (
+                          actions.map((action) => {
+                            const device = devices.find(
+                              (d) => d.id === action.device_id,
+                            );
+                            return (
+                              <span
+                                key={action.device_id}
+                                className="inline-flex min-w-0 items-center gap-1.5 border border-border bg-card-alt px-2.5 py-1 text-[10px] font-bold text-text-muted"
+                              >
+                                <span className="max-w-[160px] truncate">
+                                  {device?.name || "Removed device"}
+                                </span>
+                                <span
+                                  className={
+                                    action.is_on
+                                      ? "font-extrabold text-green-500"
+                                      : "font-extrabold text-red-500"
+                                  }
+                                >
+                                  {action.is_on ? "ON" : "OFF"}
+                                </span>
+                              </span>
+                            );
+                          })
+                        )}
                       </div>
                     </div>
-                    <div className="flex gap-2 flex-wrap justify-end">
+
+                    <div className="flex flex-col justify-end items-enter gap-2 pt-0.5 ">
                       <button
-                        className={`inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 ${
-                          active 
-                            ? 'border-accent bg-accent text-[var(--btn-text)] shadow-gold-glow'
-                            : 'border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]'
+                        className={`inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border transition-all duration-200 cursor-pointer hover:scale-105 active:scale-95 ${
+                          active
+                            ? "border-accent bg-accent text-[var(--btn-text)] shadow-gold-glow"
+                            : "border-border bg-card text-text-muted hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]"
                         }`}
                         onClick={() => applyPreset(preset, active)}
-                        title={active ? 'Deactivate' : 'Activate'}
+                        title={active ? "Deactivate" : "Activate"}
+                        aria-label={
+                          active ? "Deactivate preset" : "Activate preset"
+                        }
                       >
-                        {active ? <LucidePowerOff size={16} strokeWidth={2.5} /> : <LucidePower size={16} strokeWidth={2.5} />}
+                        {active ? (
+                          <LucidePowerOff size={16} strokeWidth={2.5} />
+                        ) : (
+                          <LucidePower size={16} strokeWidth={2.5} />
+                        )}
                       </button>
                       <button
-                        className="inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-1 bg-card transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]"
+                        className="inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-border bg-card text-text-muted transition-all duration-200 cursor-pointer hover:scale-105 active:scale-95 hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(201,168,76,0.3)]"
                         onClick={() => openEditModal(preset)}
                         title="Edit Preset"
+                        aria-label="Edit preset"
                       >
                         <Edit size={16} strokeWidth={2.5} />
                       </button>
                       <button
-                        className="inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-red-500/40 bg-red-500/10 text-red-500 transition-all duration-250 cursor-pointer hover:scale-105 active:scale-95 hover:bg-red-500 hover:text-white hover:shadow-[0_0_12px_rgba(239,68,68,0.5)]"
+                        className="inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-red-500/40 bg-red-500/10 text-red-500 transition-all duration-200 cursor-pointer hover:scale-105 active:scale-95 hover:bg-red-500 hover:text-white hover:shadow-[0_0_12px_rgba(239,68,68,0.5)]"
                         onClick={() => setPendingDelete(preset)}
                         title="Delete Preset"
+                        aria-label="Delete preset"
                       >
                         <Trash size={16} strokeWidth={2.5} />
                       </button>
@@ -399,20 +617,32 @@ export default function PresetsPage() {
       </div>
 
       {showModal && (
-        <PresetModal editingPreset={editingPreset} presetActions={presetActions} presetName={presetName} setPresetName={setPresetName} devices={devices} savePreset={savePreset} closeModal={closeModal} togglePresetDevice={togglePresetDevice} togglePresetAction={togglePresetAction} saving={savingPreset} canSave={presetFormChanged} />
+        <PresetModal
+          editingPreset={editingPreset}
+          presetActions={presetActions}
+          presetName={presetName}
+          setPresetName={setPresetName}
+          devices={devices}
+          savePreset={savePreset}
+          closeModal={closeModal}
+          togglePresetDevice={togglePresetDevice}
+          togglePresetAction={togglePresetAction}
+          saving={savingPreset}
+          canSave={presetFormChanged}
+        />
       )}
 
       <ConfirmModal
         open={Boolean(pendingDelete)}
         title="Delete this preset?"
-        description={`“${pendingDelete?.name || 'This preset'}” will be permanently deleted. This action cannot be undone.`}
+        description={`“${pendingDelete?.name || "This preset"}” will be permanently deleted. This action cannot be undone.`}
         confirmLabel="Delete Preset"
         busy={deleting}
         onCancel={() => setPendingDelete(null)}
         onConfirm={deletePreset}
       />
 
-      <Toast message={toast} onClose={() => setToast('')} />
+      <Toast message={toast} onClose={() => setToast("")} />
     </>
   );
 }

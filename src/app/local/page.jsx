@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { RefreshCw } from "lucide-react";
 import useLocalControl from "./useLocalControl";
 import { ConnectionSection, DevicesSection } from "./LocalSections";
@@ -27,18 +28,27 @@ export default function LocalControlPage() {
               Direct ESP32 device control
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => manager.loadDevices(true)}
-            disabled={manager.checking}
-            className="inline-flex h-11 items-center gap-2 rounded-2xl border border-(--border) bg-(--bg-card) px-3 text-sm font-semibold text-(--text)"
-          >
-            <RefreshCw
-              size={17}
-              className={manager.checking ? "animate-spin" : ""}
-            />
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <Link
+              href="/"
+              className="inline-flex h-11 items-center rounded-2xl border border-(--border) bg-(--bg-card) px-3 text-sm font-semibold text-(--text)"
+            >
+              <span className="hidden sm:inline">Cloud dashboard</span>
+              <span className="sm:hidden">Cloud</span>
+            </Link>
+            <button
+              type="button"
+              onClick={() => manager.loadDevices(true)}
+              disabled={manager.checking}
+              className="inline-flex h-11 items-center gap-2 rounded-2xl border border-(--border) bg-(--bg-card) px-3 text-sm font-semibold text-(--text)"
+            >
+              <RefreshCw
+                size={17}
+                className={manager.checking ? "animate-spin" : ""}
+              />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
+          </div>
         </header>
         <ConnectionSection
           state={state}

@@ -50,6 +50,8 @@ export default function useDashboardController() {
     [editingBoardObj, setEditingBoardObj] = useState(null),
     [selectedBoardId, setSelectedBoardId] = useState(null),
     [deviceView, setDeviceView] = useState("carousel"),
+    [dashboardViewSwitcherEnabled, setDashboardViewSwitcherEnabled] =
+      useState(false),
     [pending, setPending] = useState({});
   const [todayLogs, setTodayLogs] = useState([]),
     [dailyRows, setDailyRows] = useState([]);
@@ -79,6 +81,26 @@ export default function useDashboardController() {
     },
     [viewCookie],
   );
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    supabase
+      .from("user_settings")
+      .select("dashboard_view_switcher_enabled")
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!active) return;
+        const enabled = data?.dashboard_view_switcher_enabled === true;
+        setDashboardViewSwitcherEnabled(enabled);
+        // When the switcher is off, the dashboard keeps its normal carousel
+        // view instead of getting stuck on a previously saved "list" choice.
+        if (!enabled) setDeviceView("carousel");
+      });
+    return () => {
+      active = false;
+    };
+  }, [user]);
   useEffect(() => {
     if (!boards.length) return setSelectedBoardId(null);
     const saved = roomCookie && readCookie(roomCookie);
@@ -448,6 +470,7 @@ export default function useDashboardController() {
     selectedDevices,
     deviceView,
     changeDeviceView,
+    dashboardViewSwitcherEnabled,
     pending,
     toggleDevice,
     todayLogs,

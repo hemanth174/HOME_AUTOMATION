@@ -10,8 +10,10 @@
 let lastResult = null; // { up: boolean, at: timestamp }
 let inFlight = null;
 // Both the layout and dashboard use this helper. Keep one shared result long
-// enough that their background timers do not issue duplicate probes.
-const CACHE_MS = 30000;
+// enough that their background timers do not issue duplicate probes. Failures
+// are cached only briefly so a phone waking from sleep recovers quickly.
+const SUCCESS_CACHE_MS = 30000;
+const FAILURE_CACHE_MS = 3000;
 const TIMEOUT_MS = 4000;
 
 async function probe() {
@@ -55,7 +57,8 @@ async function probe() {
  */
 export async function checkInternet(force = false) {
   const now = Date.now();
-  if (!force && lastResult && now - lastResult.at < CACHE_MS) {
+  const cacheMs = lastResult?.up ? SUCCESS_CACHE_MS : FAILURE_CACHE_MS;
+  if (!force && lastResult && now - lastResult.at < cacheMs) {
     return lastResult.up;
   }
   if (inFlight) return inFlight;
