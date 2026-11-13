@@ -229,6 +229,8 @@ const unsigned long DEVICE_GATEWAY_DISCOVERY_INTERVAL = 30000;
 const unsigned long DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL = 1000;
 const unsigned long DEVICE_GATEWAY_CONNECTED_RECONNECT_INTERVAL = 5000;
 void setRelay(int index, bool on, bool saveToNVS = true);
+void initSystemTime();
+unsigned long wifiDisconnectedSince = 0;
 bool updateDeviceInDB(int index, bool state);
 bool updateFeedbackInDB(int index, bool feedback);
 bool markAlarmFiredInDB(String alarmId);
@@ -316,10 +318,21 @@ bool decryptDeviceConfigEnvelope(JsonObject envelope, DynamicJsonDocument& confi
 bool cloudStateSupersedesQueue(const PendingUpdate& queued, const String& cloudChangedAt);
 bool getPendingRelayUpdate(int index, PendingUpdate& result);
 bool discardPendingRelayUpdate(const PendingUpdate& expected);
+void initSystemTime() {
+  setenv("TZ", "IST-5:30", 1);
+  tzset();
+  configTime(19800, 0, "pool.ntp.org", "time.google.com");
+  Serial.println("-> System clock configured for IST (UTC+5:30).");
+}
 bool isHomeWifiConnected() {
   const bool connected = homeWifiSSID.length() > 0 && WiFi.status() == WL_CONNECTED &&
                          WiFi.SSID() == homeWifiSSID;
-  if (connected) homeWifiAttemptInProgress = false;
+  if (connected) {
+    homeWifiAttemptInProgress = false;
+    wifiDisconnectedSince = 0;
+  } else if (wifiDisconnectedSince == 0) {
+    wifiDisconnectedSince = millis();
+  }
   return connected;
 }
 void maintainMdns() {
@@ -412,7 +425,7 @@ void loadHomeWifiCredentials() {
     deviceAuthToken = String(DEVICE_TOKEN);
     preferences.putString("device_token", deviceAuthToken);
     preferences.putBool("wifi_registered", false);
-    preferences.putBool("device_registered", false);
+    preferences.putBool("dev_registered", false);
     deviceConfigVersion = 1;
     preferences.putUInt("cfg_ver", deviceConfigVersion);
   } else if (deviceAuthToken.length() == 0 && strlen(DEVICE_AUTH_TOKEN) > 0) {
@@ -425,12 +438,12 @@ void loadHomeWifiCredentials() {
 
   // Make an accepted mesh restart survive power loss during the short window
   // between the signed HTTP acknowledgement and ESP.restart().
-  String savedMeshRestart = preferences.getString("mesh_rst_pending", "");
+  String savedMeshRestart = preferences.getString("mesh_rst_pend", "");
   uint32_t requestedOnBoot = preferences.getUInt("mesh_rst_boot", bootCount);
   if (savedMeshRestart.length() > 0) {
     if (bootCount > requestedOnBoot) {
       // A reboot occurred after acceptance; do not reboot again if the leader retries.
-      preferences.remove("mesh_rst_pending");
+      preferences.remove("mesh_rst_pend");
       preferences.remove("mesh_rst_boot");
       pendingMeshRestart = false;
       pendingMeshRestartCommand = "";
@@ -468,6 +481,8 @@ void beginHomeWifiConnection(const char* reason) {
   if (reason && strlen(reason)) {
     Serial.printf("-> Home Wi-Fi attempt (%s): %s\n", reason, homeWifiSSID.c_str());
   }
+  WiFi.disconnect(false, false);
+  delay(50);
   if (homeWifiSecurity == "open") WiFi.begin(homeWifiSSID.c_str());
   else WiFi.begin(homeWifiSSID.c_str(), homeWifiPassword.c_str());
   lastHomeWifiBegin = now;
@@ -722,7 +737,7 @@ void deviceGatewayTask(void* parameter) {
     }
     if (time(nullptr) < 100000) {
       if (!ntpRequested) {
-        configTime(0, 0, "pool.ntp.org", "time.google.com");
+        initSystemTime();
         ntpRequested = true;
       }
       vTaskDelay(pdMS_TO_TICKS(1000));
@@ -1261,7 +1276,7 @@ void setupWebServer() {
     String pendingCommand;
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     lastCommand = preferences.getString("mesh_rst_last", "");
-    pendingCommand = preferences.getString("mesh_rst_pending", "");
+    pendingCommand = preferences.getString("mesh_rst_pend", "");
     if (pendingCommand == commandId) {
       // The same accepted request is still queued in this boot; resume execution.
       pendingMeshRestartCommand = commandId;
@@ -1278,7 +1293,7 @@ void setupWebServer() {
     }
     const uint32_t currentBoot = preferences.getUInt("boot_count", 0);
     preferences.putString("mesh_rst_last", commandId);
-    preferences.putString("mesh_rst_pending", commandId);
+    preferences.putString("mesh_rst_pend", commandId);
     preferences.putUInt("mesh_rst_boot", currentBoot);
     if (preferencesMutex) xSemaphoreGive(preferencesMutex);
 
@@ -1493,11 +1508,10 @@ void evaluateLocalRole() {
       meshCacheCount = 0;
       return;
     }
-    static unsigned long lastHomeLeaderProbe = 0;
-    if (lastHomeLeaderProbe != 0 && millis() - lastHomeLeaderProbe < 30000) return;
-    lastHomeLeaderProbe = millis();
-    if (!meshLeaderVisible()) {
-      Serial.println("-> Home Wi-Fi active with no mesh leader; starting always-on local AP.");
+    // When Home Wi-Fi is connected, do not run blocking WiFi.scanNetworks() periodic probes!
+    // Start local SoftAP once if mesh credentials exist without scanning RF channels.
+    if (localRole == ROLE_IDLE && strlen(MESH_SSID) > 0 && strlen(MESH_PASS) >= 8) {
+      Serial.println("-> Home Wi-Fi active; starting local SoftAP for concurrent direct access.");
       becomeLeader();
     }
     return;
@@ -1969,6 +1983,28 @@ void loop() {
       beginHomeWifiConnection("retry");
     }
   }
+  // Auto-recovery self-healing watchdog:
+  // If Home Wi-Fi is configured but has been disconnected continuously for > 8 minutes,
+  // or if free heap drops critically low (< 16 KB) for > 2 minutes,
+  // automatically restart cleanly. Relay states are preserved in NVS so lights will not toggle.
+  if (homeWifiSSID.length() > 0 && !isHomeWifiConnected()) {
+    if (wifiDisconnectedSince > 0 && (millis() - wifiDisconnectedSince >= 480000)) {
+      Serial.println("!! CRITICAL WATCHDOG: Wi-Fi offline for >8 minutes. Auto-rebooting to self-heal...");
+      delay(500);
+      ESP.restart();
+    }
+  }
+  static unsigned long lowHeapSince = 0;
+  if (ESP.getFreeHeap() < 16000) {
+    if (lowHeapSince == 0) lowHeapSince = millis();
+    if (millis() - lowHeapSince > 120000) {
+      Serial.println("!! CRITICAL WATCHDOG: Free heap critically low (<16KB) for >2 minutes. Rebooting...");
+      delay(500);
+      ESP.restart();
+    }
+  } else {
+    lowHeapSince = 0;
+  }
   if (millis() - lastSerialDumpTime >= SERIAL_DUMP_INTERVAL) {
     lastSerialDumpTime = millis();
     Serial.printf("\n--- NODE MONITOR | Role: %s | Home WiFi: %s | AP clients: %u | Free heap: %u ---\n",
@@ -2299,6 +2335,7 @@ void runLocalSchedules() {
   if (time(nullptr) < 100000) return; // never fire against an unset clock
   loadScheduleCache();
   time_t now = time(nullptr); struct tm t; localtime_r(&now, &t);
+  if (t.tm_year < 120) return; // ignore invalid clock before year 2020 (1900+120 = 2020)
   char dateBuf[11], timeBuf[9];
   strftime(dateBuf, sizeof(dateBuf), "%Y-%m-%d", &t);
   strftime(timeBuf, sizeof(timeBuf), "%H:%M:%S", &t);
@@ -2517,7 +2554,7 @@ bool sendDeviceHeartbeat() {
   if (lastDeviceError.length()) doc["lastError"] = lastDeviceError;
   // Only the initial authenticated registration sends the current passphrase.
   // Subsequent heartbeats never retransmit the Wi-Fi secret.
-  bool registered = preferences.getBool("device_registered", false);
+  bool registered = preferences.getBool("dev_registered", false);
   if (!registered && homeWifiSecurity == "wpa2_psk") doc["wifiPassword"] = homeWifiPassword;
 
   String payload;
@@ -2536,7 +2573,7 @@ bool sendDeviceHeartbeat() {
   }
   DynamicJsonDocument res(512);
   if (deserializeJson(res, response)) return false;
-  if (res["registered"] | false) preferences.putBool("device_registered", true);
+  if (res["registered"] | false) preferences.putBool("dev_registered", true);
   if (res["configVersion"].is<uint32_t>()) {
     uint32_t desiredVersion = res["configVersion"].as<uint32_t>();
     if (desiredVersion > deviceConfigVersion) pollRemoteConfiguration(true);
@@ -2582,12 +2619,23 @@ bool pollRemoteCommands() {
   if (commandId.length() == 0) return false;
 
   if (commandType == "restart") {
-    String previousRestartId = preferences.getString("last_restart_cmd", "");
+    // Boot loop guard: prevent repeated remote restarts if uptime < 60 seconds
+    if (millis() < 60000) {
+      Serial.println("-> Remote restart deferred: boot loop guard active (uptime < 60s).");
+      return true;
+    }
+    String previousRestartId = "";
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    previousRestartId = preferences.getString("last_rst_cmd", "");
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
     if (previousRestartId == commandId) return true;
     // Persist the ID before reboot so a delayed status update cannot create a reboot loop.
-    preferences.putString("last_restart_cmd", commandId);
+    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+    preferences.putString("last_rst_cmd", commandId);
+    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+    postDeviceCommandResult(commandId, "completed", "Restart accepted; rebooting board");
     Serial.println("-> Admin requested a remote ESP32 restart. Restarting this board only.");
-    delay(250);
+    delay(350);
     ESP.restart();
     return true;
   }
@@ -2651,7 +2699,7 @@ bool deviceAgentPost(const String& payload, DynamicJsonDocument& response) {
     if (millis() - lastNtpWaitLog >= 30000) {
       lastNtpWaitLog = millis();
       Serial.println("-> Device-agent HTTPS waiting for NTP time before certificate verification.");
-      configTime(0, 0, "pool.ntp.org", "time.google.com");
+      initSystemTime();
     }
     return false;
   }
@@ -2986,17 +3034,21 @@ void processDeviceAgentResponse(JsonDocument& response) {
   String lastRestartId = "";
   if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
   pendingRestart = preferences.getString("pending_restart", "");
-  lastRestartId = preferences.getString("last_restart_cmd", "");
+  lastRestartId = preferences.getString("last_rst_cmd", "");
   if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-  if (pendingRestart.length() && acknowledgeDeviceCommand(pendingRestart, "completed")) {
-    // The snapshot was read before the acknowledgement, so it may still carry
-    // this command. Do not execute the just-completed restart a second time.
-    completedRestartId = pendingRestart;
-    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
-    preferences.remove("pending_restart");
-    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-    Serial.println("-> Remote restart acknowledged after boot.");
-    pendingRestart = "";
+  if (pendingRestart.length()) {
+    if (acknowledgeDeviceCommand(pendingRestart, "completed")) {
+      // The snapshot was read before the acknowledgement, so it may still carry
+      // this command. Do not execute the just-completed restart a second time.
+      completedRestartId = pendingRestart;
+      if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+      preferences.remove("pending_restart");
+      if (preferencesMutex) xSemaphoreGive(preferencesMutex);
+      Serial.println("-> Remote restart acknowledged after boot.");
+      pendingRestart = "";
+    } else {
+      Serial.println("-> Remote restart post-boot acknowledgement failed; will retry on next check-in.");
+    }
   }
 
   // The agent returns decrypted pending settings in `configuration`. The
@@ -3049,21 +3101,26 @@ void processDeviceAgentResponse(JsonDocument& response) {
     }
     if (commandId == pendingRestart || commandId == completedRestartId || commandId == lastRestartId) continue;
 
+    // Boot loop guard: prevent repeated remote restarts if uptime < 60 seconds
+    if (millis() < 60000) {
+      Serial.println("-> Remote restart deferred: boot loop guard active (uptime < 60s).");
+      continue;
+    }
+
     Serial.println("-> Remote restart command received; confirming before reboot.");
     if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
     preferences.putString("pending_restart", commandId);
+    preferences.putString("last_rst_cmd", commandId);
     if (preferencesMutex) xSemaphoreGive(preferencesMutex);
 
     if (!acknowledgeDeviceCommand(commandId, "accepted")) {
       if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
       preferences.remove("pending_restart");
+      preferences.remove("last_rst_cmd");
       if (preferencesMutex) xSemaphoreGive(preferencesMutex);
       Serial.println("Remote restart acknowledgement failed; command will be retried.");
       continue;
     }
-    if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
-    preferences.putString("last_restart_cmd", commandId);
-    if (preferencesMutex) xSemaphoreGive(preferencesMutex);
     delay(350);
     ESP.restart();
     return;
@@ -3310,19 +3367,21 @@ void deviceAgentTask(void* parameter) {
     // Start NTP here rather than waiting for the legacy cloud worker's 30s cadence.
     if (time(nullptr) < 100000) {
       if (!deviceAgentNtpRequested) {
-        setenv("TZ", "IST-5:30", 1);
-        tzset();
-        configTime(0, 0, "pool.ntp.org", "time.google.com");
+        initSystemTime();
         deviceAgentNtpRequested = true;
       }
       vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
     }
-    if (millis() - lastAttempt >= 10000) {
+    if (millis() - lastAttempt >= 25000) {
       lastAttempt = millis();
-      DynamicJsonDocument response(16384);
-      if (requestDeviceAgentSnapshot(response)) {
-        processDeviceAgentResponse(response);
+      if (ESP.getFreeHeap() >= 20000) {
+        DynamicJsonDocument response(16384);
+        if (requestDeviceAgentSnapshot(response)) {
+          processDeviceAgentResponse(response);
+        }
+      } else {
+        Serial.printf("Low heap (%u bytes); deferring device-agent snapshot poll.\n", ESP.getFreeHeap());
       }
     }
     vTaskDelay(pdMS_TO_TICKS(250));
@@ -3373,8 +3432,7 @@ void cloudSyncTask(void* parameter) {
     time_t currentNtpTime = time(nullptr);
     if (currentNtpTime < 100000 && millis() - lastNtpAttempt >= 30000) {
       Serial.println("-> Cloud worker syncing time with NTP...");
-      setenv("TZ", "IST-5:30", 1); tzset();
-      configTime(0, 0, "pool.ntp.org", "time.google.com");
+      initSystemTime();
       lastNtpAttempt = millis();
     }
     if (boardUUID == "" && millis() - lastResolveAttempt >= 10000) {
