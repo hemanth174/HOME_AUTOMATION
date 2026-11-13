@@ -155,7 +155,7 @@ volatile bool cloudDevicesReady = false;
 // Cloud polling is a fallback for commands issued while the browser is not
 // connected to the local controller. Local REST commands remain immediate;
 // keeping this at one second creates tens of thousands of Supabase requests.
-const unsigned long POLL_INTERVAL = 30000;
+const unsigned long POLL_INTERVAL = 2500;
 const unsigned long HEARTBEAT_INTERVAL = 60000;
 const unsigned long FEEDBACK_RETRY_INTERVAL = 1000;
 struct Alarm { String id; String triggerAt; bool action; bool active; int deviceIndex; };
@@ -226,7 +226,7 @@ bool deviceGatewayTls = true;
 volatile bool deviceGatewayConnected = false;
 unsigned long lastDeviceGatewayDiscovery = 0;
 const unsigned long DEVICE_GATEWAY_DISCOVERY_INTERVAL = 30000;
-const unsigned long DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL = 1000;
+const unsigned long DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL = 15000;
 const unsigned long DEVICE_GATEWAY_CONNECTED_RECONNECT_INTERVAL = 5000;
 void setRelay(int index, bool on, bool saveToNVS = true);
 void initSystemTime();
@@ -337,17 +337,21 @@ bool isHomeWifiConnected() {
 }
 void maintainMdns() {
   const bool shouldAdvertise = isHomeWifiConnected();
+  static unsigned long lastMdnsAttempt = 0;
   if (shouldAdvertise && !mdnsActive) {
+    if (lastMdnsAttempt != 0 && millis() - lastMdnsAttempt < 30000) return;
+    lastMdnsAttempt = millis();
     if (MDNS.begin("home-automation")) {
       MDNS.addService("http", "tcp", 80);
       mdnsActive = true;
       Serial.println("-> Local discovery active at http://home-automation.local");
     } else {
-      Serial.println("WARNING: mDNS startup failed; use the ESP32 local IP from the serial log.");
+      Serial.println("WARNING: mDNS startup failed; will retry in 30s. Use local IP from log.");
     }
   } else if (!shouldAdvertise && mdnsActive) {
     MDNS.end();
     mdnsActive = false;
+    lastMdnsAttempt = 0;
   }
 }
 bool isDirectCloudConfigured() {
@@ -2115,7 +2119,7 @@ bool resolveBoardAndDevices() {
       String(BOARD_IDENTIFIER) == "esp32-unconfigured") return false;
 
   if (isDeviceAgentConfigured()) {
-    DynamicJsonDocument response(16384);
+    DynamicJsonDocument response(6144);
     if (!requestDeviceAgentSnapshot(response)) return false;
     applyDeviceSnapshot(response, true);
     bool foundAny = false;
@@ -2170,7 +2174,7 @@ bool resolveBoardAndDevices() {
 bool syncAllStatesToDB() {
   if (!isCloudConfigured()) return false;
   if (isDeviceAgentConfigured()) {
-    DynamicJsonDocument response(16384);
+    DynamicJsonDocument response(6144);
     if (!requestDeviceAgentSnapshot(response)) return false;
     applyDeviceSnapshot(response, true);
     int count = 0;
@@ -2700,6 +2704,16 @@ bool deviceAgentPost(const String& payload, DynamicJsonDocument& response) {
       lastNtpWaitLog = millis();
       Serial.println("-> Device-agent HTTPS waiting for NTP time before certificate verification.");
       initSystemTime();
+    }
+    return false;
+  }
+
+  // Protect against heap exhaustion: mbedTLS with CA bundle requires sufficient free contiguous heap
+  if (ESP.getFreeHeap() < 30000) {
+    static unsigned long lastHeapWarn = 0;
+    if (millis() - lastHeapWarn >= 10000) {
+      lastHeapWarn = millis();
+      Serial.printf("Low heap (%u bytes); deferring HTTPS request to prevent TLS memory abort.\n", ESP.getFreeHeap());
     }
     return false;
   }
@@ -3373,10 +3387,10 @@ void deviceAgentTask(void* parameter) {
       vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
     }
-    if (millis() - lastAttempt >= 25000) {
+    if (millis() - lastAttempt >= 2500) {
       lastAttempt = millis();
-      if (ESP.getFreeHeap() >= 20000) {
-        DynamicJsonDocument response(16384);
+      if (ESP.getFreeHeap() >= 30000) {
+        DynamicJsonDocument response(6144);
         if (requestDeviceAgentSnapshot(response)) {
           processDeviceAgentResponse(response);
         }
@@ -3435,23 +3449,23 @@ void cloudSyncTask(void* parameter) {
       initSystemTime();
       lastNtpAttempt = millis();
     }
-    if (boardUUID == "" && millis() - lastResolveAttempt >= 10000) {
-      lastResolveAttempt = millis();
-      Serial.println("-> Cloud worker linking board/devices...");
-      if (resolveBoardAndDevices()) {
-        Serial.println("-> Board & devices linked; reconciling relay state before cloud polling.");
+    if (!isDeviceAgentConfigured()) {
+      if (boardUUID == "" && millis() - lastResolveAttempt >= 10000) {
+        lastResolveAttempt = millis();
+        Serial.println("-> Cloud worker linking board/devices...");
+        if (resolveBoardAndDevices()) {
+          Serial.println("-> Board & devices linked; reconciling relay state before cloud polling.");
+        }
       }
-    }
-    if (boardUUID != "" && !cloudDevicesReady) {
-      if (syncAllStatesToDB()) {
-        Serial.println(isDeviceAgentConfigured()
-          ? "-> Device-agent snapshots active; legacy direct polling is disabled."
-          : "-> Cloud state reconciled; cloud polling enabled.");
-        cloudDevicesReady = true;
-      } else {
-        Serial.println("-> Initial relay-state reconciliation failed; cloud polling paused.");
-        vTaskDelay(pdMS_TO_TICKS(3000));
-        continue;
+      if (boardUUID != "" && !cloudDevicesReady) {
+        if (syncAllStatesToDB()) {
+          Serial.println("-> Cloud state reconciled; cloud polling enabled.");
+          cloudDevicesReady = true;
+        } else {
+          Serial.println("-> Initial relay-state reconciliation failed; cloud polling paused.");
+          vTaskDelay(pdMS_TO_TICKS(3000));
+          continue;
+        }
       }
     }
     if (boardUUID != "") {
