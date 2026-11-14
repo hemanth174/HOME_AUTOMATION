@@ -6,7 +6,7 @@ import { Sun, Moon } from 'lucide-react';
 
 const THEME_TRANSITION_DURATION = 720;
 
-export default function ThemeToggle({ className, size = 15 }) {
+export default function ThemeToggle({ className, size = 15, variant = "button" }) {
   const [theme, setTheme] = useState('dark');
   const [mounted, setMounted] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -22,6 +22,7 @@ export default function ThemeToggle({ className, size = 15 }) {
   useEffect(() => {
     if (mounted) {
       document.documentElement.setAttribute('data-theme', theme);
+      document.documentElement.classList.toggle('dark', theme === 'dark');
     }
   }, [theme, mounted]);
 
@@ -47,6 +48,7 @@ export default function ThemeToggle({ className, size = 15 }) {
 
     const applyTheme = (flush = false) => {
       root.setAttribute('data-theme', next);
+      root.classList.toggle('dark', next === 'dark');
       localStorage.setItem('theme', next);
       if (flush) {
         flushSync(() => setTheme(next));
@@ -92,11 +94,45 @@ export default function ThemeToggle({ className, size = 15 }) {
 
   // Render a placeholder matching the dimension until client mounts to prevent mismatch
   if (!mounted) {
+    if (variant === "switch") {
+      return (
+        <div 
+          className={`h-7 w-12 rounded-full border border-border/80 bg-slate-200/80 dark:bg-zinc-800 ${className || ""}`}
+        />
+      );
+    }
     return (
       <div 
         className={className || "p-2 w-[34px] h-[34px] rounded-xl border border-border bg-accent-bg/5 text-text-muted/40 flex items-center justify-center"}
         style={{ width: `${size + 19}px`, height: `${size + 19}px` }}
       />
+    );
+  }
+
+  if (variant === "switch") {
+    return (
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={isTransitioning}
+        role="switch"
+        aria-checked={theme === 'dark'}
+        aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+        title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+        className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full border border-border/80 bg-slate-200/90 p-0.5 transition-colors duration-300 dark:bg-zinc-800 focus:outline-none disabled:cursor-wait disabled:opacity-70 ${className || ""}`}
+      >
+        <span
+          className={`flex h-5.5 w-5.5 transform items-center justify-center rounded-full bg-white shadow-md transition-transform duration-300 ease-out dark:bg-zinc-950 ${
+            theme === 'dark' ? 'translate-x-5' : 'translate-x-0'
+          }`}
+        >
+          {theme === 'dark' ? (
+            <Moon size={11} className="text-cyan-300 stroke-[2.5]" />
+          ) : (
+            <Sun size={12} className="text-amber-500 stroke-[2.5]" />
+          )}
+        </span>
+      </button>
     );
   }
 

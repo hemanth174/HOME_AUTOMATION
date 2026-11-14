@@ -11,6 +11,7 @@ import LandingDualPlane from "./LandingDualPlane";
 import LandingShowcase from "./LandingShowcase";
 import LandingAnalytics from "./LandingAnalytics";
 import LandingJourney from "./LandingJourney";
+import VoiceSubscriptionSection from "./VoiceSubscriptionSection";
 import LandingCta from "./LandingCta";
 import LandingFooter from "./LandingFooter";
 
@@ -167,6 +168,7 @@ export default function LandingPage() {
         />
         <LandingAnalytics videoRef={videoRef} />
         <LandingJourney />
+        <VoiceSubscriptionSection />
         <LandingCta handleAddToCart={handleAddToCart} router={router} />
       </main>
       <LandingFooter

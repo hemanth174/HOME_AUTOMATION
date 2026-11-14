@@ -18,10 +18,10 @@
 /* -------- Prevent horizontal overflow & theme the scrollbar globally -------- */
 html {
     scroll-behavior: smooth;
-    overflow-x: hidden;
+    overflow-x: clip;
 }
 body {
-    overflow-x: hidden;
+    overflow-x: clip;
 }
 
 /* Circular theme transition originating from the toggle button. */
