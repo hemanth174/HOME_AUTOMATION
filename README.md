@@ -108,7 +108,9 @@ finalzzz_antigravity/
 
 ### VikaTech account approvals
 
-Run `supabase_approval_flow.sql` in the Supabase SQL editor, then configure `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, `PROVISIONING_ENCRYPTION_KEY`, and `NEXT_PUBLIC_SITE_URL`. The scheduled reminder endpoint is `/api/cron/approval-reminders`; Vercel runs it hourly and it sends reminders only after a full 24 hours without the second admin approval.
+Run `supabase_approval_flow.sql` in the Supabase SQL editor, then configure `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, `PROVISIONING_ENCRYPTION_KEY`, and `NEXT_PUBLIC_SITE_URL`. The scheduled reminder endpoint is `/api/cron/approval-reminders`; Vercel runs it once daily and it sends reminders only after a full 24 hours without the second admin approval.
+
+Vercel Hobby plans do not allow a per-minute cron expression. The notification endpoint (`/api/cron/notifications`) is therefore intentionally not listed in `vercel.json`; configure an external scheduler to call it every minute with `Authorization: Bearer <CRON_SECRET>`. This keeps device power-loss notifications and minute-level schedules timely without causing a Vercel deployment failure.
 
 ### Feature announcements
 
