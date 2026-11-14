@@ -54,7 +54,7 @@ export async function sendPushToUser(admin, userId, payload) {
           },
         },
         message,
-        { TTL: 60 * 60, urgency: payload.type === 'alarm' ? 'high' : 'normal' },
+        { TTL: 60 * 60, urgency: ['alarm', 'device_offline'].includes(payload.type) ? 'high' : 'normal' },
       );
       sent += 1;
       await admin

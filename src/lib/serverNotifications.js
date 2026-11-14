@@ -6,6 +6,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
   notifications_enabled: true,
   notify_alarm: true,
   notify_schedule: true,
+  notify_device_offline: true,
   schedule_lead_minutes: 5,
   notify_energy: true,
   energy_device_kwh_threshold: 3,
@@ -14,6 +15,19 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
   tariff_per_kwh: 8,
   currency: 'INR',
 };
+
+// The device-agent checks in roughly every 2.5 seconds. Waiting two minutes
+// avoids false alarms during a short Wi-Fi or Internet interruption while still
+// reporting a real power cut quickly through the server cron.
+export const DEVICE_OFFLINE_AFTER_MS = 2 * 60 * 1000;
+
+export function isDeviceOffline(lastSeenAt, now = new Date(), thresholdMs = DEVICE_OFFLINE_AFTER_MS) {
+  if (!lastSeenAt) return false;
+  const lastSeen = new Date(lastSeenAt).getTime();
+  const current = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  return Number.isFinite(lastSeen) && Number.isFinite(current) &&
+    current >= lastSeen && current - lastSeen >= thresholdMs;
+}
 
 export function normalizeNotificationSettings(row) {
   const settings = { ...DEFAULT_NOTIFICATION_SETTINGS, ...(row || {}) };

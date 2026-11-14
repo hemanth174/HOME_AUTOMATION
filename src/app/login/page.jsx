@@ -381,7 +381,7 @@ export default function LoginPage() {
         </Link>
         <div className="relative z-10 max-w-md">
           <div className="mb-5 flex h-16 w-52 items-center justify-center overflow-hidden rounded-xl bg-white shadow-lg">
-            <img src="/vikatech-logo.png" alt="VikaTech" className="h-full w-full object-contain" />
+            <img src="/vikatech_logo.png" alt="VikaTech" className="h-full w-full object-contain" />
           </div>
           <h2 className="login-brand-title text-4xl xl:text-5xl font-extrabold leading-[1.05] tracking-tight">
             One login.
@@ -436,7 +436,7 @@ export default function LoginPage() {
           {/* Mobile brand header — compact, no kicker per craft-floor */}
           <div className="lg:hidden text-center mb-5">
             <div className="mx-auto mb-3 flex h-14 w-44 items-center justify-center overflow-hidden rounded-xl bg-white shadow-sm">
-              <img src="/vikatech-logo.png" alt="VikaTech" className="h-full w-full object-contain" />
+              <img src="/vikatech_logo.png" alt="VikaTech" className="h-full w-full object-contain" />
             </div>
             <h1 className="text-[32px] leading-[1.1] font-extrabold tracking-tight text-text">Smart Home</h1>
           </div>

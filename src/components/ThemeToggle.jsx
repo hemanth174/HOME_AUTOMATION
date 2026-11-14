@@ -103,7 +103,7 @@ export default function ThemeToggle({ className, size = 15, variant = "button" }
     }
     return (
       <div 
-        className={className || "p-2 w-[34px] h-[34px] rounded-xl border border-border bg-accent-bg/5 text-text-muted/40 flex items-center justify-center"}
+        className={className || "p-2 w-[34px] h-[34px] rounded-full border border-border bg-accent-bg/5 text-text-muted/40 flex items-center justify-center"}
         style={{ width: `${size + 19}px`, height: `${size + 19}px` }}
       />
     );
@@ -142,7 +142,7 @@ export default function ThemeToggle({ className, size = 15, variant = "button" }
         type="button"
         onClick={toggle}
         disabled={isTransitioning}
-        className={className || "p-2 rounded-xl border border-border bg-accent-bg/5 hover:bg-accent-bg hover:text-accent hover:border-accent text-text-muted transition-all cursor-pointer flex items-center justify-center disabled:cursor-wait disabled:opacity-70"}
+        className={`${className || "p-2 rounded-full border border-border bg-accent-bg/5 hover:bg-accent-bg hover:text-accent hover:border-accent text-text-muted transition-all cursor-pointer flex items-center justify-center disabled:cursor-wait disabled:opacity-70"} header-icon-sweep`}
         aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
         aria-busy={isTransitioning}
         title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}

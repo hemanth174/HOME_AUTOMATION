@@ -22,7 +22,11 @@ function parseArgs(argv) {
     const token = argv[index];
     if (!token.startsWith('--')) continue;
     const key = token.slice(2);
-    values[key] = argv[index + 1]?.startsWith('--') ? true : argv[++index];
+    const parts = [];
+    while (index + 1 < argv.length && !argv[index + 1].startsWith('--')) {
+      parts.push(argv[++index]);
+    }
+    values[key] = parts.length > 0 ? parts.join(' ') : true;
   }
   return values;
 }
@@ -34,6 +38,18 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+function resolveActionUrl(value) {
+  if (!value) return null;
+  const actionUrl = String(value).trim();
+  if (/^https?:\/\//i.test(actionUrl)) return actionUrl;
+
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (!siteUrl) {
+    throw new Error('NEXT_PUBLIC_SITE_URL is required when --url is a relative path.');
+  }
+  return new URL(actionUrl, `${siteUrl.replace(/\/+$/, '')}/`).toString();
 }
 
 function usage() {
@@ -69,10 +85,18 @@ async function main() {
   const admin = createClient(url, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: Number.parseInt(process.env.SMTP_PORT || '587', 10),
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: { user: smtpUser, pass: smtpPass },
+  });
+  await transporter.verify();
+
   const announcement = {
     title: String(args.title).trim(),
     message: String(args.message).trim(),
-    action_url: args.url ? String(args.url).trim() : null,
+    action_url: resolveActionUrl(args.url),
   };
   const { data: saved, error: insertError } = await admin
     .from('feature_announcements')
@@ -83,12 +107,6 @@ async function main() {
 
   const users = await listUsers(admin);
   const recipients = [...new Set(users.map((user) => user.email?.trim()).filter(Boolean))];
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: Number.parseInt(process.env.SMTP_PORT || '587', 10),
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: { user: smtpUser, pass: smtpPass },
-  });
   const subject = `VikaTech update: ${saved.title}`;
   const actionText = saved.action_url ? `\nOpen VikaTech: ${saved.action_url}` : '';
   const text = `${saved.message}${actionText}`;
@@ -104,8 +122,16 @@ async function main() {
       html,
     }))));
   }
-  const failed = results.filter((result) => result.status === 'rejected').length;
-  console.log(JSON.stringify({ announcementId: saved.id, recipients: recipients.length, sent: recipients.length - failed, failed }, null, 2));
+  const failedResults = results.filter((result) => result.status === 'rejected');
+  const failed = failedResults.length;
+  const firstError = failedResults[0]?.reason?.message || null;
+  console.log(JSON.stringify({
+    announcementId: saved.id,
+    recipients: recipients.length,
+    sent: recipients.length - failed,
+    failed,
+    ...(firstError ? { errorReason: firstError } : {})
+  }, null, 2));
   if (failed) process.exitCode = 2;
 }
 

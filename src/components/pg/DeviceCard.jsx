@@ -8,6 +8,13 @@ export default function DeviceCard({
   pending,
   onToggle,
   carousel = false,
+  draggable = false,
+  isDragging = false,
+  isDragOver = false,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
 }) {
   const kind = getDeviceKind(device.name);
   const { Icon } = kind;
@@ -15,10 +22,22 @@ export default function DeviceCard({
     device.feedback_on !== null && device.feedback_on !== undefined;
   const isRelayOn = device.is_on;
   const isLightOn = isRelayOn;
+  const handleDragStart = (event) => {
+    if (event.target.closest?.("button,a,input,select,textarea")) {
+      event.preventDefault();
+      return;
+    }
+    onDragStart?.(event, device.id);
+  };
 
   return (
     <article
-      className={`relative flex min-h-[104px] min-w-0 flex-col justify-between gap-1.5 rounded-2xl border bg-(--pg-card) p-3.5 transition-all duration-200 ${carousel ? "w-[320px] shrink-0 snap-start snap-always" : "w-full"} max-sm:w-full max-sm:basis-full max-sm:shrink-0 max-sm:snap-start max-sm:snap-always max-sm:min-h-[132px] ${
+      draggable={draggable}
+      onDragStart={handleDragStart}
+      onDragOver={(event) => onDragOver?.(event, device.id)}
+      onDrop={(event) => onDrop?.(event, device.id)}
+      onDragEnd={onDragEnd}
+      className={`relative flex min-h-[104px] min-w-0 flex-col justify-between gap-1.5 rounded-2xl border bg-(--pg-card) p-3.5 transition-all duration-200 ${carousel ? "w-[320px] shrink-0 snap-start snap-always" : "w-full"} ${draggable ? (isDragging ? "cursor-grabbing opacity-60" : "cursor-grab active:cursor-grabbing") : ""} ${isDragOver ? "border-(--pg-brand) ring-2 ring-(--pg-brand)/20" : ""} max-sm:w-full max-sm:basis-full max-sm:shrink-0 max-sm:snap-start max-sm:snap-always max-sm:min-h-[132px] ${
         isLightOn ? "border-(--pg-brand-line)" : "border-(--pg-line)"
       } ${pending ? "opacity-70" : ""}`}
     >

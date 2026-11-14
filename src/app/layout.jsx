@@ -52,9 +52,9 @@ export const metadata = {
     url: "/",
     images: [
       {
-        url: "/vikatech-header-logo.png",
-        width: 1200,
-        height: 630,
+        url: "/vikatech_logo.png",
+        width: 2172,
+        height: 724,
         alt: "VikaTech smart home automation",
       },
     ],
@@ -64,7 +64,7 @@ export const metadata = {
     title: "VikaTech | Smart Home Automation",
     description:
       "Reliable cloud and local control for your connected home with VikaTech.",
-    images: ["/vikatech-header-logo.png"],
+    images: ["/vikatech_logo.png"],
   },
   robots: {
     index: true,
@@ -127,7 +127,7 @@ export default function RootLayout({ children }) {
                 url: `${
                   process.env.NEXT_PUBLIC_SITE_URL ||
                   "https://home-automation-mauve-one.vercel.app"
-                }/vikatech-logo.png`,
+                }/vikatech_logo.png`,
               },
               description:
                 "Smart home automation with reliable cloud and local device control.",

@@ -38,8 +38,6 @@ export default function FeatureNotificationBell({
   notificationPermission = "default",
   onEnableNotifications,
   mobile = false,
-  onMouseEnter,
-  onMouseLeave,
 }) {
   const [notifications, setNotifications] = useState([]);
   const [user, setUser] = useState(null);
@@ -283,22 +281,11 @@ export default function FeatureNotificationBell({
   );
 
   return (
-    <div
-      className="relative"
-      onMouseEnter={(event) => {
-        onMouseEnter?.(event);
-        if (!mobile && !open) onToggle?.();
-      }}
-      onMouseLeave={(event) => {
-        onMouseLeave?.(event);
-        if (!mobile && open) onClose?.();
-      }}
-    >
+    <div className="relative">
       <button
         type="button"
         onClick={onToggle}
-        className={`relative flex items-center justify-center rounded-xl border border-border bg-card text-text-muted transition-all hover:bg-accent-bg hover:text-accent hover:border-accent/30 ${mobile ? "h-9 w-9" : "h-9 w-9"}`}
-        title="Notifications"
+        className={`header-icon-sweep relative flex items-center justify-center rounded-full border border-border bg-card text-text-muted transition-all hover:bg-accent-bg hover:text-accent hover:border-accent/30 ${mobile ? "h-9 w-9" : "h-9 w-9"}`}
         aria-label={`Notifications${combinedUnread ? `, ${combinedUnread} unread` : ""}`}
         aria-expanded={open}
       >

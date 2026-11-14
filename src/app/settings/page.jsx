@@ -53,6 +53,7 @@ const DEFAULT_NOTIFICATION_SETTINGS = {
   notificationsEnabled: true,
   notifyAlarm: true,
   notifySchedule: true,
+  notifyDeviceOffline: true,
   scheduleLeadMinutes: "5",
   notifyEnergy: true,
   energyThreshold: "3",
@@ -70,6 +71,7 @@ export default function SettingsPage() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [notifyAlarm, setNotifyAlarm] = useState(true);
   const [notifySchedule, setNotifySchedule] = useState(true);
+  const [notifyDeviceOffline, setNotifyDeviceOffline] = useState(true);
   const [scheduleLeadMinutes, setScheduleLeadMinutes] = useState("5");
   const [notifyEnergy, setNotifyEnergy] = useState(true);
   const [energyThreshold, setEnergyThreshold] = useState("3");
@@ -121,6 +123,7 @@ export default function SettingsPage() {
         notificationsEnabled: data?.notifications_enabled !== false,
         notifyAlarm: data?.notify_alarm !== false,
         notifySchedule: data?.notify_schedule !== false,
+        notifyDeviceOffline: data?.notify_device_offline !== false,
         scheduleLeadMinutes: String(data?.schedule_lead_minutes ?? DEFAULT_NOTIFICATION_SETTINGS.scheduleLeadMinutes),
         notifyEnergy: data?.notify_energy !== false,
         energyThreshold: String(data?.energy_device_kwh_threshold ?? DEFAULT_NOTIFICATION_SETTINGS.energyThreshold),
@@ -139,6 +142,7 @@ export default function SettingsPage() {
       setNotificationsEnabled(nextNotificationSettings.notificationsEnabled);
       setNotifyAlarm(nextNotificationSettings.notifyAlarm);
       setNotifySchedule(nextNotificationSettings.notifySchedule);
+      setNotifyDeviceOffline(nextNotificationSettings.notifyDeviceOffline);
       setScheduleLeadMinutes(nextNotificationSettings.scheduleLeadMinutes);
       setNotifyEnergy(nextNotificationSettings.notifyEnergy);
       setEnergyThreshold(nextNotificationSettings.energyThreshold);
@@ -169,6 +173,7 @@ export default function SettingsPage() {
     notificationsEnabled !== savedNotificationSettings.notificationsEnabled ||
     notifyAlarm !== savedNotificationSettings.notifyAlarm ||
     notifySchedule !== savedNotificationSettings.notifySchedule ||
+    notifyDeviceOffline !== savedNotificationSettings.notifyDeviceOffline ||
     scheduleLeadMinutes !== savedNotificationSettings.scheduleLeadMinutes ||
     notifyEnergy !== savedNotificationSettings.notifyEnergy ||
     energyThreshold !== savedNotificationSettings.energyThreshold ||
@@ -250,6 +255,7 @@ export default function SettingsPage() {
         notifications_enabled: notificationsEnabled,
         notify_alarm: notifyAlarm,
         notify_schedule: notifySchedule,
+        notify_device_offline: notifyDeviceOffline,
         schedule_lead_minutes: lead,
         notify_energy: notifyEnergy,
         energy_device_kwh_threshold: threshold,
@@ -265,6 +271,7 @@ export default function SettingsPage() {
         notificationsEnabled,
         notifyAlarm,
         notifySchedule,
+        notifyDeviceOffline,
         scheduleLeadMinutes,
         notifyEnergy,
         energyThreshold,
@@ -514,6 +521,13 @@ export default function SettingsPage() {
               description="Remind before a recurring schedule runs."
               checked={notifySchedule}
               onChange={setNotifySchedule}
+              disabled={!notificationsEnabled}
+            />
+            <SettingSwitch
+              label="ESP32 power-loss alerts"
+              description="Notify when an ESP32 stops checking in for two minutes. This may also indicate a Wi-Fi or Internet outage."
+              checked={notifyDeviceOffline}
+              onChange={setNotifyDeviceOffline}
               disabled={!notificationsEnabled}
             />
             <SettingSwitch

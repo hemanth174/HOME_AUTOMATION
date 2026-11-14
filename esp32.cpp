@@ -1148,6 +1148,7 @@ void setupWebServer() {
     doc["devicesCount"] = NUM_DEVICES;
     doc["meshNodes"] = (localRole == ROLE_LEADER) ? meshNodeCount : 0;
     doc["stationConnected"] = isHomeWifiConnected();
+    if (isHomeWifiConnected()) doc["wifiRssi"] = WiFi.RSSI();
     doc["wifiConfigured"] = homeWifiSSID.length() > 0;
     doc["wifiSecurity"] = homeWifiSecurity;
     doc["deviceManagementConfigured"] = deviceAuthToken.length() > 0;

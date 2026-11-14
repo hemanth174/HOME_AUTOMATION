@@ -104,7 +104,8 @@ export async function checkConnection() {
       snapshot.leaderNode?.nodeId !== status.nodeId ||
       snapshot.leaderNode?.role !== status.role ||
       snapshot.leaderNode?.stationConnected !== status.stationConnected ||
-      snapshot.leaderNode?.apStations !== status.apStations
+      snapshot.leaderNode?.apStations !== status.apStations ||
+      snapshot.leaderNode?.wifiRssi !== status.wifiRssi
     ) {
       patch({ isLocalConnected: true, leaderNode: status });
     }

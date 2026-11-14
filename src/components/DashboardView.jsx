@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -54,6 +55,130 @@ export default function DashboardView({ c }) {
   const roomExpanded = selectedBoard
     ? c.expandedBoards?.[selectedBoard.id] !== false
     : true;
+  const [listDeviceOrder, setListDeviceOrder] = useState([]);
+  const [draggedDeviceId, setDraggedDeviceId] = useState(null);
+  const [dragOverDeviceId, setDragOverDeviceId] = useState(null);
+  const [isCarouselDragging, setIsCarouselDragging] = useState(false);
+  const carouselDragRef = useRef(null);
+  const selectedDeviceIdList = selectedDevices.map((device) => String(device.id));
+  const selectedDeviceIds = selectedDeviceIdList.join(",");
+
+  useEffect(() => {
+    const roomId = selectedBoard?.id;
+    if (!roomId) {
+      setListDeviceOrder(selectedDeviceIdList);
+      return;
+    }
+
+    let savedOrder = [];
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem(`vikatech_device_order_${roomId}`) || "[]",
+      );
+      if (Array.isArray(saved)) savedOrder = saved.map(String);
+    } catch {}
+
+    setListDeviceOrder([
+      ...savedOrder.filter((id) => selectedDeviceIdList.includes(id)),
+      ...selectedDeviceIdList.filter((id) => !savedOrder.includes(id)),
+    ]);
+    setDraggedDeviceId(null);
+    setDragOverDeviceId(null);
+  }, [selectedBoard?.id, selectedDeviceIds]);
+
+  const orderedSelectedDevices = listDeviceOrder.length
+    ? listDeviceOrder
+        .map((id) => selectedDevices.find((device) => String(device.id) === id))
+        .filter(Boolean)
+    : selectedDevices;
+
+  const handleDeviceDragStart = (event, deviceId) => {
+    if (c.deviceView !== "list") return;
+    const id = String(deviceId);
+    setDraggedDeviceId(id);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", id);
+  };
+
+  const handleDeviceDragOver = (event, deviceId) => {
+    if (!draggedDeviceId || draggedDeviceId === String(deviceId)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverDeviceId(String(deviceId));
+  };
+
+  const handleDeviceDrop = (event, deviceId) => {
+    event.preventDefault();
+    const sourceId = draggedDeviceId || event.dataTransfer.getData("text/plain");
+    const targetId = String(deviceId);
+    if (!sourceId || sourceId === targetId) {
+      setDraggedDeviceId(null);
+      setDragOverDeviceId(null);
+      return;
+    }
+
+    const currentOrder = listDeviceOrder.length
+      ? listDeviceOrder
+      : selectedDeviceIdList;
+    const nextOrder = [...currentOrder];
+    const sourceIndex = nextOrder.indexOf(String(sourceId));
+    const targetIndex = nextOrder.indexOf(targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+
+    nextOrder.splice(sourceIndex, 1);
+    nextOrder.splice(targetIndex, 0, String(sourceId));
+    setListDeviceOrder(nextOrder);
+    try {
+      localStorage.setItem(
+        `vikatech_device_order_${selectedBoard.id}`,
+        JSON.stringify(nextOrder),
+      );
+    } catch {}
+    setDraggedDeviceId(null);
+    setDragOverDeviceId(null);
+  };
+
+  const handleDeviceDragEnd = () => {
+    setDraggedDeviceId(null);
+    setDragOverDeviceId(null);
+  };
+
+  const handleCarouselPointerDown = (event) => {
+    if (c.deviceView !== "carousel" || event.button !== 0) return;
+    if (event.target.closest?.("button,a,input,select,textarea")) return;
+
+    const carousel = c.carouselRef.current;
+    if (!carousel) return;
+    carouselDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startScrollLeft: carousel.scrollLeft,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setIsCarouselDragging(true);
+  };
+
+  const handleCarouselPointerMove = (event) => {
+    const drag = carouselDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    const distance = event.clientX - drag.startX;
+    if (Math.abs(distance) > 4) drag.moved = true;
+    if (!drag.moved) return;
+
+    event.preventDefault();
+    const carousel = c.carouselRef.current;
+    if (carousel) carousel.scrollLeft = drag.startScrollLeft - distance;
+  };
+
+  const handleCarouselPointerEnd = (event) => {
+    const drag = carouselDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    carouselDragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    setIsCarouselDragging(false);
+  };
 
   return (
     <>
@@ -196,15 +321,25 @@ export default function DashboardView({ c }) {
                       <div
                         id="device-carousel"
                         ref={c.carouselRef}
-                        className={
+                        className={`${
                           c.deviceView === "carousel"
-                            ? "flex w-full min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth overscroll-x-contain pb-1"
+                            ? "flex w-full min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth overscroll-x-contain pb-1 touch-pan-y"
                             : "grid w-full min-w-0 sm:grid-cols-2 gap-2.5"
-                        }
+                        } ${
+                          c.deviceView === "carousel"
+                            ? isCarouselDragging
+                              ? "cursor-grabbing select-none"
+                              : "cursor-grab"
+                            : ""
+                        }`}
                         aria-label="Local devices carousel"
                         onScroll={c.saveDeviceIndex}
+                        onPointerDown={handleCarouselPointerDown}
+                        onPointerMove={handleCarouselPointerMove}
+                        onPointerUp={handleCarouselPointerEnd}
+                        onPointerCancel={handleCarouselPointerEnd}
                       >
-                        {selectedDevices.map((device) => (
+                        {orderedSelectedDevices.map((device) => (
                           <DeviceCard
                             key={device.id}
                             device={device}
@@ -213,6 +348,13 @@ export default function DashboardView({ c }) {
                             pending={c.pending[device.id] !== undefined}
                             onToggle={() => c.toggleDevice(device)}
                             carousel={c.deviceView === "carousel"}
+                            draggable={c.deviceView === "list"}
+                            isDragging={draggedDeviceId === String(device.id)}
+                            isDragOver={dragOverDeviceId === String(device.id)}
+                            onDragStart={handleDeviceDragStart}
+                            onDragOver={handleDeviceDragOver}
+                            onDrop={handleDeviceDrop}
+                            onDragEnd={handleDeviceDragEnd}
                           />
                         ))}
                       </div>

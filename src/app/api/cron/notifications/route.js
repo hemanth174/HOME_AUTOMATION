@@ -2,12 +2,14 @@ import { NextResponse } from 'next/server';
 import { getAdminSupabase } from '@/lib/adminServer';
 import {
   DEFAULT_NOTIFICATION_SETTINGS,
+  DEVICE_OFFLINE_AFTER_MS,
   dispatchNotification,
   formatKwh,
   formatMoney,
   getDeviceKwhToday,
   getLocalDayBounds,
   getNextScheduleOccurrence,
+  isDeviceOffline,
   normalizeNotificationSettings,
 } from '@/lib/serverNotifications';
 
@@ -23,6 +25,14 @@ const ALARM_LOOKBACK_MS = 5 * 60 * 1000;
 // repeated catch-up passes idempotent.
 const SCHEDULE_LOOKBACK_MS = 5 * 60 * 1000;
 const ENERGY_INTERVAL_MINUTES = 5;
+
+function formatOfflineDuration(lastSeenAt, now) {
+  const ageMs = Math.max(0, now.getTime() - new Date(lastSeenAt).getTime());
+  const minutes = Math.max(1, Math.floor(ageMs / 60000));
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} hour${hours === 1 ? '' : 's'}`;
+}
 
 function formatScheduleTime(time) {
   const match = String(time || '').match(/^(\d{1,2}):(\d{2})/);
@@ -351,6 +361,60 @@ async function runDailyChecks(admin, getSettings, devices, now, stats) {
   }
 }
 
+async function runDeviceOfflineChecks(admin, getSettings, now, stats) {
+  const { data: configs, error } = await admin
+    .from('device_runtime_configs')
+    .select('board_id, user_id, last_direct_seen_at, last_mesh_seen_at, last_seen_at, revoked_at, boards(name, board_identifier)')
+    .is('revoked_at', null);
+
+  if (error) {
+    stats.errors.push(`device offline checks: ${error.message}`);
+    return;
+  }
+
+  for (const config of configs || []) {
+    // A mesh gateway can keep a board reachable even when the board is not
+    // making a direct cloud check-in, so use whichever authenticated signal is
+    // newest before deciding that the board is unavailable.
+    const lastSeenAt = [
+      config.last_direct_seen_at,
+      config.last_mesh_seen_at,
+      config.last_seen_at,
+    ]
+      .filter(Boolean)
+      .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0];
+    if (!lastSeenAt || !isDeviceOffline(lastSeenAt, now, DEVICE_OFFLINE_AFTER_MS)) continue;
+
+    const settings = getSettings(config.user_id);
+    if (!settings.notifications_enabled || !settings.notify_device_offline) continue;
+
+    const board = Array.isArray(config.boards) ? config.boards[0] : config.boards;
+    const boardName = board?.name || board?.board_identifier || 'ESP32 board';
+    try {
+      const result = await dispatchNotification(admin, {
+        userId: config.user_id,
+        type: 'device_offline',
+        title: `${boardName} is offline`,
+        body: `${boardName} has not checked in for ${formatOfflineDuration(lastSeenAt, now)}. It may have lost power or its network connection.`,
+        url: '/boards',
+        // lastSeenAt remains fixed during one outage, so this is sent once per
+        // outage and a later outage gets a new key after the next heartbeat.
+        dedupeKey: `device-offline:${config.board_id}:${lastSeenAt}`,
+        data: {
+          board_id: config.board_id,
+          board_identifier: board?.board_identifier || null,
+          last_seen_at: lastSeenAt,
+          detected_at: now.toISOString(),
+          offline_after_ms: DEVICE_OFFLINE_AFTER_MS,
+        },
+      });
+      if (result) stats.deviceOffline += 1;
+    } catch (caught) {
+      stats.errors.push(`device offline ${config.board_id}: ${caught.message}`);
+    }
+  }
+}
+
 export async function GET(request) {
   if (
     process.env.CRON_SECRET &&
@@ -375,13 +439,14 @@ export async function GET(request) {
     scheduleRuns: 0,
     energy: 0,
     ghost: 0,
+    deviceOffline: 0,
     errors: [],
   };
 
   const { data: settingsRows, error: settingsError } = await admin
     .from('user_settings')
     .select(
-      'user_id, timezone, notifications_enabled, notify_alarm, notify_schedule, schedule_lead_minutes, notify_energy, energy_device_kwh_threshold, notify_ghost, ghost_summary_hour, tariff_per_kwh, currency',
+      'user_id, timezone, notifications_enabled, notify_alarm, notify_schedule, notify_device_offline, schedule_lead_minutes, notify_energy, energy_device_kwh_threshold, notify_ghost, ghost_summary_hour, tariff_per_kwh, currency',
     );
 
   if (settingsError) {
@@ -412,6 +477,7 @@ export async function GET(request) {
   await runAlarms(admin, getSettings, now, stats);
   await runSchedules(admin, getSettings, now, stats);
   await runDailyChecks(admin, getSettings, devices || [], now, stats);
+  await runDeviceOfflineChecks(admin, getSettings, now, stats);
 
   return NextResponse.json({
     ok: true,

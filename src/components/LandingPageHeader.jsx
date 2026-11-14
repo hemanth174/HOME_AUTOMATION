@@ -31,10 +31,13 @@ export default function LandingPageHeader({
     <>
       <header className="fixed top-0 w-full z-50 flex justify-between items-center px-4 md:px-6 py-3 md:py-4 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant">
         <div className="flex items-center gap-2 min-w-0">
-          <div className="flex h-9 w-24 md:h-11 md:w-32 items-center justify-center overflow-hidden rounded-full bg-white shadow-sm select-none shrink-0">
+          <div
+            className="flex h-9 w-24 items-center justify-center overflow-hidden rounded-full bg-white shadow-sm select-none shrink-0 md:h-11 md:w-32"
+          >
             <img
-              src="/vikatech-header-logo.png"
+              src="/vikatech_logo.png"
               alt="VikaTech"
+              draggable="false"
               className="h-full w-full object-contain"
             />
           </div>

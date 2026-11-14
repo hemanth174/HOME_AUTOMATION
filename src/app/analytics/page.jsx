@@ -248,7 +248,7 @@ export default function AnalyticsPage() {
       ]);
       let logoDataUrl = null;
       try {
-        logoDataUrl = await fetchImageDataUrl('/vikatech-logo.png');
+        logoDataUrl = await fetchImageDataUrl('/vikatech_logo.png');
       } catch (logoError) {
         console.warn('Analytics PDF logo skipped:', logoError.message);
       }

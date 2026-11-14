@@ -21,7 +21,7 @@ export default function InfoPageShell({ badge, title, subtitle, children }) {
       {/* Top Navbar */}
       <header className="fixed top-0 w-full z-50 flex justify-between items-center px-4 md:px-6 py-3 md:py-4 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant">
         <Link href="/" className="flex h-9 w-28 md:h-11 md:w-36 items-center justify-center overflow-hidden rounded-lg bg-white shadow-sm select-none">
-          <img src="/vikatech-logo.png" alt="VikaTech" className="h-full w-full object-contain" />
+          <img src="/vikatech_logo.png" alt="VikaTech" className="h-full w-full object-contain" />
         </Link>
         <div className="flex gap-2 md:gap-4 items-center shrink-0">
           <ThemeToggle />

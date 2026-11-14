@@ -306,6 +306,98 @@ html[data-theme-transitioning="true"] *::after {
     transition: left 200ms ease-out;
 }
 
+/* Header signal icons scan their lines from top to bottom on hover. */
+.header-icon-sweep {
+    position: relative;
+    isolation: isolate;
+}
+
+.header-icon-sweep > * {
+    position: relative;
+    z-index: 1;
+}
+
+.header-icon-sweep:hover .signal-line,
+.header-icon-sweep:focus-visible .signal-line {
+    animation: signal-line-scan 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.header-icon-sweep:hover .signal-line-2,
+.header-icon-sweep:focus-visible .signal-line-2 {
+    animation-delay: 70ms;
+}
+
+.header-icon-sweep:hover .signal-line-3,
+.header-icon-sweep:focus-visible .signal-line-3 {
+    animation-delay: 140ms;
+}
+
+.header-icon-sweep:hover .signal-line-4,
+.header-icon-sweep:focus-visible .signal-line-4 {
+    animation-delay: 210ms;
+}
+
+@keyframes signal-line-scan {
+    from {
+        stroke: currentColor;
+    }
+    38% {
+        stroke: #000;
+        opacity: 1;
+    }
+    to {
+        stroke: currentColor;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .header-icon-sweep:hover .signal-line,
+    .header-icon-sweep:focus-visible .signal-line {
+        animation: none;
+    }
+}
+
+/* While a connection is being checked, light the signal lines from the
+   bottom up so the icon reads as an active connection attempt. */
+.header-icon-sweep .signal-connecting .signal-line:not(.signal-line-cross) {
+    animation: signal-line-connect 760ms ease-in-out infinite;
+}
+
+.header-icon-sweep .signal-connecting .signal-line-1 {
+    animation-delay: 270ms;
+}
+
+.header-icon-sweep .signal-connecting .signal-line-2 {
+    animation-delay: 180ms;
+}
+
+.header-icon-sweep .signal-connecting .signal-line-3 {
+    animation-delay: 90ms;
+}
+
+.header-icon-sweep .signal-connecting .signal-line-4 {
+    animation-delay: 0ms;
+}
+
+@keyframes signal-line-connect {
+    0%,
+    100% {
+        stroke: currentColor;
+        opacity: 0.35;
+    }
+    45%,
+    65% {
+        stroke: #000;
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .header-icon-sweep .signal-connecting .signal-line:not(.signal-line-cross) {
+        animation: none;
+    }
+}
+
 /* Desktop status controls expand into labeled hover targets. The sharp
    trailing edge keeps the control visually connected to its popover. */
 @media (min-width: 768px) {

@@ -118,7 +118,16 @@ Run `supabase_feature_announcements.sql` once in Supabase, then publish an updat
 npm run announce-feature -- --title "New feature" --message "Your update is now available." --url "/local"
 ```
 
-The command stores the announcement, sends SMTP email to all auth users, and active VikaTech sessions show an in-app and browser notification.
+The command stores the announcement, sends SMTP email to all auth users, and active VikaTech sessions show an in-app and browser notification. Relative
+paths such as `/admin` are converted to absolute links using
+`NEXT_PUBLIC_SITE_URL`.
+
+When using Gmail, `SMTP_USER` must be the Gmail mailbox that owns the account and
+`SMTP_PASS` must be a Google **App Password**, not the normal Gmail password.
+Enable 2-Step Verification, create an App Password for this project, and set
+`SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, and `SMTP_SECURE=false`. The command
+checks SMTP authentication before inserting the announcement, so invalid
+credentials will not create a new announcement.
 
 To run the platform locally on your computer:
 
