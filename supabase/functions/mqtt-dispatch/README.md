@@ -8,11 +8,11 @@ This function runs in the VikaTech application project:
 SUPABASE_URL=https://ojuvphlkzbxwjhqzexbt.supabase.co
 ```
 
-The checked-in friend bridge frontend currently uses this separate project for
+The MQTT backend uses this separate discovery project for
 `public.app_discovery`:
 
 ```text
-MQTT_SUPABASE_URL=https://htlrmrkhuzunrceshsrk.supabase.co
+MQTT_SUPABASE_URL=https://vrrptbjzfbbfyqimtwxk.supabase.co
 ```
 
 Do not swap these URLs. The application project owns `boards` and `devices`;

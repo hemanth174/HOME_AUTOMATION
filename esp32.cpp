@@ -228,6 +228,12 @@ unsigned long lastDeviceGatewayDiscovery = 0;
 const unsigned long DEVICE_GATEWAY_DISCOVERY_INTERVAL = 30000;
 const unsigned long DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL = 15000;
 const unsigned long DEVICE_GATEWAY_CONNECTED_RECONNECT_INTERVAL = 5000;
+// CA-validated HTTPS needs a large contiguous heap block for mbedTLS. Keep
+// the device-agent poll conservative because the WSS client and SoftAP are
+// already resident in memory.
+const unsigned long DEVICE_AGENT_POLL_INTERVAL = 15000;
+const uint32_t DEVICE_AGENT_MIN_FREE_HEAP = 36000;
+const uint32_t DEVICE_AGENT_MIN_LARGEST_BLOCK = 18000;
 void setRelay(int index, bool on, bool saveToNVS = true);
 void initSystemTime();
 unsigned long wifiDisconnectedSince = 0;
@@ -574,13 +580,27 @@ bool fetchDeviceGatewayUrl(String& backendUrl) {
   backendUrl = "";
   if (!isDeviceGatewayConfigured() || WiFi.status() != WL_CONNECTED) return false;
 
+  const uint32_t freeHeap = ESP.getFreeHeap();
+  const uint32_t largestBlock = ESP.getMaxAllocHeap();
+  if (freeHeap < DEVICE_AGENT_MIN_FREE_HEAP ||
+      largestBlock < DEVICE_AGENT_MIN_LARGEST_BLOCK) {
+    Serial.printf(
+      "Low/fragmented heap (free=%u, largest=%u); deferring gateway discovery.\n",
+      freeHeap,
+      largestBlock
+    );
+    return false;
+  }
+
   String discoveryBase = String(DISCOVERY_SUPABASE_URL);
   while (discoveryBase.endsWith("/")) discoveryBase.remove(discoveryBase.length() - 1);
   String url = discoveryBase + "/rest/v1/" + String(DISCOVERY_TABLE) +
                "?id=eq.true&select=backend_url&limit=1";
 
   VikaTechSecureClient secureClient;
-  secureClient.useBuiltinCACertBundle();
+  // The full ESP32 CA bundle is too memory-heavy while the WSS client and
+  // SoftAP are active. Use the small pinned public-root set instead.
+  secureClient.setCACert(DEVICE_AGENT_ROOT_CA);
   secureClient.setHandshakeTimeout(8);
   HTTPClient http;
   if (!http.begin(secureClient, url)) return false;
@@ -2709,21 +2729,30 @@ bool deviceAgentPost(const String& payload, DynamicJsonDocument& response) {
     return false;
   }
 
-  // Protect against heap exhaustion: mbedTLS with CA bundle requires sufficient free contiguous heap
-  if (ESP.getFreeHeap() < 30000) {
+  // Protect against heap exhaustion: total free heap alone is not enough;
+  // mbedTLS needs one sufficiently large contiguous allocation for BIGNUMs.
+  const uint32_t freeHeap = ESP.getFreeHeap();
+  const uint32_t largestBlock = ESP.getMaxAllocHeap();
+  if (freeHeap < DEVICE_AGENT_MIN_FREE_HEAP ||
+      largestBlock < DEVICE_AGENT_MIN_LARGEST_BLOCK) {
     static unsigned long lastHeapWarn = 0;
     if (millis() - lastHeapWarn >= 10000) {
       lastHeapWarn = millis();
-      Serial.printf("Low heap (%u bytes); deferring HTTPS request to prevent TLS memory abort.\n", ESP.getFreeHeap());
+      Serial.printf(
+        "Low/fragmented heap (free=%u, largest=%u); deferring device-agent HTTPS request.\n",
+        freeHeap,
+        largestBlock
+      );
     }
     return false;
   }
 
   // Never use HTTPClient.begin(url) without a CA: Arduino-ESP32's convenience
-  // overload can create an insecure TLS client. Require the core's trusted CA bundle.
+  // overload can create an insecure TLS client. Require the pinned public roots.
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
   VikaTechSecureClient secureClient;
-  secureClient.useBuiltinCACertBundle();
+  // Keep certificate validation enabled without loading the full CA bundle.
+  secureClient.setCACert(DEVICE_AGENT_ROOT_CA);
   secureClient.setHandshakeTimeout(8);
   HTTPClient http;
   if (!http.begin(secureClient, String(DEVICE_AGENT_URL))) {
@@ -3388,15 +3417,22 @@ void deviceAgentTask(void* parameter) {
       vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
     }
-    if (millis() - lastAttempt >= 2500) {
+    if (millis() - lastAttempt >= DEVICE_AGENT_POLL_INTERVAL) {
       lastAttempt = millis();
-      if (ESP.getFreeHeap() >= 30000) {
+      const uint32_t freeHeap = ESP.getFreeHeap();
+      const uint32_t largestBlock = ESP.getMaxAllocHeap();
+      if (freeHeap >= DEVICE_AGENT_MIN_FREE_HEAP &&
+          largestBlock >= DEVICE_AGENT_MIN_LARGEST_BLOCK) {
         DynamicJsonDocument response(6144);
         if (requestDeviceAgentSnapshot(response)) {
           processDeviceAgentResponse(response);
         }
       } else {
-        Serial.printf("Low heap (%u bytes); deferring device-agent snapshot poll.\n", ESP.getFreeHeap());
+        Serial.printf(
+          "Low/fragmented heap (free=%u, largest=%u); deferring device-agent snapshot poll.\n",
+          freeHeap,
+          largestBlock
+        );
       }
     }
     vTaskDelay(pdMS_TO_TICKS(250));
