@@ -1,5 +1,6 @@
 import { Lightbulb, Fan, PlugZap } from 'lucide-react';
 import { getDeviceWattage } from '@/app/analytics/helpers';
+import { isBoardOnline } from '@/lib/boardPresence';
 
 /**
  * Device categorization by name keywords. Only drives icon + restrained
@@ -38,13 +39,7 @@ export function getDeviceKind(name = '') {
   };
 }
 
-export { getDeviceWattage };
-
-/** Same 45s heartbeat cutoff the sidebar uses for board presence. */
-export function isBoardOnline(board, now = Date.now()) {
-  if (!board?.last_seen) return false;
-  return now - new Date(board.last_seen).getTime() < 45 * 1000;
-}
+export { getDeviceWattage, isBoardOnline };
 
 export function getGreeting(date = new Date()) {
   const h = date.getHours();

@@ -2,6 +2,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { isBoardOnline } from "@/lib/boardPresence";
 import { useState, useEffect, useRef } from "react";
 import ThemeToggle from "./ThemeToggle";
 import {
@@ -333,12 +334,6 @@ export default function Navbar() {
         : "var(--pg-error)";
   const wifiIsWeak = wifiRouterOnline && clientNetQuality.bars < 4;
   const wifiIsCritical = wifiRouterOnline && clientNetQuality.bars <= 2;
-  const isBoardOnline = (lastSeen) => {
-    if (!lastSeen) return false;
-    const lastSeenMs = new Date(lastSeen).getTime();
-    const nowMs = Date.now();
-    return nowMs - lastSeenMs < 45000;
-  };
   const getBoardSignal = (board, online) => {
     if (!online) {
       return {
@@ -1018,8 +1013,8 @@ export default function Navbar() {
                               </p>{" "}
                               <p className="text-[9px] text-text-muted leading-tight mt-0.5">
                                 {" "}
-                                Please move the board closer to your router or
-                                check if the device power is connected.{" "}
+                                No recent heartbeat. If it stays offline, check
+                                the board's Wi-Fi and power.{" "}
                               </p>{" "}
                             </div>
                           )}{" "}

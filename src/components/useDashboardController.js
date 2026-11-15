@@ -56,13 +56,8 @@ export default function useDashboardController() {
   const [todayLogs, setTodayLogs] = useState([]),
     [dailyRows, setDailyRows] = useState([]);
   const carouselRef = useRef(null);
-  const deviceScrollTimer = useRef(null);
   const viewCookie = user?.id && `vt_device_view_${user.id}`,
     roomCookie = user?.id && `vt_selected_room_${user.id}`;
-  const deviceIndexCookie =
-    user?.id && selectedBoardId
-      ? `vt_device_index_${user.id}_${selectedBoardId}`
-      : null;
   const showToast = useCallback((message) => setToast(message), []);
   const getDevicesForBoard = useCallback(
     (id) => devices.filter((device) => device.board_id === id),
@@ -336,63 +331,21 @@ export default function useDashboardController() {
     ? expandedBoards?.[selectedBoard.id] !== false
     : true;
   useEffect(() => {
-    if (
-      !deviceIndexCookie ||
-      deviceView !== "carousel" ||
-      !selectedRoomExpanded ||
-      loading
-    )
+    if (deviceView !== "carousel" || !selectedRoomExpanded || loading)
       return undefined;
     const carousel = carouselRef.current;
     if (!carousel) return undefined;
-    const saved = Number(readCookie(deviceIndexCookie));
-    if (!Number.isInteger(saved) || saved < 0) return undefined;
     const frame = requestAnimationFrame(() => {
-      const cards = carousel.querySelectorAll("article");
-      const card = cards[saved];
-      if (!card) return;
-      const left =
-        card.getBoundingClientRect().left -
-        carousel.getBoundingClientRect().left +
-        carousel.scrollLeft;
-      carousel.scrollLeft = left;
+      carousel.scrollLeft = 0;
     });
     return () => cancelAnimationFrame(frame);
   }, [
-    deviceIndexCookie,
     deviceView,
     loading,
+    selectedBoard?.id,
     selectedDevices.length,
     selectedRoomExpanded,
   ]);
-  const saveDeviceIndex = useCallback(() => {
-    const carousel = carouselRef.current;
-    if (!carousel || !deviceIndexCookie) return;
-    if (deviceScrollTimer.current) clearTimeout(deviceScrollTimer.current);
-    deviceScrollTimer.current = setTimeout(() => {
-      const cards = Array.from(carousel.querySelectorAll("article"));
-      if (!cards.length) return;
-      const carouselRect = carousel.getBoundingClientRect();
-      const center = carouselRect.left + carouselRect.width / 2;
-      let nearestIndex = 0;
-      let nearestDistance = Infinity;
-      cards.forEach((card, index) => {
-        const rect = card.getBoundingClientRect();
-        const distance = Math.abs(rect.left + rect.width / 2 - center);
-        if (distance < nearestDistance) {
-          nearestDistance = distance;
-          nearestIndex = index;
-        }
-      });
-      writeCookie(deviceIndexCookie, String(nearestIndex));
-    }, 120);
-  }, [deviceIndexCookie]);
-  useEffect(
-    () => () => {
-      if (deviceScrollTimer.current) clearTimeout(deviceScrollTimer.current);
-    },
-    [],
-  );
   const activeCount = devices.filter((d) => d.is_on).length,
     onlineBoards = boards.filter(isBoardOnline),
     liveWatts = Math.round(
@@ -503,6 +456,5 @@ export default function useDashboardController() {
     saveFullBoardEdit,
     deviceRoom,
     carouselRef,
-    saveDeviceIndex,
   };
 }

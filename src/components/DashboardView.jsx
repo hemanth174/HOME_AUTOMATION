@@ -333,7 +333,6 @@ export default function DashboardView({ c }) {
                             : ""
                         }`}
                         aria-label="Local devices carousel"
-                        onScroll={c.saveDeviceIndex}
                         onPointerDown={handleCarouselPointerDown}
                         onPointerMove={handleCarouselPointerMove}
                         onPointerUp={handleCarouselPointerEnd}
