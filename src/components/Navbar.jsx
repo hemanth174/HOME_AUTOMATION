@@ -38,8 +38,11 @@ import NavbarMobileMenu from "./NavbarMobileMenu";
 import NavbarSidebar from "./NavbarSidebar";
 
 const normalizeRssi = (value) => {
+  if (value === null || value === undefined || value === "" || typeof value === "boolean") {
+    return null;
+  }
   const rssi = Number(value);
-  return Number.isFinite(rssi) && rssi <= 0 && rssi >= -120
+  return Number.isFinite(rssi) && rssi < 0 && rssi >= -120
     ? Math.round(rssi)
     : null;
 };
