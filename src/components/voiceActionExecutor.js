@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { wakeAutomationScheduler } from '@/lib/wakeAutomationScheduler';
 import { speak } from '@/utils/voice';
 import { discoverLocalNode, setLocalDeviceState, triggerLocalAll } from '@/lib/localApi';
 
@@ -268,6 +269,7 @@ export async function executeVoiceAction(result, { getLatestDevices, applyPreset
             if (error) {
               provideFeedback(`Could not create alarm for ${device.name}. Please try again.`);
             } else {
+              void wakeAutomationScheduler();
               const displayTime = triggerDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
               const displayDate = triggerDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
               provideFeedback(`✅ Alarm set for ${device.name} to turn ${actionBool ? 'on' : 'off'} at ${displayTime} on ${displayDate}`);
@@ -332,6 +334,7 @@ export async function executeVoiceAction(result, { getLatestDevices, applyPreset
             if (error) {
               provideFeedback(`Could not create schedule for ${device.name}. Please try again.`);
             } else {
+              void wakeAutomationScheduler();
               const [hh, mm] = normTime.split(':').map(Number);
               const h12 = hh % 12 || 12;
               const ampm = hh >= 12 ? 'PM' : 'AM';
@@ -345,12 +348,14 @@ export async function executeVoiceAction(result, { getLatestDevices, applyPreset
 
       case 'DELETE_ALL_ALARMS': {
         const { error } = await supabase.from('alarms').delete().eq('user_id', user.id);
+        if (!error) void wakeAutomationScheduler();
         provideFeedback(error ? 'Could not clear alarms. Please try again.' : 'All alarms cleared');
         break;
       }
 
       case 'DELETE_ALL_SCHEDULES': {
         const { error } = await supabase.from('schedules').delete().eq('user_id', user.id);
+        if (!error) void wakeAutomationScheduler();
         provideFeedback(error ? 'Could not clear schedules. Please try again.' : 'All schedules cleared');
         break;
       }

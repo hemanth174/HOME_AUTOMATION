@@ -914,7 +914,7 @@ export default function Navbar() {
                   {" "}
                   <span className="text-[10px] font-black text-text uppercase tracking-wider font-label-caps">
                     {" "}
-                    Board Connection & Range{" "}
+                    Board Connection{" "}
                   </span>{" "}
                   <span
                     className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md ${boards.length === 0 ? "bg-border text-text-muted" : !overallWifi.online ? "bg-red-500/10 text-red-500 border border-red-500/20" : "bg-(--pg-brand-faint) text-(--pg-success) border border-(--pg-brand-soft)"}`}
@@ -1009,12 +1009,12 @@ export default function Navbar() {
                               {" "}
                               <p className="flex items-center gap-1">
                                 {" "}
-                                ⚠️ Connection / Board range is Down.{" "}
+                                No recent board check-in.{" "}
                               </p>{" "}
                               <p className="text-[9px] text-text-muted leading-tight mt-0.5">
                                 {" "}
-                                No recent heartbeat. If it stays offline, check
-                                the board's Wi-Fi and power.{" "}
+                                Connection loss alone does not switch relays.
+                                Check Wi-Fi, tunnel, and board power.{" "}
                               </p>{" "}
                             </div>
                           )}{" "}
@@ -1159,7 +1159,7 @@ export default function Navbar() {
             <button
               type="button"
               onClick={() => setShowProfileMenu((v) => !v)}
-              className="flex gap-2 header-icon-sweep inline-flex h-full w-full pr-1 font-extrabold p-1 items-center justify-center rounded-full border border-border bg-card text-text-muted transition-all hover:border-accent/50 hover:text-accent cursor-pointer"
+              className="header-icon-sweep inline-flex h-9 min-w-[58px] items-center justify-center gap-1.5 rounded-full border border-border bg-card px-1.5 font-extrabold text-text-muted transition-all hover:border-accent/50 hover:text-accent cursor-pointer"
               aria-label="Open account menu"
               aria-expanded={showProfileMenu}
             >
@@ -1168,11 +1168,11 @@ export default function Navbar() {
                 <img
                   src={avatarUrl}
                   alt={fullName}
-                  className="w-9 h-9 object-cover rounded-full"
+                  className="h-6 w-6 shrink-0 rounded-full object-cover"
                   referrerPolicy="no-referrer"
                 />
               ) : (
-                <span>{initial}</span>
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent-bg text-[11px] font-black text-accent">{initial}</span>
               )}
               <ChevronDown
                 size={14}
@@ -1450,7 +1450,7 @@ export default function Navbar() {
                   {" "}
                   <span className="text-[10px] font-black text-text uppercase tracking-wider font-label-caps font-bold">
                     {" "}
-                    Board Range{" "}
+                    Board Connection{" "}
                   </span>{" "}
                   <span
                     className={`text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${boards.length === 0 ? "bg-border text-text-muted" : !overallWifi.online ? "bg-red-500/10 text-red-500 border border-red-500/20" : "bg-(--pg-brand-faint) text-(--pg-success) border border-(--pg-brand-soft)"}`}
@@ -1542,11 +1542,11 @@ export default function Navbar() {
                           ) : (
                             <div className="flex flex-col gap-1 text-[9px] leading-relaxed font-semibold text-red-500/90">
                               {" "}
-                              <p>⚠️ Range is Down.</p>{" "}
+                              <p>No recent board check-in.</p>{" "}
                               <p className="text-[8px] text-text-muted/80 leading-tight">
                                 {" "}
-                                Move closer to router or check device
-                                power.{" "}
+                                Connection loss alone won't switch relays.
+                                Check Wi-Fi, tunnel, or board power.{" "}
                               </p>{" "}
                             </div>
                           )}{" "}

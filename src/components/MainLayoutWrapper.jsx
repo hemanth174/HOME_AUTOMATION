@@ -3,7 +3,6 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import AlarmExecutor from './AlarmExecutor';
 import NotificationEngine from './NotificationEngine';
 import GlobalToast from './GlobalToast';
 import Loader from './Loader';
@@ -435,7 +434,6 @@ export default function MainLayoutWrapper({ children, className = "" }) {
         />
       )}
       {children}
-      {!fullWidthPage && <AlarmExecutor user={user} />}
       {!fullWidthPage && <NotificationEngine user={user} />}
       <GlobalToast />
     </div>

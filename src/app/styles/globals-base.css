@@ -312,7 +312,7 @@ html[data-theme-transitioning="true"] *::after {
     isolation: isolate;
 }
 
-.header-icon-sweep > * {
+.header-icon-sweep > svg {
     position: relative;
     z-index: 1;
 }

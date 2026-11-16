@@ -16,14 +16,8 @@ import {
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-// `trigger_at` is stored as a UTC instant and the device/client also use a
-// bounded catch-up window. Five minutes tolerates delayed cron invocations
-// without resurrecting alarms that expired hours or days ago.
-const ALARM_LOOKBACK_MS = 5 * 60 * 1000;
-// The external per-minute trigger normally lands on time. Five minutes keeps
-// schedules reliable when a trigger is skipped or delayed; schedule_runs makes
-// repeated catch-up passes idempotent.
-const SCHEDULE_LOOKBACK_MS = 5 * 60 * 1000;
+// This cron sends notifications only. The local MQTT backend owns timed relay
+// execution and the devices table remains the source for cloud fallback.
 const ENERGY_INTERVAL_MINUTES = 5;
 
 function formatOfflineDuration(lastSeenAt, now) {
@@ -52,154 +46,34 @@ function groupByUser(rows) {
   return groups;
 }
 
-async function runAlarms(admin, getSettings, now, stats) {
-  // Only alarms inside the catch-up window are loaded. Older unfired alarms are
-  // intentionally left untouched so the UI can keep showing them as expired
-  // instead of firing them hours or days late.
-  const { data: alarms, error } = await admin
-    .from('alarms')
-    .select('id, user_id, trigger_at, action, device_id, devices(name)')
-    .eq('fired', false)
-    .gte('trigger_at', new Date(now.getTime() - ALARM_LOOKBACK_MS).toISOString())
+async function notifyFiredAlarms(admin, getSettings, now, stats) {
+  const { data: alarms, error } = await admin.from('alarms')
+    .select('id,user_id,device_id,action,trigger_at,devices(name)')
+    .eq('fired', true)
+    .gte('trigger_at', new Date(now.getTime() - 5 * 60 * 1000).toISOString())
     .lte('trigger_at', now.toISOString());
-
   if (error) {
-    stats.errors.push(`alarms: ${error.message}`);
+    stats.errors.push(`alarm notifications: ${error.message}`);
     return;
   }
-
   for (const alarm of alarms || []) {
+    const settings = getSettings(alarm.user_id);
+    if (!settings.notifications_enabled || !settings.notify_alarm) continue;
     try {
-      // Claim atomically so this cron, the browser executor, and the ESP32
-      // never act on the same alarm. Only the winner gets a row back.
-      const { data: claimedRows, error: claimError } = await admin
-        .from('alarms')
-        .update({ fired: true })
-        .eq('id', alarm.id)
-        .eq('user_id', alarm.user_id)
-        .eq('fired', false)
-        .select('id');
-
-      if (claimError) {
-        stats.errors.push(`alarm ${alarm.id} claim: ${claimError.message}`);
-        continue;
-      }
-      if (!claimedRows?.length) continue;
-
-      // Execute the relay change in the cloud so the ESP32 reconciles it on
-      // its next poll even when no browser is open.
-      const { data: updated, error: updateError } = await admin
-        .from('devices')
-        .update({ is_on: Boolean(alarm.action), last_changed: now.toISOString() })
-        .eq('id', alarm.device_id)
-        .eq('user_id', alarm.user_id)
-        .select('id');
-
-      if (updateError || !updated?.length) {
-        // Release the claim so another executor can retry this alarm.
-        await admin
-          .from('alarms')
-          .update({ fired: false })
-          .eq('id', alarm.id)
-          .eq('user_id', alarm.user_id);
-        stats.errors.push(
-          `alarm ${alarm.id} device update: ${updateError?.message || 'device not found'}`,
-        );
-        continue;
-      }
-
-      const deviceName = alarm.devices?.name || 'Device';
-      const { error: logError } = await admin.from('activity_logs').insert({
-        user_id: alarm.user_id,
-        device_id: alarm.device_id,
-        device_name: deviceName,
-        action: `turned ${alarm.action ? 'ON' : 'OFF'}`,
-        triggered_by: 'Alarm (server)',
-      });
-      if (logError) {
-        stats.errors.push(`alarm ${alarm.id} activity log: ${logError.message}`);
-      }
-
-      stats.alarmRuns += 1;
-
-      // Notifications are optional; execution above must happen regardless.
-      const settings = getSettings(alarm.user_id);
-      if (!settings.notifications_enabled || !settings.notify_alarm) continue;
       const result = await dispatchNotification(admin, {
         userId: alarm.user_id,
         type: 'alarm',
         title: 'Alarm fired',
-        body: `${deviceName} turned ${alarm.action ? 'ON' : 'OFF'}.`,
+        body: `${alarm.devices?.name || 'Device'} turned ${alarm.action ? 'ON' : 'OFF'}.`,
         url: '/alarms',
         dedupeKey: `alarm:${alarm.id}`,
         data: { alarm_id: alarm.id, device_id: alarm.device_id },
       });
       if (result) stats.alarms += 1;
     } catch (caught) {
-      stats.errors.push(`alarm ${alarm.id}: ${caught.message}`);
+      stats.errors.push(`alarm notification ${alarm.id}: ${caught.message}`);
     }
   }
-}
-
-async function claimScheduleRun(admin, schedule, occurrence) {
-  const { data: claimed, error } = await admin
-    .from('schedule_runs')
-    .upsert(
-      {
-        user_id: schedule.user_id,
-        schedule_id: schedule.id,
-        occurrence_at: occurrence.toISOString(),
-        source: 'server',
-      },
-      { onConflict: 'schedule_id,occurrence_at', ignoreDuplicates: true },
-    )
-    .select('id');
-
-  if (error) throw new Error(error.message);
-  return claimed?.[0] || null;
-}
-
-async function executeSchedule(admin, schedule, claim, stats) {
-  const now = new Date();
-  const { data: updated, error } = await admin
-    .from('devices')
-    .update({ is_on: Boolean(schedule.action), last_changed: now.toISOString() })
-    .eq('id', schedule.device_id)
-    .eq('user_id', schedule.user_id)
-    .select('id');
-
-  if (error || !updated?.length) {
-    await admin.from('schedule_runs').delete().eq('id', claim.id);
-    if (error) throw new Error(error.message);
-    return false;
-  }
-
-  const deviceName = schedule.devices?.name || 'Device';
-  const { error: logError } = await admin.from('activity_logs').insert({
-    user_id: schedule.user_id,
-    device_id: schedule.device_id,
-    device_name: deviceName,
-    action: `turned ${schedule.action ? 'ON' : 'OFF'}`,
-    triggered_by: 'Schedule (server)',
-  });
-  if (logError) {
-    stats.errors.push(`schedule ${schedule.id} activity log: ${logError.message}`);
-  }
-
-  await admin
-    .from('schedule_runs')
-    .update({ executed_at: now.toISOString() })
-    .eq('id', claim.id);
-
-  // A one-time schedule must not fire again after its date has passed.
-  if (schedule.run_date) {
-    await admin
-      .from('schedules')
-      .update({ enabled: false })
-      .eq('id', schedule.id)
-      .eq('user_id', schedule.user_id);
-  }
-  return true;
 }
 
 async function runSchedules(admin, getSettings, now, stats) {
@@ -248,21 +122,6 @@ async function runSchedules(admin, getSettings, now, stats) {
         }
       }
 
-      // Offset by one second so occurrences exactly at the lookback boundary
-      // are still returned by the strictly-greater comparison.
-      const executionFrom = new Date(now.getTime() - SCHEDULE_LOOKBACK_MS - 1000);
-      const executionOccurrence = getNextScheduleOccurrence(schedule, executionFrom, timeZone);
-      if (
-        executionOccurrence &&
-        executionOccurrence.getTime() <= now.getTime() &&
-        now.getTime() - executionOccurrence.getTime() <= SCHEDULE_LOOKBACK_MS
-      ) {
-        const claim = await claimScheduleRun(admin, schedule, executionOccurrence);
-        if (claim) {
-          const executed = await executeSchedule(admin, schedule, claim, stats);
-          if (executed) stats.scheduleRuns += 1;
-        }
-      }
     } catch (error) {
       stats.errors.push(`schedule ${schedule.id}: ${error.message}`);
     }
@@ -364,7 +223,7 @@ async function runDailyChecks(admin, getSettings, devices, now, stats) {
 async function runDeviceOfflineChecks(admin, getSettings, now, stats) {
   const { data: configs, error } = await admin
     .from('device_runtime_configs')
-    .select('board_id, user_id, last_direct_seen_at, last_mesh_seen_at, last_seen_at, revoked_at, boards(name, board_identifier)')
+    .select('board_id, user_id, last_direct_seen_at, last_mesh_seen_at, last_seen_at, revoked_at, boards(name, board_identifier, last_seen)')
     .is('revoked_at', null);
 
   if (error) {
@@ -373,23 +232,67 @@ async function runDeviceOfflineChecks(admin, getSettings, now, stats) {
   }
 
   for (const config of configs || []) {
-    // A mesh gateway can keep a board reachable even when the board is not
-    // making a direct cloud check-in, so use whichever authenticated signal is
-    // newest before deciding that the board is unavailable.
+    const board = Array.isArray(config.boards) ? config.boards[0] : config.boards;
+    // The WSS gateway refreshes boards.last_seen; direct and mesh check-ins
+    // update the runtime timestamps. Use the freshest signal for this board.
     const lastSeenAt = [
+      board?.last_seen,
       config.last_direct_seen_at,
       config.last_mesh_seen_at,
       config.last_seen_at,
     ]
       .filter(Boolean)
       .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0];
-    if (!lastSeenAt || !isDeviceOffline(lastSeenAt, now, DEVICE_OFFLINE_AFTER_MS)) continue;
+    if (!lastSeenAt) continue;
 
     const settings = getSettings(config.user_id);
     if (!settings.notifications_enabled || !settings.notify_device_offline) continue;
 
-    const board = Array.isArray(config.boards) ? config.boards[0] : config.boards;
     const boardName = board?.name || board?.board_identifier || 'ESP32 board';
+    // A timestamp can briefly advance during a failing connection. Track the
+    // last alert state so one outage does not create a new alert on every gap.
+    const { data: recentAlerts, error: historyError } = await admin
+      .from('user_notifications')
+      .select('id, type, created_at')
+      .eq('user_id', config.user_id)
+      .in('type', ['device_offline', 'device_online'])
+      .contains('data', { board_id: config.board_id })
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (historyError) {
+      stats.errors.push(`device alert history ${config.board_id}: ${historyError.message}`);
+      continue;
+    }
+    const lastAlert = recentAlerts?.[0];
+    if (!isDeviceOffline(lastSeenAt, now, DEVICE_OFFLINE_AFTER_MS)) {
+      const seenAgeMs = now.getTime() - new Date(lastSeenAt).getTime();
+      if (seenAgeMs < 0 || seenAgeMs > 60_000) continue;
+      if (lastAlert?.type !== 'device_offline' ||
+          new Date(lastSeenAt).getTime() <= new Date(lastAlert.created_at).getTime()) continue;
+
+      try {
+        const result = await dispatchNotification(admin, {
+          userId: config.user_id,
+          type: 'device_online',
+          title: `${boardName} is back online`,
+          body: `${boardName} has reconnected and is responding again.`,
+          url: '/boards',
+          dedupeKey: `device-online:${config.board_id}:${lastAlert.id}`,
+          data: {
+            board_id: config.board_id,
+            board_identifier: board?.board_identifier || null,
+            offline_notification_id: lastAlert.id,
+            reconnected_at: lastSeenAt,
+          },
+        });
+        if (result) stats.deviceOnline += 1;
+      } catch (caught) {
+        stats.errors.push(`device recovery ${config.board_id}: ${caught.message}`);
+      }
+      continue;
+    }
+
+    if (lastAlert?.type === 'device_offline') continue;
     try {
       const result = await dispatchNotification(admin, {
         userId: config.user_id,
@@ -434,12 +337,11 @@ export async function GET(request) {
   const now = new Date();
   const stats = {
     alarms: 0,
-    alarmRuns: 0,
     scheduleNotifications: 0,
-    scheduleRuns: 0,
     energy: 0,
     ghost: 0,
     deviceOffline: 0,
+    deviceOnline: 0,
     errors: [],
   };
 
@@ -474,7 +376,7 @@ export async function GET(request) {
     stats.errors.push(`devices: ${devicesError.message}`);
   }
 
-  await runAlarms(admin, getSettings, now, stats);
+  await notifyFiredAlarms(admin, getSettings, now, stats);
   await runSchedules(admin, getSettings, now, stats);
   await runDailyChecks(admin, getSettings, devices || [], now, stats);
   await runDeviceOfflineChecks(admin, getSettings, now, stats);

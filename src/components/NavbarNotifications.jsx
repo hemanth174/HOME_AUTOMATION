@@ -18,6 +18,8 @@ const TYPE_STYLES = {
   energy: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
   ghost: "bg-sky-500/10 text-sky-400 border-sky-500/20",
   system: "bg-(--pg-brand-faint) text-(--pg-success) border-(--pg-brand-soft)",
+  device_offline: "bg-red-500/10 text-red-400 border-red-500/20",
+  device_online: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
 };
 
 function readAnnouncementIds() {
@@ -254,7 +256,7 @@ export default function FeatureNotificationBell({
   };
 
   const databaseUnread = notifications.filter((item) => !item.read_at).length;
-  const combinedUnread = databaseUnread + (open ? 0 : unreadCount);
+  const combinedUnread = databaseUnread + unreadCount;
 
   const announcementItems = announcements.map((announcement) => ({
     id: `announcement-${announcement.id}`,
@@ -289,9 +291,9 @@ export default function FeatureNotificationBell({
         aria-label={`Notifications${combinedUnread ? `, ${combinedUnread} unread` : ""}`}
         aria-expanded={open}
       >
-        <Bell size={15} />
+        <Bell size={15} className={combinedUnread > 0 ? "-translate-x-0.5 translate-y-0.5" : ""} />
         {combinedUnread > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-(--pg-error) px-1 text-[9px] font-black text-white">
+          <span className="pointer-events-none absolute right-0.5 top-0.5 z-10 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-(--pg-error) px-0.5 text-[9px] font-black leading-none text-white tabular-nums">
             {combinedUnread > 9 ? "9+" : combinedUnread}
           </span>
         )}

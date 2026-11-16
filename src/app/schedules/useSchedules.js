@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { wakeAutomationScheduler } from "@/lib/wakeAutomationScheduler";
 import { DAY_NAMES, formatScheduleDate, formatTime, getCurrentTime, normalizeDays, toDateInputValue, validateScheduleDate, validateTime } from "./scheduleUtils";
 
 const SELECT = "id, time, enabled, days, action, device_id, run_date, devices(name, boards(name))";
@@ -63,8 +64,8 @@ export default function useSchedules() {
     (scheduleMode === "once" ? scheduleDate : "") !== (editingSchedule.run_date ? String(editingSchedule.run_date).slice(0, 10) : "") ||
     JSON.stringify(normalizeDays(scheduleDays)) !== JSON.stringify(normalizeDays(editingSchedule.days)) ||
     scheduleAction !== editingSchedule.action;
-  const deleteSchedule = useCallback(async (id) => { const { error } = await supabase.from("schedules").delete().eq("id", id).eq("user_id", user.id); if (error) { setToast(`Could not delete schedule: ${error.message}`); return false; } setSchedules((all) => all.filter((s) => s.id !== id)); setToast("Schedule deleted"); return true; }, [user]);
-  const toggleSchedule = useCallback(async (schedule) => { const { error } = await supabase.from("schedules").update({ enabled: !schedule.enabled }).eq("id", schedule.id).eq("user_id", user.id); if (error) { setToast(`Could not ${schedule.enabled ? "disable" : "enable"} schedule: ${error.message}`); return false; } setSchedules((all) => all.map((s) => s.id === schedule.id ? { ...s, enabled: !schedule.enabled } : s)); return true; }, [user]);
+  const deleteSchedule = useCallback(async (id) => { const { error } = await supabase.from("schedules").delete().eq("id", id).eq("user_id", user.id); if (error) { setToast(`Could not delete schedule: ${error.message}`); return false; } void wakeAutomationScheduler(); setSchedules((all) => all.filter((s) => s.id !== id)); setToast("Schedule deleted"); return true; }, [user]);
+  const toggleSchedule = useCallback(async (schedule) => { const { error } = await supabase.from("schedules").update({ enabled: !schedule.enabled }).eq("id", schedule.id).eq("user_id", user.id); if (error) { setToast(`Could not ${schedule.enabled ? "disable" : "enable"} schedule: ${error.message}`); return false; } void wakeAutomationScheduler(); setSchedules((all) => all.map((s) => s.id === schedule.id ? { ...s, enabled: !schedule.enabled } : s)); return true; }, [user]);
   const addSchedule = useCallback(async (event) => {
     event.preventDefault();
     if (savingRef.current || isSaving || (editingSchedule && !scheduleDraftChanged)) return;
@@ -74,8 +75,7 @@ export default function useSchedules() {
     if (isOnce) {
       const dateCheck = validateScheduleDate(scheduleDate);
       if (!dateCheck.valid) return setToast(dateCheck.error);
-      // Leave `days` empty: the ESP32 runs weekly schedules from `days`, so an
-      // empty list prevents a one-time schedule from repeating on the device.
+      // One-time schedules use run_date; weekly schedules use days.
       days = [];
     } else {
       if (!scheduleDays.length) return setToast("Please select at least one day");
@@ -119,12 +119,13 @@ export default function useSchedules() {
         if (editingSchedule) await supabase.from("schedules").delete().eq("id", editingSchedule.id).eq("user_id", user.id);
         setToast(editingSchedule ? "Schedule updated" : `Created ${rows.length} schedule${rows.length > 1 ? "s" : ""}`);
       }
+      void wakeAutomationScheduler();
       closeModal();
     } finally {
       savingRef.current = false;
       setIsSaving(false);
     }
   }, [selectedDevices, scheduleDays, timeConfirmed, scheduleTime, schedules, editingSchedule, scheduleAction, scheduleMode, scheduleDate, devices, user, closeModal, isSaving, scheduleDraftChanged]);
-  const deleteAllSchedules = useCallback(async () => { const { error } = await supabase.from("schedules").delete().eq("user_id", user.id); if (error) return setToast(`Could not delete schedules: ${error.message}`); setSchedules([]); setShowDeleteAllModal(false); setToast("All schedules deleted"); }, [user]);
+  const deleteAllSchedules = useCallback(async () => { const { error } = await supabase.from("schedules").delete().eq("user_id", user.id); if (error) return setToast(`Could not delete schedules: ${error.message}`); void wakeAutomationScheduler(); setSchedules([]); setShowDeleteAllModal(false); setToast("All schedules deleted"); }, [user]);
   return { user, schedules, devices, loading, toast, setToast, showModal, setShowModal, showDeleteAllModal, setShowDeleteAllModal, selectedDevices, scheduleTime, scheduleDays, scheduleAction, setScheduleAction, scheduleMode, scheduleDate, setScheduleDate, changeScheduleMode, timeConfirmed, timeError, editingSchedule, isSaving, scheduleDraftChanged, closeModal, openCreateModal, openEditModal, handleTimeChange, toggleDay, toggleDeviceSelection, addSchedule, deleteSchedule, toggleSchedule, deleteAllSchedules, confirmTime: () => { const result = validateTime(scheduleTime); setTimeError(result.error); if (result.valid) setTimeConfirmed(true); } };
 }

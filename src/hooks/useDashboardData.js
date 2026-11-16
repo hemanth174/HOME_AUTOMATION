@@ -180,6 +180,48 @@ export default function useDashboardData() {
     };
   }, [user]);
 
+  // A disconnected board stops writing presence updates, so Realtime alone
+  // cannot trigger the transition from online to offline. Refresh the board
+  // timestamps on a timer and immediately when the tab becomes visible.
+  useEffect(() => {
+    if (!user?.id) return undefined;
+    let active = true;
+    let inFlight = false;
+    const refreshBoardPresence = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const { data: latest } = await supabase
+          .from('boards')
+          .select('id, name, board_identifier, last_seen')
+          .eq('user_id', user.id)
+          .order('created_at');
+        if (!active) return;
+        setBoards((current) => {
+          if (!latest) return [...current];
+          const localOnly = current.filter((board) => board._localOnly &&
+            !latest.some((cloudBoard) => cloudBoard.board_identifier === board.board_identifier));
+          return [...latest, ...localOnly];
+        });
+      } catch {
+        // The clock must still re-evaluate cached timestamps while offline.
+        if (active) setBoards((current) => [...current]);
+      } finally {
+        inFlight = false;
+      }
+    };
+    const timer = setInterval(refreshBoardPresence, 10_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refreshBoardPresence();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [user?.id]);
+
   // Realtime subscription
   useEffect(() => {
     if (!user) return;

@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { wakeAutomationScheduler } from '@/lib/wakeAutomationScheduler';
 import { speak } from '@/utils/voice';
 import { getLocalISOString, normalizeText, fuzzyScore, findBestDevice, parseTimeWithDay } from './voiceControlUtils';
 import { executeVoiceAction } from './voiceActionExecutor';
@@ -266,6 +267,7 @@ export function useVoiceCommandProcessor({ getLatestDevices, onToast, applyPrese
         safeToast(`⚠ ${errMsg}`);
         speak(errMsg);
       } else {
+        void wakeAutomationScheduler();
         const timeDisplay = alarmDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
         const dateDisplay = alarmDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
         safeToast(`✅ Alarm set for ${matchedDevice.name} on ${dateDisplay} at ${timeDisplay}`);
@@ -376,6 +378,8 @@ export function useVoiceCommandProcessor({ getLatestDevices, onToast, applyPrese
         enabled: true
       });
 
+      if (!error) void wakeAutomationScheduler();
+
       if (error) {
         const errMsg = `Couldn't create schedule for ${matchedDevice.name}. Please try again.`;
         safeToast(`⚠ ${errMsg}`);
@@ -413,6 +417,7 @@ export function useVoiceCommandProcessor({ getLatestDevices, onToast, applyPrese
         const { error } = await supabase.from('alarms').delete().eq('user_id', user.id).eq('device_id', matchedDevice.id);
         if (error) safeToast(`⚠ Could not delete alarms for ${matchedDevice.name}. Please try again.`);
         else {
+          void wakeAutomationScheduler();
           safeToast(`✅ Alarms deleted for ${matchedDevice.name}`);
           speak(`Alarms deleted for ${matchedDevice.name}`);
         }
@@ -420,6 +425,7 @@ export function useVoiceCommandProcessor({ getLatestDevices, onToast, applyPrese
         const { error } = await supabase.from('schedules').delete().eq('user_id', user.id).eq('device_id', matchedDevice.id);
         if (error) safeToast(`⚠ Could not delete schedules for ${matchedDevice.name}. Please try again.`);
         else {
+          void wakeAutomationScheduler();
           safeToast(`✅ Schedules deleted for ${matchedDevice.name}`);
           speak(`Schedules deleted for ${matchedDevice.name}`);
         }
@@ -451,6 +457,7 @@ export function useVoiceCommandProcessor({ getLatestDevices, onToast, applyPrese
       const { error } = await supabase.from('schedules').update({ enabled: enableVal }).eq('user_id', user.id).eq('device_id', matchedDevice.id);
       if (error) safeToast(error.message);
       else {
+        void wakeAutomationScheduler();
         safeToast(`Schedules ${enableVal ? 'enabled' : 'disabled'} for ${matchedDevice.name}`);
         speak(`Schedules ${enableVal ? 'enabled' : 'disabled'} for ${matchedDevice.name}`);
       }

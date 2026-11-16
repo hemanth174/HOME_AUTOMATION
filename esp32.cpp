@@ -155,20 +155,10 @@ volatile bool cloudDevicesReady = false;
 // Cloud polling is a fallback for commands issued while the browser is not
 // connected to the local controller. Local REST commands remain immediate;
 // keeping this at one second creates tens of thousands of Supabase requests.
-const unsigned long POLL_INTERVAL = 2500;
+const unsigned long POLL_INTERVAL = 30000;
+const unsigned long MQTT_FALLBACK_POLL_INTERVAL = 10000;
 const unsigned long HEARTBEAT_INTERVAL = 60000;
 const unsigned long FEEDBACK_RETRY_INTERVAL = 1000;
-struct Alarm { String id; String triggerAt; bool action; bool active; int deviceIndex; };
-#define MAX_ALARMS 20
-Alarm alarms[MAX_ALARMS];
-const unsigned long ALARM_POLL_INTERVAL = 60000;
-struct Schedule { String id, deviceId, time, days, lastRunDate; bool action, enabled; int deviceIndex; };
-#define MAX_SCHEDULES 32
-Schedule schedules[MAX_SCHEDULES];
-int scheduleCount = 0;
-const unsigned long SCHEDULE_POLL_INTERVAL = 60000;
-unsigned long lastSchedulePoll = 0;
-bool scheduleCacheLoaded = false;
 struct PendingUpdate {
   int deviceIndex;
   bool state;
@@ -224,6 +214,51 @@ String deviceGatewayPath = "";
 String deviceGatewayHeaders = "";
 bool deviceGatewayTls = true;
 volatile bool deviceGatewayConnected = false;
+// GPIO2 is the blue onboard LED on the standard ESP32 DevKit. Change this pin
+// if the installed board routes its blue LED elsewhere.
+constexpr uint8_t WSS_STATUS_LED = 2;
+constexpr bool WSS_LED_ACTIVE_HIGH = true;
+constexpr unsigned long WSS_LED_ON_MS = 90;
+constexpr unsigned long WSS_LED_GAP_MS = 110;
+constexpr unsigned long WSS_LED_PAUSE_MS = 900;
+
+void setWssLed(bool lit) {
+  digitalWrite(WSS_STATUS_LED, (lit == WSS_LED_ACTIVE_HIGH) ? HIGH : LOW);
+}
+
+void updateWssLed() {
+  static bool wasConnected = false;
+  static bool ledLit = false;
+  static uint8_t flashes = 0;
+  static unsigned long nextChangeAt = 0;
+  const bool connected = deviceGatewayConnected;
+  if (!connected) {
+    if (wasConnected || ledLit) setWssLed(false);
+    wasConnected = false;
+    ledLit = false;
+    flashes = 0;
+    return;
+  }
+  const unsigned long now = millis();
+  if (!wasConnected) {
+    wasConnected = true;
+    nextChangeAt = now;
+  }
+  if (static_cast<long>(now - nextChangeAt) < 0) return;
+  if (ledLit) {
+    setWssLed(false);
+    ledLit = false;
+    nextChangeAt = now + (flashes == 3 ? WSS_LED_PAUSE_MS : WSS_LED_GAP_MS);
+  } else {
+    if (flashes == 3) flashes = 0;
+    setWssLed(true);
+    ledLit = true;
+    ++flashes;
+    nextChangeAt = now + WSS_LED_ON_MS;
+  }
+}
+volatile bool mqttBrokerConnected = false;
+volatile unsigned long lastMqttHeartbeatMs = 0;
 unsigned long lastDeviceGatewayDiscovery = 0;
 const unsigned long DEVICE_GATEWAY_DISCOVERY_INTERVAL = 30000;
 const unsigned long DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL = 15000;
@@ -239,14 +274,8 @@ void initSystemTime();
 unsigned long wifiDisconnectedSince = 0;
 bool updateDeviceInDB(int index, bool state);
 bool updateFeedbackInDB(int index, bool feedback);
-bool markAlarmFiredInDB(String alarmId);
 bool logActivityInDB(int index, bool state, const String& triggeredBy);
 void pollDatabase();
-void pollAlarms();
-void pollSchedules();
-void loadScheduleCache();
-void saveScheduleCache();
-void runLocalSchedules();
 void sendHeartbeat();
 bool resolveBoardAndDevices();
 bool syncAllStatesToDB();
@@ -290,8 +319,6 @@ bool isDeviceAgentConfigured();
 bool requestDeviceAgentSnapshot(DynamicJsonDocument& response);
 bool sendDeviceAgentAction(DynamicJsonDocument& requestDoc, DynamicJsonDocument& response);
 void applyDeviceSnapshot(JsonDocument& response, bool applyRelayStates);
-void applyAlarmSnapshot(JsonDocument& response);
-void applyScheduleSnapshot(JsonDocument& response);
 void loadHomeWifiCredentials();
 void beginHomeWifiConnection(const char* reason = nullptr);
 void diagnoseHomeWifiFailure();
@@ -364,8 +391,7 @@ bool isDirectCloudConfigured() {
   return strlen(SUPABASE_BASE) > 0 && strlen(SUPABASE_SERVICE_KEY) > 0;
 }
 bool isDeviceAgentConfigured() {
-  return strlen(DEVICE_AGENT_URL) > 0 && deviceAuthToken.length() >= 32 &&
-         String(BOARD_IDENTIFIER) != "esp32-unconfigured";
+  return false; // WSS plus direct Supabase fallback is the active device path.
 }
 bool isCloudConfigured() {
   // New generic firmware uses a per-device token through the Edge Function.
@@ -713,6 +739,8 @@ void handleDeviceGatewayMessage(uint8_t* payload, size_t length) {
   }
   const String type = message["type"].as<String>();
   if (type == "heartbeat") {
+    mqttBrokerConnected = String(message["mqtt"] | "") == "connected";
+    lastMqttHeartbeatMs = millis();
     String pong = "{\"type\":\"pong\"}";
     if (!deviceWebSocket.sendTXT(pong)) Serial.println("!! WSS pong send failed");
     return;
@@ -726,11 +754,13 @@ void handleDeviceGatewayEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     case WStype_CONNECTED:
       deviceGatewayConnected = true;
+      mqttBrokerConnected = false;
       deviceWebSocket.setReconnectInterval(DEVICE_GATEWAY_CONNECTED_RECONNECT_INTERVAL);
       Serial.println("-> WSS device gateway connected.");
       break;
     case WStype_DISCONNECTED:
       deviceGatewayConnected = false;
+      mqttBrokerConnected = false;
       deviceWebSocket.setReconnectInterval(DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL);
       // A Quick Tunnel hostname may change when the tunnel restarts. Refresh
       // discovery immediately instead of retrying the stale hostname for 5m.
@@ -742,6 +772,7 @@ void handleDeviceGatewayEvent(WStype_t type, uint8_t* payload, size_t length) {
       break;
     case WStype_ERROR:
       deviceGatewayConnected = false;
+      mqttBrokerConnected = false;
       deviceWebSocket.setReconnectInterval(DEVICE_GATEWAY_OFFLINE_RECONNECT_INTERVAL);
       lastDeviceGatewayDiscovery = millis() - DEVICE_GATEWAY_DISCOVERY_INTERVAL;
       Serial.println("!! WSS device gateway error.");
@@ -1809,6 +1840,8 @@ bool flushOfflineQueue() {
   return true;
 }
 void setup() {
+  pinMode(WSS_STATUS_LED, OUTPUT);
+  setWssLed(false);
   Serial.begin(115200);
   delay(500);
   configureTaskWatchdogForTls();
@@ -1906,24 +1939,7 @@ void setup() {
     }
   }
 
-  if (isDeviceAgentConfigured()) {
-    BaseType_t agentTaskCreated = xTaskCreatePinnedToCore(
-      deviceAgentTask,
-      "device_agent",
-      12288,
-      nullptr,
-      1,
-      &deviceAgentTaskHandle,
-      0
-    );
-    if (agentTaskCreated != pdPASS) {
-      Serial.println("ERROR: Device agent task failed to start; remote restart/config updates are unavailable.");
-    } else {
-      Serial.println("-> Authenticated device-agent task started (remote config/restart).");
-    }
-  } else {
-    Serial.println("-> Device agent not provisioned; remote config/restart unavailable until enrollment firmware is flashed.");
-  }
+  Serial.println("-> Device-agent task disabled; WSS and cloud fallback active.");
 
   if (isDeviceGatewayConfigured()) {
     BaseType_t gatewayTaskCreated = xTaskCreatePinnedToCore(
@@ -1959,6 +1975,7 @@ void applyPendingWifiConfiguration() {
   }
 }
 void loop() {
+  updateWssLed();
   server.handleClient();
   maintainMdns();
   if (pendingMeshRestart && millis() - pendingMeshRestartAt >= 650) {
@@ -2249,173 +2266,6 @@ bool syncAllStatesToDB() {
     reconciledDevices++;
   }
   return reconciledDevices > 0 && allSynced;
-}
-void pollAlarms() {
-  if (!isCloudConfigured() || boardUUID == "") return;
-  if (isDeviceAgentConfigured()) {
-    DynamicJsonDocument requestDoc(512), response(8192);
-    requestDoc["action"] = "poll_alarms";
-    if (sendDeviceAgentAction(requestDoc, response)) applyAlarmSnapshot(response);
-    return;
-  }
-  if (!isDirectCloudConfigured()) return;
-
-  String queryIds = "";
-  for (int i = 0; i < NUM_DEVICES; i++) {
-    if (deviceUUIDs[i] != "") {
-      if (queryIds != "") queryIds += ",";
-      queryIds += "%22" + deviceUUIDs[i] + "%22";
-    }
-  }
-  if (queryIds == "") return;
-  HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/alarms?device_id=in.(" + queryIds + ")&fired=eq.false&select=id,trigger_at,action,device_id");
-  configureHttp(http);
-  http.addHeader("apikey", SUPABASE_SERVICE_KEY);
-  http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
-  if (http.GET() == 200) {
-    DynamicJsonDocument doc(2048);
-    deserializeJson(doc, http.getString());
-    applyAlarmSnapshot(doc);
-  }
-  http.end();
-}
-void saveScheduleCache() {
-  DynamicJsonDocument doc(8192);
-  JsonArray arr = doc.to<JsonArray>();
-  for (int i = 0; i < scheduleCount; ++i) {
-    JsonObject o = arr.createNestedObject();
-    o["id"] = schedules[i].id; o["device_id"] = schedules[i].deviceId;
-    o["time"] = schedules[i].time; o["days"] = schedules[i].days;
-    o["action"] = schedules[i].action; o["enabled"] = schedules[i].enabled;
-    o["last_run"] = schedules[i].lastRunDate;
-  }
-  String payload; serializeJson(doc, payload);
-  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
-  preferences.putString("sched_cache", payload);
-  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-}
-
-void loadScheduleCache() {
-  if (scheduleCacheLoaded) return;
-  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
-  String payload = preferences.getString("sched_cache", "");
-  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
-  DynamicJsonDocument doc(8192);
-  if (!payload.isEmpty() && !deserializeJson(doc, payload) && doc.is<JsonArray>()) {
-    for (JsonObject o : doc.as<JsonArray>()) {
-      if (scheduleCount >= MAX_SCHEDULES) break;
-      Schedule &s = schedules[scheduleCount++];
-      s.id = o["id"] | ""; s.deviceId = o["device_id"] | "";
-      s.time = o["time"] | "00:00:00"; s.days = "";
-      if (o["days"].is<JsonArray>()) {
-        for (JsonVariant d : o["days"].as<JsonArray>()) { if (s.days.length()) s.days += ","; s.days += d.as<String>(); }
-      } else s.days = o["days"] | "";
-      s.action = o["action"] | false; s.enabled = o["enabled"] | false;
-      s.lastRunDate = o["last_run"] | ""; s.deviceIndex = -1;
-      for (int d = 0; d < NUM_DEVICES; ++d) if (deviceUUIDs[d] == s.deviceId) s.deviceIndex = d;
-    }
-  }
-  scheduleCacheLoaded = true;
-  Serial.printf("Restored %d local schedules.\\n", scheduleCount);
-}
-
-void pollSchedules() {
-  if (!isCloudConfigured() || boardUUID == "") return;
-  if (isDeviceAgentConfigured()) {
-    DynamicJsonDocument requestDoc(512), response(8192);
-    requestDoc["action"] = "poll_schedules";
-    if (sendDeviceAgentAction(requestDoc, response)) applyScheduleSnapshot(response);
-    return;
-  }
-  if (!isDirectCloudConfigured()) return;
-
-  String ids;
-  for (int i = 0; i < NUM_DEVICES; ++i) if (deviceUUIDs[i].length()) {
-    if (ids.length()) ids += ",";
-    ids += "%22" + deviceUUIDs[i] + "%22";
-  }
-  if (!ids.length()) return;
-  HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/schedules?device_id=in.(" + ids + ")&enabled=eq.true&select=id,device_id,action,time,days,enabled");
-  configureHttp(http);
-  http.addHeader("apikey", SUPABASE_SERVICE_KEY);
-  http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
-  int code = http.GET();
-  String body = code == 200 ? http.getString() : "";
-  http.end();
-  if (code != 200) {
-    Serial.printf("Schedule refresh failed (HTTP %d); using saved schedules.\\n", code);
-    return;
-  }
-  DynamicJsonDocument doc(8192);
-  if (deserializeJson(doc, body) || !doc.is<JsonArray>()) {
-    Serial.println("Invalid schedules response; keeping saved cache.");
-    return;
-  }
-  applyScheduleSnapshot(doc);
-  Serial.printf("Synced %d schedules; cached for offline execution.\\n", scheduleCount);
-}
-void runLocalSchedules() {
-  if (time(nullptr) < 100000) return; // never fire against an unset clock
-  loadScheduleCache();
-  time_t now = time(nullptr); struct tm t; localtime_r(&now, &t);
-  if (t.tm_year < 120) return; // ignore invalid clock before year 2020 (1900+120 = 2020)
-  char dateBuf[11], timeBuf[9];
-  strftime(dateBuf, sizeof(dateBuf), "%Y-%m-%d", &t);
-  strftime(timeBuf, sizeof(timeBuf), "%H:%M:%S", &t);
-  String today = dateBuf, clockNow = timeBuf;
-  String day = String(t.tm_wday);
-  bool cacheChanged = false;
-  for (int i = 0; i < scheduleCount; ++i) {
-    Schedule &s = schedules[i];
-    if (s.deviceIndex < 0) for (int d = 0; d < NUM_DEVICES; ++d) if (deviceUUIDs[d] == s.deviceId) s.deviceIndex = d;
-    if (!s.enabled || s.deviceIndex < 0 || s.time.substring(0, 5) != clockNow.substring(0, 5) || s.lastRunDate == today) continue;
-    bool dayMatch = false; int start = 0;
-    while (start < s.days.length()) {
-      int comma = s.days.indexOf(',', start); if (comma < 0) comma = s.days.length();
-      if (s.days.substring(start, comma).toInt() == t.tm_wday) { dayMatch = true; break; }
-      start = comma + 1;
-    }
-    if (!dayMatch) continue;
-    // Record before actuation to avoid repeating this occurrence after a reboot.
-    s.lastRunDate = today; cacheChanged = true;
-    Serial.printf("LOCAL SCHEDULE %s -> device %d %s\\n", s.id.c_str(), s.deviceIndex, s.action ? "ON" : "OFF");
-    setRelay(s.deviceIndex, s.action);
-    enqueueOfflineUpdate(s.deviceIndex, s.action, false);
-    logActivityInDB(s.deviceIndex, s.action, "Schedule (ESP32)");
-  }
-  if (cacheChanged) saveScheduleCache();
-}
-
-bool markAlarmFiredInDB(String alarmId) {
-  if (!isCloudConfigured() || alarmId.length() == 0) return false;
-  if (isDeviceAgentConfigured()) {
-    DynamicJsonDocument requestDoc(512), response(512);
-    requestDoc["action"] = "claim_alarm";
-    requestDoc["alarm_id"] = alarmId;
-    if (!sendDeviceAgentAction(requestDoc, response)) return false;
-    const bool claimed = response["claimed"] | false;
-    if (claimed) Serial.println("Alarm atomically claimed through device agent.");
-    return claimed;
-  }
-  if (!isDirectCloudConfigured()) return false;
-
-  HTTPClient http;
-  http.begin(String(SUPABASE_BASE) + "/alarms?id=eq." + alarmId + "&fired=eq.false&select=id");
-  configureHttp(http);
-  http.addHeader("apikey", SUPABASE_SERVICE_KEY);
-  http.addHeader("Authorization", "Bearer " + String(SUPABASE_SERVICE_KEY));
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("Prefer", "return=representation");
-  int code = http.PATCH("{\"fired\":true}");
-  String responseBody = code == 200 ? http.getString() : "";
-  http.end();
-  DynamicJsonDocument doc(256);
-  DeserializationError parseError = deserializeJson(doc, responseBody);
-  const bool claimed = code == 200 && !parseError && doc.is<JsonArray>() && doc.size() > 0;
-  if (!claimed) Serial.printf("Alarm not claimed (HTTP %d); another executor may have claimed it or cloud is unavailable.\\n", code);
-  return claimed;
 }
 bool logActivityInDB(int index, bool state, const String& triggeredBy) {
   if (!isCloudConfigured() || index < 0 || index >= NUM_DEVICES ||
@@ -3070,8 +2920,6 @@ void processDeviceAgentResponse(JsonDocument& response) {
   }
 
   applyDeviceSnapshot(response, true);
-  applyAlarmSnapshot(response);
-  applyScheduleSnapshot(response);
   // A restart requested before the previous reboot is acknowledged only after boot.
   String pendingRestart = "";
   String completedRestartId = "";
@@ -3304,99 +3152,6 @@ void applyDeviceSnapshot(JsonDocument& response, bool applyRelayStates) {
   cloudDevicesReady = true;
 }
 
-void applyAlarmSnapshot(JsonDocument& response) {
-  JsonArray rows = response["alarms"].as<JsonArray>();
-  if (rows.isNull()) return;
-  for (int i = 0; i < MAX_ALARMS; ++i) alarms[i].active = false;
-  int count = 0;
-  for (JsonObject row : rows) {
-    if (count >= MAX_ALARMS) break;
-    const String alarmId = row["id"] | "";
-    const String deviceId = row["device_id"] | "";
-    const String trigger = row["trigger_at"] | "";
-    if (!alarmId.length() || !deviceId.length() || trigger.length() < 19) continue;
-    int deviceIndex = -1;
-    for (int d = 0; d < NUM_DEVICES; ++d) {
-      if (deviceUUIDs[d] == deviceId) { deviceIndex = d; break; }
-    }
-    if (deviceIndex < 0) continue;
-    alarms[count].id = alarmId;
-    alarms[count].triggerAt = trigger.substring(0, 19);
-    alarms[count].action = row["action"] | false;
-    alarms[count].deviceIndex = deviceIndex;
-    alarms[count].active = !(row["fired"] | false);
-    ++count;
-  }
-}
-
-void applyScheduleSnapshot(JsonDocument& response) {
-  JsonArray rows = response["schedules"].as<JsonArray>();
-  if (rows.isNull()) return;
-
-  Schedule updated[MAX_SCHEDULES];
-  int count = 0;
-  bool changed = false;
-  for (JsonObject row : rows) {
-    if (count >= MAX_SCHEDULES) break;
-    const String scheduleId = row["id"] | "";
-    const String deviceId = row["device_id"] | "";
-    if (!scheduleId.length() || !deviceId.length()) continue;
-
-    Schedule& item = updated[count++];
-    item.id = scheduleId;
-    item.deviceId = deviceId;
-    item.time = row["time"] | "00:00:00";
-    item.action = row["action"] | false;
-    item.enabled = row["enabled"] | true;
-    item.days = "";
-    item.lastRunDate = "";
-    item.deviceIndex = -1;
-    if (row["days"].is<JsonArray>()) {
-      for (JsonVariant day : row["days"].as<JsonArray>()) {
-        if (item.days.length()) item.days += ",";
-        item.days += day.as<String>();
-      }
-    } else {
-      item.days = row["days"] | "";
-    }
-
-    for (int d = 0; d < NUM_DEVICES; ++d) {
-      if (deviceUUIDs[d] == item.deviceId) { item.deviceIndex = d; break; }
-    }
-
-    bool matchedExisting = false;
-    for (int old = 0; old < scheduleCount; ++old) {
-      if (schedules[old].id != item.id) continue;
-      matchedExisting = true;
-      item.lastRunDate = schedules[old].lastRunDate;
-      if (schedules[old].deviceId != item.deviceId ||
-          schedules[old].time != item.time ||
-          schedules[old].days != item.days ||
-          schedules[old].action != item.action ||
-          schedules[old].enabled != item.enabled ||
-          schedules[old].deviceIndex != item.deviceIndex) {
-        changed = true;
-      }
-      break;
-    }
-    if (!matchedExisting) changed = true;
-  }
-
-  if (count != scheduleCount) changed = true;
-  for (int old = 0; old < scheduleCount; ++old) {
-    bool stillExists = false;
-    for (int i = 0; i < count; ++i) {
-      if (updated[i].id == schedules[old].id) { stillExists = true; break; }
-    }
-    if (!stillExists) { changed = true; break; }
-  }
-
-  scheduleCount = count;
-  for (int i = 0; i < count; ++i) schedules[i] = updated[i];
-  // Device snapshots arrive every 10 seconds; write NVS only if the schedule
-  // definition actually changed to avoid unnecessary flash wear.
-  if (changed) saveScheduleCache();
-}
 void deviceAgentTask(void* parameter) {
   (void)parameter;
   unsigned long lastAttempt = 0;
@@ -3444,36 +3199,14 @@ void cloudSyncTask(void* parameter) {
   (void)parameter;
   unsigned long lastNtpAttempt = 0;
   unsigned long lastResolveAttempt = 0;
-  unsigned long lastCloudAlarmPoll = 0;
   unsigned long lastCloudHeartbeat = 0;
   unsigned long nextQueueAttempt = 0;
   unsigned long queueRetryDelay = 2000;
-  unsigned long lastDeviceHeartbeatAttempt = millis() - 15000;
-  unsigned long lastDeviceCommandPoll = millis() - 5000;
-  unsigned long lastDeviceConfigPoll = millis() - 30000;
-  loadScheduleCache();
+  // A prior build cached schedules in NVS. Remove that cache once on upgrade.
+  if (preferencesMutex) xSemaphoreTake(preferencesMutex, portMAX_DELAY);
+  preferences.remove("sched_cache");
+  if (preferencesMutex) xSemaphoreGive(preferencesMutex);
   for (;;) {
-    runLocalSchedules();
-
-    // Secure device-management APIs use a per-board credential and do not
-    // require the legacy Supabase service-role key embedded by older builds.
-    // Run the older PR #7 API path only on legacy firmware. Newly enrolled
-    // boards use the device-agent path above and must not execute two command
-    // pipelines in parallel.
-    if (!isDeviceAgentConfigured() && isHomeWifiConnected() && deviceAuthToken.length()) {
-      if (millis() - lastDeviceHeartbeatAttempt >= 15000) {
-        lastDeviceHeartbeatAttempt = millis();
-        sendDeviceHeartbeat();
-      }
-      if (millis() - lastDeviceCommandPoll >= 5000) {
-        lastDeviceCommandPoll = millis();
-        pollRemoteCommands();
-      }
-      if (millis() - lastDeviceConfigPoll >= 30000) {
-        lastDeviceConfigPoll = millis();
-        pollRemoteConfiguration(false);
-      }
-    }
 
     if (!isHomeWifiConnected() || !isCloudConfigured()) {
       cloudDevicesReady = false;
@@ -3506,10 +3239,6 @@ void cloudSyncTask(void* parameter) {
       }
     }
     if (boardUUID != "") {
-      if (!isDeviceAgentConfigured() && millis() - lastSchedulePoll >= SCHEDULE_POLL_INTERVAL) {
-        lastSchedulePoll = millis();
-        pollSchedules();
-      }
       if ((long)(millis() - nextQueueAttempt) >= 0) {
         const bool feedbackPending = hasPendingFeedbackUpdate();
         bool queueOk = flushOfflineQueue(); // one update per pass
@@ -3528,28 +3257,9 @@ void cloudSyncTask(void* parameter) {
       }
       currentNtpTime = time(nullptr);
       if (currentNtpTime >= 100000) {
-        if (!isDeviceAgentConfigured() && millis() - lastCloudAlarmPoll >= ALARM_POLL_INTERVAL) {
-          lastCloudAlarmPoll = millis();
-          pollAlarms();
-        }
         if (!isDeviceAgentConfigured() && millis() - lastCloudHeartbeat >= HEARTBEAT_INTERVAL) {
           lastCloudHeartbeat = millis();
           sendHeartbeat();
-        }
-        String nowIso = getIsoTime();
-        for (int i = 0; i < MAX_ALARMS; i++) {
-          if (!alarms[i].active || nowIso < alarms[i].triggerAt) continue;
-          Serial.println("ALARM DUE. Claiming atomically: " + alarms[i].id);
-          const String alarmId = alarms[i].id;
-          const int targetDev = alarms[i].deviceIndex;
-          const bool targetState = alarms[i].action;
-          alarms[i].active = false;
-          if (!markAlarmFiredInDB(alarmId)) continue;
-          if (targetDev >= 0 && targetDev < NUM_DEVICES) {
-            enqueueOfflineUpdate(targetDev, targetState, false);
-            setRelay(targetDev, targetState);
-            logActivityInDB(targetDev, targetState, "Alarm (ESP32)");
-          }
         }
       }
     }
@@ -3558,13 +3268,23 @@ void cloudSyncTask(void* parameter) {
 }
 void cloudPollTask(void* parameter) {
   (void)parameter;
+  unsigned long lastPollStarted = 0;
+  bool wasHealthy = false;
   for (;;) {
     if (!isHomeWifiConnected() || !cloudDevicesReady || !isCloudConfigured()) {
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
     }
-    if (!isDeviceAgentConfigured()) pollDatabase();
-    const unsigned long pollInterval = isDeviceGatewayConfigured() ? POLL_INTERVAL : 1000;
-    vTaskDelay(pdMS_TO_TICKS(pollInterval));
+    const bool healthy = deviceGatewayConnected && mqttBrokerConnected &&
+      millis() - lastMqttHeartbeatMs < 45000;
+    const unsigned long pollInterval = healthy ? POLL_INTERVAL : MQTT_FALLBACK_POLL_INTERVAL;
+    if (!healthy && wasHealthy) lastPollStarted = 0;
+    wasHealthy = healthy;
+    if (!isDeviceAgentConfigured() &&
+        (lastPollStarted == 0 || millis() - lastPollStarted >= pollInterval)) {
+      lastPollStarted = millis();
+      pollDatabase();
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
