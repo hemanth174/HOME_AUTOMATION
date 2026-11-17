@@ -14,6 +14,7 @@ import {
   LayoutDashboard,
   Mail,
   RefreshCw,
+  Radio,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -26,6 +27,7 @@ import AdminOrderPipeline from "./AdminOrderPipeline";
 import AdminOrderDrawer from "./AdminOrderDrawer";
 import AdminVoiceSubscription from "./AdminVoiceSubscription";
 import AdminMonitoring from "./monitoring/AdminMonitoring";
+import AdminMqttServer from "./AdminMqttServer";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const stageColors = {
@@ -38,7 +40,7 @@ const stageColors = {
 };
 
 const ADMIN_TAB_COOKIE = "vikatech_admin_tab";
-const ADMIN_TABS = ["orders", "users", "hardware", "subscriptions", "monitoring"];
+const ADMIN_TABS = ["orders", "users", "hardware", "subscriptions", "monitoring", "mqtt-server"];
 
 function readAdminTabCookie() {
   if (typeof document === "undefined") return "orders";
@@ -465,13 +467,29 @@ export default function AdminPage() {
               <Activity size={15} className={tab === "monitoring" ? "text-amber-500" : "text-text-muted"} />
               <span>Monitoring</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setTab("mqtt-server")}
+              aria-current={tab === "mqtt-server" ? "page" : undefined}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs transition-all ${
+                tab === "mqtt-server"
+                  ? "bg-card text-text border border-border shadow-sm font-black"
+                  : "text-text-muted hover:text-text hover:bg-card/40 font-bold"
+              }`}
+            >
+              <Radio size={15} className={tab === "mqtt-server" ? "text-emerald-500" : "text-text-muted"} />
+              <span>MQTT Server</span>
+            </button>
           </nav>
         </div>
       </header>
 
       {/* Main Content Area */}
       <div className="mx-auto max-w-[1440px] px-3 py-5 sm:px-6 sm:py-6 lg:px-10">
-        {tab === "monitoring" ? (
+        {tab === "mqtt-server" ? (
+          <AdminMqttServer accessToken={accessToken} />
+        ) : tab === "monitoring" ? (
           <AdminMonitoring accessToken={accessToken} />
         ) : tab === "hardware" ? (
           <DeviceFleet />
@@ -506,7 +524,7 @@ export default function AdminPage() {
         )}
 
         {/* Operational Telemetry Cards */}
-        {tab !== "hardware" && tab !== "subscriptions" && tab !== "monitoring" && (
+        {tab !== "hardware" && tab !== "subscriptions" && tab !== "monitoring" && tab !== "mqtt-server" && (
           <section className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex items-start gap-3 rounded-2xl border border-border bg-card/60 p-4 backdrop-blur-sm sm:p-5">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-accent/20 bg-accent/10 text-accent">
