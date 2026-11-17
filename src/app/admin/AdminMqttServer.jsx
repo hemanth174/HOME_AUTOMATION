@@ -168,7 +168,7 @@ export default function AdminMqttServer({ accessToken = "" }) {
                 <div><dt className="text-[10px] font-black uppercase tracking-wider text-text-muted">Selected startup laptop</dt><dd className="mt-1 text-sm font-bold text-text">{state?.owner_name || state?.requested_owner || "First online laptop"}</dd></div>
               </dl>
 
-              {snapshot?.backendUrl && <a className="mt-4 inline-flex items-center gap-1.5 break-all text-xs font-bold text-accent underline underline-offset-4" href={snapshot.backendUrl} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Current MQTT backend</a>}
+              {snapshot?.backendUrl && <a className="mt-4 inline-flex items-center gap-1.5 break-all text-xs font-bold text-accent underline underline-offset-4" href={`${snapshot.backendUrl.replace(/\/+$/, "")}/api/status`} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Current MQTT backend</a>}
 
               <div className="mt-5 border-t border-border pt-4">
                 <div className="mb-2 flex items-center gap-2 text-xs font-black text-text"><Server size={14} className="text-accent" /> Docker services</div>
