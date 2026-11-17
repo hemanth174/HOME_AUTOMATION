@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { ADMIN_EMAILS, isAdminEmail } from "@/lib/admin";
 import { CATEGORY_LABELS, STAGES } from "@/lib/orderCategories";
 import {
+  Activity,
   ArrowLeft,
   CheckCircle2,
   Cpu,
@@ -24,6 +25,7 @@ import AdminApprovalQueue from "./AdminApprovalQueue";
 import AdminOrderPipeline from "./AdminOrderPipeline";
 import AdminOrderDrawer from "./AdminOrderDrawer";
 import AdminVoiceSubscription from "./AdminVoiceSubscription";
+import AdminMonitoring from "./monitoring/AdminMonitoring";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const stageColors = {
@@ -36,7 +38,7 @@ const stageColors = {
 };
 
 const ADMIN_TAB_COOKIE = "vikatech_admin_tab";
-const ADMIN_TABS = ["orders", "users", "hardware", "subscriptions"];
+const ADMIN_TABS = ["orders", "users", "hardware", "subscriptions", "monitoring"];
 
 function readAdminTabCookie() {
   if (typeof document === "undefined") return "orders";
@@ -450,13 +452,28 @@ export default function AdminPage() {
               <Sparkles size={15} className={tab === "subscriptions" ? "text-amber-500" : "text-text-muted"} />
               <span>Voice Plans</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setTab("monitoring")}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs transition-all ${
+                tab === "monitoring"
+                  ? "bg-card text-text border border-border shadow-sm font-black"
+                  : "text-text-muted hover:text-text hover:bg-card/40 font-bold"
+              }`}
+            >
+              <Activity size={15} className={tab === "monitoring" ? "text-amber-500" : "text-text-muted"} />
+              <span>Monitoring</span>
+            </button>
           </nav>
         </div>
       </header>
 
       {/* Main Content Area */}
       <div className="mx-auto max-w-[1440px] px-3 py-5 sm:px-6 sm:py-6 lg:px-10">
-        {tab === "hardware" ? (
+        {tab === "monitoring" ? (
+          <AdminMonitoring accessToken={accessToken} />
+        ) : tab === "hardware" ? (
           <DeviceFleet />
         ) : tab === "users" ? (
           <AdminApprovalQueue
@@ -489,7 +506,7 @@ export default function AdminPage() {
         )}
 
         {/* Operational Telemetry Cards */}
-        {tab !== "hardware" && tab !== "subscriptions" && (
+        {tab !== "hardware" && tab !== "subscriptions" && tab !== "monitoring" && (
           <section className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex items-start gap-3 rounded-2xl border border-border bg-card/60 p-4 backdrop-blur-sm sm:p-5">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-accent/20 bg-accent/10 text-accent">

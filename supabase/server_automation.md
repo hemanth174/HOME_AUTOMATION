@@ -65,3 +65,50 @@ That can briefly interrupt a connected load. If the light flickers, compare
 the serial reset reason and `MAIN LOOP STALL` / `CRITICAL WATCHDOG` lines with
 the event time. A connected LED with `MQTT: FALLBACK` means the WSS connection
 exists but the broker path is not currently healthy.
+
+The optimized firmware now skips cloud device-state polling entirely while the
+WSS gateway reports a healthy MQTT broker path. If that path goes down, it
+starts an immediate fallback poll, then polls every 10 seconds while offline.
+Polling stops again when MQTT recovers. Cloud sync and heartbeat work are
+separate from this device-state polling rule. An HTTP poll already in progress
+when MQTT recovers may finish; no new poll should start while the path is
+healthy. The former 3-second healthy-path poll was visible in the serial log
+and added avoidable TLS memory pressure.
+
+If the gateway socket disconnects, offline discovery now recreates the WSS
+client even when the discovered URL text is unchanged. Previously it waited
+for six 30-second discovery cycles before doing that, which could leave it
+trying a stale socket until the board was reset. A changed Cloudflare Quick
+Tunnel address still requires discovery to succeed; the serial monitor now
+prints its HTTP status when discovery fails. The board keeps the local mesh
+and cloud polling fallback during reconnection.
+
+## Automations when MQTT or the Node server is down
+
+Run `supabase/esp32_automation_fallback.sql` once in the **VikaTech app**
+Supabase SQL editor before flashing the updated firmware. On each 10-second
+fallback poll, the ESP32 invokes this database function. Supabase uses its own
+clock and the user's timezone to find due alarms and schedules, atomically
+claims them using the same `alarms.fired` and `schedule_runs` records used by
+the Node scheduler, updates the device state, and returns current relay states.
+The ESP32 applies those states immediately. It does not cache alarm or schedule
+rows locally or perform timing calculations. When MQTT is healthy, this request
+stops and the Node scheduler remains the normal execution path.
+The SQL function also updates `boards.last_seen` on each successful fallback
+request, so the website can show that the board is reachable through cloud
+polling even when WSS is down. Re-run the SQL file if an earlier version was
+already installed.
+
+If device-state polling works but due automations do not, re-run the current
+SQL file. An older version rejected the RPC by reading a legacy PostgREST JWT
+setting even for the service role. The current version relies on explicit
+`REVOKE`/`GRANT` permissions instead. The firmware logs the RPC HTTP status
+when it falls back to device-only reads, so a successful device poll no longer
+looks like proof that automations were checked.
+
+The function uses a five-minute catch-up window and requires the existing
+`schedule_runs` table. If the SQL has not been installed yet, the firmware
+still falls back to reading device states, but due automations cannot run when
+the Node server is down. HTTPS certificate failures or an unreachable Supabase
+project also prevent this cloud fallback; local switches and mesh remain
+available.

@@ -191,18 +191,45 @@ export default function useDashboardData() {
       if (inFlight) return;
       inFlight = true;
       try {
-        const { data: latest } = await supabase
-          .from('boards')
-          .select('id, name, board_identifier, last_seen')
-          .eq('user_id', user.id)
-          .order('created_at');
+        const [boardsResult, devicesResult] = await Promise.all([
+          supabase.from('boards')
+            .select('id, name, board_identifier, last_seen')
+            .eq('user_id', user.id)
+            .order('created_at'),
+          supabase.from('devices')
+            .select('id, name, is_on, feedback_on, relay_index, board_id')
+            .eq('user_id', user.id)
+            .order('relay_index'),
+        ]);
         if (!active) return;
         setBoards((current) => {
-          if (!latest) return [...current];
+          if (!boardsResult.data) return [...current];
           const localOnly = current.filter((board) => board._localOnly &&
-            !latest.some((cloudBoard) => cloudBoard.board_identifier === board.board_identifier));
-          return [...latest, ...localOnly];
+            !boardsResult.data.some((cloudBoard) => cloudBoard.board_identifier === board.board_identifier));
+          return [...boardsResult.data, ...localOnly];
         });
+        if (devicesResult.data) {
+          setDevices((current) => {
+            const previousById = new Map(current.map((device) => [device.id, device]));
+            const updated = devicesResult.data.map((device) => {
+              const previous = previousById.get(device.id);
+              if (isLocalConnected && previous?._lastSource === 'local') {
+                return { ...device, is_on: previous.is_on, feedback_on: previous.feedback_on,
+                  _lastSource: 'local' };
+              }
+              if (previous?._lastSource === 'cloud' &&
+                  Date.now() - (previous._optimisticAt || 0) < 5000) {
+                return { ...device, is_on: previous.is_on, _lastSource: 'cloud',
+                  _optimisticAt: previous._optimisticAt };
+              }
+              return device;
+            });
+            const cloudIds = new Set(updated.map((device) => device.id));
+            updated.push(...current.filter((device) => device._localOnly && !cloudIds.has(device.id)));
+            try { localStorage.setItem(LOCAL_STORAGE_DEVICES, JSON.stringify(updated)); } catch {}
+            return updated;
+          });
+        }
       } catch {
         // The clock must still re-evaluate cached timestamps while offline.
         if (active) setBoards((current) => [...current]);
@@ -220,7 +247,7 @@ export default function useDashboardData() {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [user?.id]);
+  }, [user?.id, isLocalConnected]);
 
   // Realtime subscription
   useEffect(() => {
@@ -340,7 +367,8 @@ export default function useDashboardData() {
                 (!board?.board_identifier || item.node_id === board.board_identifier ||
                   (!item.node_id && currentBoards.length === 1)),
             );
-            return local ? { ...device, is_on: local.is_on, feedback_on: local.feedback_on } : device;
+            return local ? { ...device, is_on: local.is_on, feedback_on: local.feedback_on,
+              _lastSource: 'local' } : device;
           });
 
           // Add locally reported devices that are not present in stale cloud
@@ -359,6 +387,7 @@ export default function useDashboardData() {
                 board_id: board?.id || `local-${local.node_id || 'esp32'}`,
                 is_on: local.is_on,
                 feedback_on: local.feedback_on,
+                _lastSource: 'local',
                 node_id: local.node_id,
                 _localOnly: true,
               });
@@ -399,7 +428,8 @@ export default function useDashboardData() {
 
     // 1. Optimistic UI update
     setDevices(prev => {
-      const updated = prev.map(d => d.id === device.id ? { ...d, is_on: newState, _lastSource: isLocalConnected ? 'local' : 'cloud' } : d);
+      const updated = prev.map(d => d.id === device.id ? { ...d, is_on: newState,
+        _lastSource: isLocalConnected ? 'local' : 'cloud', _optimisticAt: Date.now() } : d);
       try { localStorage.setItem(LOCAL_STORAGE_DEVICES, JSON.stringify(updated)); } catch {}
       return updated;
     });

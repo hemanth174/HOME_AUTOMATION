@@ -459,7 +459,7 @@ export default function Navbar() {
       .subscribe();
     const timer = setInterval(() => {
       fetchBoards();
-    }, 10000);
+    }, 5000);
     return () => {
       channel.unsubscribe();
       clearInterval(timer);
