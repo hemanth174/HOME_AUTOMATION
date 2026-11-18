@@ -37,6 +37,8 @@ export function useProjectFeed({ project, range, token, active, detailed, autoRe
   const retryTimerRef = useRef(null);
   const loadRef = useRef(null);
   const overviewRef = useRef(null);
+  const autoRefreshRef = useRef(autoRefresh);
+  autoRefreshRef.current = autoRefresh;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -89,7 +91,7 @@ export function useProjectFeed({ project, range, token, active, detailed, autoRe
     setLoading(false);
     setRefreshing(false);
 
-    if (failures > 0 && active) {
+    if (failures > 0 && active && autoRefreshRef.current) {
       retryRef.current += 1;
       const delay = retryDelay(retryRef.current);
       clearTimeout(retryTimerRef.current);
@@ -103,6 +105,17 @@ export function useProjectFeed({ project, range, token, active, detailed, autoRe
   }, [active, token, project?.id, range, detailed, customStart, customEnd]);
 
   loadRef.current = load;
+
+  useEffect(() => {
+    if (active) return;
+    controllerRef.current?.abort();
+    clearTimeout(retryTimerRef.current);
+    setLiveStatus('IDLE');
+  }, [active]);
+
+  useEffect(() => {
+    if (!autoRefresh) clearTimeout(retryTimerRef.current);
+  }, [autoRefresh]);
 
   useEffect(() => {
     if (!active) return;
@@ -122,16 +135,16 @@ export function useProjectFeed({ project, range, token, active, detailed, autoRe
   }, [active, autoRefresh, load]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || !autoRefresh) return;
     const onVisible = () => {
       if (document.visibilityState === 'visible') load(false);
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [active, load]);
+  }, [active, autoRefresh, load]);
 
   useEffect(() => {
-    if (!active || !project?.id) return;
+    if (!active || !autoRefresh || !project?.id) return;
     const client = getRealtimeClient(project);
     if (!client) {
       setLiveStatus(project?.realtime ? 'UNAVAILABLE' : 'NOT_CONFIGURED');
@@ -159,7 +172,7 @@ export function useProjectFeed({ project, range, token, active, detailed, autoRe
       clearTimeout(timer);
       if (channel) Promise.resolve(client.removeChannel(channel)).catch(() => {});
     };
-  }, [active, project]);
+  }, [active, autoRefresh, project]);
 
   useEffect(() => () => {
     controllerRef.current?.abort();
@@ -179,7 +192,7 @@ export function useProjectFeed({ project, range, token, active, detailed, autoRe
   };
 }
 
-export function useLogsFeed({ project, range, token, active, filters, customStart, customEnd }) {
+export function useLogsFeed({ project, range, token, active, filters, customStart, customEnd, autoRefresh = false }) {
   const [logs, setLogs] = useState([]);
   const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -189,6 +202,8 @@ export function useLogsFeed({ project, range, token, active, filters, customStar
   const retryRef = useRef(0);
   const retryTimerRef = useRef(null);
   const loadRef = useRef(null);
+  const autoRefreshRef = useRef(autoRefresh);
+  autoRefreshRef.current = autoRefresh;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -214,18 +229,24 @@ export function useLogsFeed({ project, range, token, active, filters, customStar
     } catch (requestError) {
       if (!mountedRef.current || controller.signal.aborted || controllerRef.current !== controller) return;
       setError({ code: requestError.code || 'request_failed', message: requestError.message || 'Logs request failed.' });
-      retryRef.current += 1;
-      const delay = retryDelay(retryRef.current);
-      clearTimeout(retryTimerRef.current);
-      retryTimerRef.current = setTimeout(() => {
-        if (mountedRef.current) loadRef.current?.();
-      }, delay);
+      if (autoRefreshRef.current) {
+        retryRef.current += 1;
+        const delay = retryDelay(retryRef.current);
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = setTimeout(() => {
+          if (mountedRef.current) loadRef.current?.();
+        }, delay);
+      }
     } finally {
       if (mountedRef.current && controllerRef.current === controller) setLoading(false);
     }
   }, [active, token, project?.id, range, filters, customStart, customEnd]);
 
   loadRef.current = load;
+
+  useEffect(() => {
+    if (!autoRefresh) clearTimeout(retryTimerRef.current);
+  }, [autoRefresh]);
 
   useEffect(() => {
     if (!active) return;
@@ -237,10 +258,10 @@ export function useLogsFeed({ project, range, token, active, filters, customStar
   }, [active, project?.id, range, filters, token, customStart, customEnd, load]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || !autoRefresh) return;
     const timer = setInterval(load, 300000);
     return () => clearInterval(timer);
-  }, [active, load]);
+  }, [active, autoRefresh, load]);
 
   useEffect(() => () => {
     controllerRef.current?.abort();

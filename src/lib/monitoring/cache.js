@@ -1,3 +1,5 @@
+import { unstable_cache } from 'next/cache';
+
 const store = new Map();
 const inflight = new Map();
 
@@ -15,10 +17,15 @@ export async function cached(key, ttlMs, loader) {
     return inflight.get(key);
   }
   const task = (async () => {
-    const value = await loader();
-    store.set(key, { value, storedAt: new Date().toISOString(), expires: Date.now() + ttlMs });
+    const readShared = unstable_cache(
+      async () => ({ value: await loader(), storedAt: new Date().toISOString() }),
+      ['admin-monitoring', key, String(ttlMs)],
+      { revalidate: Math.max(1, Math.ceil(ttlMs / 1000)) },
+    );
+    const { value, storedAt } = await readShared();
+    store.set(key, { value, storedAt, expires: new Date(storedAt).getTime() + ttlMs });
     inflight.delete(key);
-    return { ...value, cache: { hit: false, storedAt: new Date().toISOString() } };
+    return { ...value, cache: { hit: Date.now() - new Date(storedAt).getTime() > 1000, storedAt } };
   })().catch((error) => {
     inflight.delete(key);
     throw error;

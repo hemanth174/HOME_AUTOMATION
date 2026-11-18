@@ -48,7 +48,7 @@ function toCsv(rows) {
   return [columns.join(','), ...rows.map((row) => columns.map((column) => escape(redactSensitive(row[column]))).join(','))].join('\n');
 }
 
-export default function LogsPanel({ project, token, range, rangeLabel }) {
+export default function LogsPanel({ project, token, range, rangeLabel, autoRefresh = false }) {
   const [source, setSource] = useState('edge_logs');
   const [severity, setSeverity] = useState('');
   const [status, setStatus] = useState('');
@@ -58,7 +58,7 @@ export default function LogsPanel({ project, token, range, rangeLabel }) {
   const [limit, setLimit] = useState('50');
   const [selected, setSelected] = useState(null);
   const filters = useMemo(() => ({ source, severity, status, search, sort, limit }), [source, severity, status, search, sort, limit]);
-  const feed = useLogsFeed({ project, range, token, active: true, filters });
+  const feed = useLogsFeed({ project, range, token, active: true, filters, autoRefresh });
   const rows = feed.logs || [];
 
   const exportJson = () => {
