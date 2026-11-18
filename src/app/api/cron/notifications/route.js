@@ -293,20 +293,42 @@ async function runDeviceOfflineChecks(admin, getSettings, now, stats) {
     }
 
     if (lastAlert?.type === 'device_offline') continue;
+    // A slow, overlapping cron run may hold a stale presence snapshot after
+    // another run has already reported this board back online.
+    if (lastAlert?.type === 'device_online' &&
+        now.getTime() - new Date(lastAlert.created_at).getTime() < DEVICE_OFFLINE_AFTER_MS) continue;
+
+    const { data: currentConfig, error: currentError } = await admin
+      .from('device_runtime_configs')
+      .select('last_direct_seen_at, last_mesh_seen_at, last_seen_at, boards(last_seen)')
+      .eq('board_id', config.board_id)
+      .maybeSingle();
+    if (currentError || !currentConfig) {
+      stats.errors.push(`device presence recheck ${config.board_id}: ${currentError?.message || 'missing configuration'}`);
+      continue;
+    }
+    const currentBoard = Array.isArray(currentConfig.boards) ? currentConfig.boards[0] : currentConfig.boards;
+    const currentLastSeenAt = [
+      currentBoard?.last_seen,
+      currentConfig.last_direct_seen_at,
+      currentConfig.last_mesh_seen_at,
+      currentConfig.last_seen_at,
+    ].filter(Boolean).sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0];
+    if (!isDeviceOffline(currentLastSeenAt, new Date(), DEVICE_OFFLINE_AFTER_MS)) continue;
     try {
       const result = await dispatchNotification(admin, {
         userId: config.user_id,
         type: 'device_offline',
         title: `${boardName} is offline`,
-        body: `${boardName} has not checked in for ${formatOfflineDuration(lastSeenAt, now)}. It may have lost power or its network connection.`,
+        body: `${boardName} has not checked in for ${formatOfflineDuration(currentLastSeenAt, new Date())}. It may have lost power or its network connection.`,
         url: '/boards',
-        // lastSeenAt remains fixed during one outage, so this is sent once per
-        // outage and a later outage gets a new key after the next heartbeat.
-        dedupeKey: `device-offline:${config.board_id}:${lastSeenAt}`,
+        // The latest check-in stays fixed during one outage, so this is sent
+        // once per outage and a later outage gets a new key after recovery.
+        dedupeKey: `device-offline:${config.board_id}:${currentLastSeenAt}`,
         data: {
           board_id: config.board_id,
           board_identifier: board?.board_identifier || null,
-          last_seen_at: lastSeenAt,
+          last_seen_at: currentLastSeenAt,
           detected_at: now.toISOString(),
           offline_after_ms: DEVICE_OFFLINE_AFTER_MS,
         },
