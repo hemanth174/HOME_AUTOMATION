@@ -49,6 +49,7 @@ export default function useDashboardController() {
     [dashboardViewSwitcherEnabled, setDashboardViewSwitcherEnabled] =
       useState(false),
     [pending, setPending] = useState({});
+  const [collapseCookieReady, setCollapseCookieReady] = useState(null);
   const [todayLogs, setTodayLogs] = useState([]),
     [dailyRows, setDailyRows] = useState([]);
   const carouselRef = useRef(null);
@@ -56,7 +57,8 @@ export default function useDashboardController() {
   const inFlightRef = useRef(new Set());
   const groupCommandAtRef = useRef(0);
   const viewCookie = user?.id && `vt_device_view_${user.id}`,
-    roomCookie = user?.id && `vt_selected_room_${user.id}`;
+    roomCookie = user?.id && `vt_selected_room_${user.id}`,
+    collapseCookie = user?.id && `vt_collapsed_rooms_${user.id}`;
   const showToast = useCallback((message) => setToast(message), []);
   const getDevicesForBoard = useCallback(
     (id) => devices.filter((device) => device.board_id === id),
@@ -113,6 +115,23 @@ export default function useDashboardController() {
     },
     [roomCookie],
   );
+  useEffect(() => {
+    if (!collapseCookie) return;
+    let saved = [];
+    try {
+      const parsed = JSON.parse(readCookie(collapseCookie) || "[]");
+      if (Array.isArray(parsed)) saved = parsed.filter((id) => typeof id === "string");
+    } catch {}
+    setExpandedBoards(Object.fromEntries(saved.map((id) => [id, false])));
+    setCollapseCookieReady(collapseCookie);
+  }, [collapseCookie, setExpandedBoards]);
+  useEffect(() => {
+    if (!collapseCookie || collapseCookieReady !== collapseCookie) return;
+    const collapsedIds = Object.entries(expandedBoards || {})
+      .filter(([, expanded]) => expanded === false)
+      .map(([id]) => id);
+    writeCookie(collapseCookie, JSON.stringify(collapsedIds));
+  }, [collapseCookie, collapseCookieReady, expandedBoards]);
   const toggleRoomCollapsed = useCallback(
     (id) => {
       const expanded = expandedBoards?.[id] ?? true;
