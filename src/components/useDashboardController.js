@@ -407,7 +407,7 @@ export default function useDashboardController() {
     selectedRoomExpanded,
   ]);
   const activeCount = devices.filter((d) => d.is_on).length,
-    onlineBoards = boards.filter(isBoardOnline);
+    onlineBoards = boards.filter((board) => isBoardOnline(board));
   const statusMessage = useMemo(() => {
     if (!isClientOnline && !isLocalConnected) {
       return [
