@@ -8,5 +8,6 @@ export function isBoardOnline(value, now = Date.now()) {
   if (!lastSeen) return false;
 
   const lastSeenMs = new Date(lastSeen).getTime();
-  return Number.isFinite(lastSeenMs) && now - lastSeenMs < BOARD_ONLINE_GRACE_MS;
+  const ageMs = now - lastSeenMs;
+  return Number.isFinite(lastSeenMs) && ageMs >= -10_000 && ageMs < BOARD_ONLINE_GRACE_MS;
 }

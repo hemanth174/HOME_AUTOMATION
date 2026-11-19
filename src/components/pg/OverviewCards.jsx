@@ -1,22 +1,14 @@
 "use client";
 
-import { Cpu, Zap, Activity, HeartPulse } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getGreeting } from "./deviceKind";
 
-/**
- * Personalized greeting + four summary cards. Every value comes from live
- * state or the established log-based estimate — energy shows an explicit
- * unavailable state when there is nothing to estimate from.
- */
 export default function OverviewCards({
   userName,
   statusMessage,
   totalDevices,
   activeDevices,
-  energyKwhToday,
-  energyAvailable,
-  liveWatts,
+  boardConnected,
   systemOk,
   systemMessage,
 }) {
@@ -26,118 +18,56 @@ export default function OverviewCards({
   const statusParts = Array.isArray(statusMessage)
     ? statusMessage
     : [{ text: statusMessage }];
-
   useEffect(() => {
     const updateTime = () => setCurrentTime(new Date());
     updateTime();
-    const timer = setInterval(updateTime, 60 * 1000);
+    const timer = setInterval(updateTime, 60_000);
     return () => clearInterval(timer);
   }, []);
 
-  const cards = [
-    {
-      label: "Total Devices",
-      value: String(totalDevices),
-      sub: "Across all rooms",
-      Icon: Cpu,
-      accent: false,
-    },
-    {
-      label: "Active Devices",
-      value: String(activeDevices),
-      sub: activeDevices === 1 ? "Device is on" : "Devices are on",
-      Icon: Zap,
-      accent: activeDevices > 0,
-    },
-    {
-      label: "Energy Usage",
-      value: energyAvailable
-        ? `${energyKwhToday.toFixed(2)} kWh`
-        : "Unavailable",
-      sub: energyAvailable
-        ? `Today (est.) · ${liveWatts} W live`
-        : "No meter or usage data yet",
-      Icon: Activity,
-      accent: false,
-    },
-    {
-      label: "System Status",
-      value: systemOk ? "Normal" : "Attention",
-      sub: systemMessage,
-      Icon: HeartPulse,
-      ok: systemOk,
-    },
-  ];
-
   return (
-    <section aria-label="Overview" className="mb-7">
-      <h1
-        className="text-xl sm:text-2xl font-extrabold tracking-tight text-text truncate pl-2"
-        title={`${greeting}, ${firstName}`}
-      >
-        {greeting}, {firstName}
-      </h1>
-      <p className="text-[13px] font-medium text-text-muted mt-1 mb-4 pl-2">
-        {statusParts.map((part, index) => (
-          <span
-            key={`${part.text}-${index}`}
-            className={
-              part.tone === "accent"
-                ? "rounded-md bg-(--pg-brand-faint) px-1 font-extrabold text-(--pg-brand)"
-                : part.tone === "error"
-                  ? "rounded-md bg-(--pg-error-faint) px-1 font-extrabold text-(--pg-error)"
-                  : undefined
-            }
-          >
-            {part.text}
-          </span>
-        ))}
-      </p>
-      <div className="hidden sm:grid grid-cols-2 gap-2.5 lg:grid-cols-4 lg:gap-3">
-        {cards.map(({ label, value, sub, Icon, accent, ok }) => (
-          <div
-            key={label}
-            className={`rounded-2xl border bg-(--pg-card) p-4 transition-colors min-w-0 ${
-              label === "System Status" && ok === false
-                ? "border-(--pg-error-line)"
-                : "border-(--pg-line)"
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="ov-label text-[11px] font-extrabold uppercase tracking-[0.08em]">
-                {label}
-              </span>
+    <section aria-label="Overview" className="mb-5 border-b border-(--pg-line) pb-5">
+      <div className="flex min-w-0 flex-col gap-4 px-1 py-1 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
+        <div className="min-w-0 lg:max-w-[42%]">
+          <h1 className="truncate text-xl font-extrabold tracking-tight text-(--pg-ink) sm:text-2xl" title={`${greeting}, ${firstName}`}>
+            {greeting}, {firstName}
+          </h1>
+          <p className="mt-1 text-xs font-medium leading-relaxed text-(--pg-muted) sm:text-[13px]">
+            {statusParts.map((part, index) => (
               <span
-                className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                  accent
-                    ? "bg-(--pg-brand) text-(--pg-onbrand)"
-                    : label === "System Status" && ok === false
-                      ? "bg-(--pg-error-faint) text-(--pg-error)"
-                      : "bg-(--pg-faint) text-(--pg-brand)"
-                }`}
+                key={`${part.text}-${index}`}
+                className={part.tone === "accent"
+                  ? "rounded-md bg-(--pg-brand-faint) px-1 font-extrabold text-(--pg-brand)"
+                  : part.tone === "error"
+                    ? "rounded-md bg-(--pg-error-faint) px-1 font-extrabold text-(--pg-error)"
+                    : undefined}
               >
-                <Icon size={15} strokeWidth={2.5} aria-hidden="true" />
+                {part.text}
               </span>
-            </div>
-            <p
-              className={`text-xl sm:text-2xl font-extrabold tabular-nums tracking-tight mt-2 ${
-                label === "System Status"
-                  ? ok === false
-                    ? "text-(--pg-error)"
-                    : "text-(--pg-success)"
-                  : "text-(--pg-ink)"
-              }`}
-            >
-              {value}
-            </p>
-            <p
-              className="ov-sub text-[11px] font-semibold mt-1 truncate"
-              title={sub}
-            >
-              {sub}
-            </p>
+            ))}
+          </p>
+        </div>
+
+        <div className="hidden min-w-0 flex-wrap items-center gap-x-6 gap-y-3 border-t border-(--pg-line) pt-3 sm:flex lg:flex-nowrap lg:border-t-0 lg:border-l lg:py-0 lg:pl-6">
+          <div className="min-w-[90px]">
+            <p className="text-[10px] font-extrabold uppercase tracking-wider text-(--pg-muted)">Set to on</p>
+            <p className="mt-0.5 text-xl font-extrabold tabular-nums text-(--pg-ink)">{boardConnected ? activeDevices : "—"}<span className="mx-1 text-sm text-(--pg-muted)">/</span>{totalDevices}</p>
+            {!boardConnected && <p className="text-[10px] font-semibold text-(--pg-muted)">No live board link</p>}
           </div>
-        ))}
+          <div className="min-w-[115px]">
+            <p className="text-[10px] font-extrabold uppercase tracking-wider text-(--pg-muted)">Power usage</p>
+            <p className="mt-0.5 text-sm font-extrabold text-(--pg-ink)">Not measured</p>
+            <p className="text-[10px] font-semibold text-(--pg-muted)">No power meter data</p>
+          </div>
+          <div className="min-w-[130px]">
+            <p className="text-[10px] font-extrabold uppercase tracking-wider text-(--pg-muted)">Board link</p>
+            <p className={`mt-1 flex items-center gap-1.5 text-sm font-extrabold ${systemOk ? "text-(--pg-success)" : "text-(--pg-error)"}`}>
+              <span className={`h-2 w-2 shrink-0 rounded-full ${systemOk ? "bg-(--pg-success)" : "bg-(--pg-error)"}`} aria-hidden="true" />
+              {systemOk ? "Online" : "Offline"}
+            </p>
+            <p className="max-w-[170px] truncate text-[10px] font-semibold text-(--pg-muted)" title={systemMessage}>{systemMessage}</p>
+          </div>
+        </div>
       </div>
     </section>
   );

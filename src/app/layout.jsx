@@ -168,6 +168,10 @@ function ThemeInit() {
             navigator.serviceWorker.register('/sw.js').catch(function() {});
           });
         }
+        window.addEventListener('beforeinstallprompt', function(event) {
+          event.preventDefault();
+          window.__vikatechInstallPrompt = event;
+        });
       `}
     </Script>
   );

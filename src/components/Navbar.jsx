@@ -582,18 +582,18 @@ export default function Navbar() {
   const links = [
     { href: "/", label: "Dashboard", icon: LayoutGrid },
     { href: "/boards", label: "Rooms & Devices", icon: Cpu },
+    { href: "/local", label: "Local Control", icon: Zap },
     { href: "/presets", label: "Presets", icon: SlidersHorizontal },
     { href: "/schedules", label: "Schedules", icon: CalendarDays },
+    { href: "/alarms", label: "Alarms", icon: AlarmClock },
     { href: "/analytics", label: "Energy", icon: TrendingUp },
     { href: "/logs", label: "Activity Logs", icon: History },
+  ];
+  const manageLinks = [
     { href: "/settings", label: "Settings", icon: Settings },
     ...(isAdminEmail(user?.email)
       ? [{ href: "/admin", label: "Admin Settings", icon: ShieldCheck }]
       : []),
-  ];
-  const manageLinks = [
-    { href: "/local", label: "Local Control", icon: Zap },
-    { href: "/alarms", label: "Alarms", icon: AlarmClock },
   ];
   const metadata = user?.user_metadata || {};
   const fullName =

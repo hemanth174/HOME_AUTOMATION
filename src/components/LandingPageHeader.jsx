@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { Download } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 
 export default function LandingPageHeader({
@@ -13,6 +14,8 @@ export default function LandingPageHeader({
   handleScroll,
   navItems,
   router,
+  onInstallClick,
+  appInstalled,
 }) {
   const mobileNavRef = useRef(null);
 
@@ -29,10 +32,10 @@ export default function LandingPageHeader({
 
   return (
     <>
-      <header className="fixed top-0 w-full z-50 flex justify-between items-center px-4 md:px-6 py-3 md:py-4 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant">
+      <header className="fixed top-0 w-full z-50 flex justify-between items-center px-3 md:px-6 py-3 md:py-4 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant">
         <div className="flex items-center gap-2 min-w-0">
           <div
-            className="flex h-9 w-24 items-center justify-center overflow-hidden rounded-full bg-white shadow-sm select-none shrink-0 md:h-11 md:w-32"
+            className="flex h-9 w-20 items-center justify-center overflow-hidden rounded-full bg-white shadow-sm select-none shrink-0 sm:w-24 md:h-11 md:w-32"
           >
             <img
               src="/vikatech_logo.png"
@@ -86,8 +89,20 @@ export default function LandingPageHeader({
             Our Journey
           </button>
         </nav>
-        <div className="flex gap-2 md:gap-4 items-center shrink-0">
+        <div className="flex gap-1 md:gap-4 items-center shrink-0">
           <ThemeToggle />
+          {!appInstalled && (
+            <button
+              type="button"
+              onClick={onInstallClick}
+              title="Install VikaTech app"
+              aria-label="Install VikaTech app"
+              className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full border border-lp-primary-container/40 px-2.5 text-lp-primary transition-colors hover:bg-lp-primary-container/10 md:h-11 md:px-3"
+            >
+              <Download size={15} aria-hidden="true" />
+              <span className="hidden text-[11px] font-bold md:inline">Install App</span>
+            </button>
+          )}
           <button
             ref={cartRef}
             onClick={() => router.push("/contact-sales")}

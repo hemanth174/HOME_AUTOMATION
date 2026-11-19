@@ -89,6 +89,9 @@ export default function AnalyticsPage() {
     if (!isSilent) setLoading(true);
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
+    const firstReportDay = new Date(startOfToday);
+    firstReportDay.setDate(firstReportDay.getDate() - 29);
+    const firstReportDate = `${firstReportDay.getFullYear()}-${String(firstReportDay.getMonth() + 1).padStart(2, '0')}-${String(firstReportDay.getDate()).padStart(2, '0')}`;
 
     try {
       // Rollup/pruning is a maintenance action, not a live polling query.
@@ -109,7 +112,8 @@ export default function AnalyticsPage() {
         supabase.from('daily_analytics')
           .select('date, total_kwh, total_cost, avg_on_time, usage_duration, toggle_counts, peak_hours, error_rates')
           .eq('user_id', user.id)
-          .order('date', { ascending: true })
+          .gte('date', firstReportDate)
+          .order('date', { ascending: false })
           .limit(30),
         supabase.from('weekly_analytics')
           .select('week_start, week_end, total_kwh, total_cost, usage_duration, toggle_counts, peak_hours, error_rates')
@@ -129,7 +133,7 @@ export default function AnalyticsPage() {
       if (devicesRes.data) setDevices(devicesRes.data);
       if (boardsRes.data) setBoards(boardsRes.data);
       if (logsRes.data) setLogs(logsRes.data);
-      if (dailyAnalyticsRes.data) setDailyAnalytics(dailyAnalyticsRes.data);
+      if (dailyAnalyticsRes.data) setDailyAnalytics([...dailyAnalyticsRes.data].reverse());
       if (weeklyAnalyticsRes.data) setWeeklyAnalytics(weeklyAnalyticsRes.data);
       if (settingsRes.data) setUserSettings({ tariff_per_kwh: settingsRes.data.tariff_per_kwh, voltage: settingsRes.data.voltage, currency: settingsRes.data.currency });
       return true;
@@ -260,7 +264,24 @@ export default function AnalyticsPage() {
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       const boardById = new Map(boards.map((board) => [board.id, board.name]));
-      const number = (value, digits = 2) => Number(value || 0).toFixed(digits);
+      const number = (value, digits = 2) => {
+        const numeric = value === null || value === undefined ? NaN : Number(value);
+        return Number.isFinite(numeric) ? numeric.toFixed(digits) : '—';
+      };
+      const durationHours = (durationByDevice) => {
+        if (!durationByDevice || typeof durationByDevice !== 'object' || Array.isArray(durationByDevice)) return null;
+        const minutes = Object.values(durationByDevice).reduce((sum, value) => {
+          const numeric = Number(value);
+          return sum + (Number.isFinite(numeric) ? numeric : 0);
+        }, 0);
+        return minutes / 60;
+      };
+      const oldestRebuildableDay = new Date();
+      oldestRebuildableDay.setUTCDate(oldestRebuildableDay.getUTCDate() - 6);
+      const oldestRebuildableDate = oldestRebuildableDay.toISOString().slice(0, 10);
+      const unverifiedHistoricalRow = (row) =>
+        row.date < oldestRebuildableDate && Number(row.total_kwh) === 0 &&
+        Object.values(row.toggle_counts || {}).some((count) => Number(count) > 0);
       const date = (value) => value ? new Date(value).toLocaleString('en-IN') : 'Not recorded';
       const days = (value) => {
         if (!Array.isArray(value)) return value || 'Every day';
@@ -340,15 +361,17 @@ export default function AnalyticsPage() {
         number(device.kwh, 4),
       ]));
 
-      addSection('Daily Energy History (Last 30 Days)', ['Date', 'Energy kWh', 'Cost', 'Avg on-time', 'Usage duration'], dailyAnalytics.map((row) => [
-        row.date || '-', number(row.total_kwh, 4), `${userSettings.currency || 'INR'} ${number(row.total_cost, 2)}`,
-        `${number(row.avg_on_time)} hrs`, `${number(row.usage_duration)} hrs`,
-      ]));
+      addSection('Daily Energy History (Last 30 Days)', ['Date', 'Energy kWh', 'Cost', 'Avg on-time', 'Usage duration'], dailyAnalytics.map((row) =>
+        unverifiedHistoricalRow(row)
+          ? [row.date || '-', 'Unverified', 'Unverified', 'Unverified', 'Unverified']
+          : [row.date || '-', number(row.total_kwh, 4), `${userSettings.currency || 'INR'} ${number(row.total_cost, 2)}`,
+            `${number(row.avg_on_time)} hrs`, `${number(durationHours(row.usage_duration))} hrs`],
+      ));
 
       addSection('Weekly Comparison', ['Week', 'Energy kWh', 'Cost', 'Usage duration'], weeklyAnalytics.map((row) => [
         `${row.week_start || '-'} to ${row.week_end || '-'}`,
         number(row.total_kwh, 4), `${userSettings.currency || 'INR'} ${number(row.total_cost, 2)}`,
-        `${number(row.usage_duration)} hrs`,
+        `${number(durationHours(row.usage_duration))} hrs`,
       ]));
 
       addSection('Activity Log (Last 30 Days)', ['Timestamp', 'Device', 'Action', 'Triggered by'], (fullLogsRes.data || []).map((log) => [
@@ -363,6 +386,12 @@ export default function AnalyticsPage() {
       addSection('Alarms', ['Device', 'Trigger time', 'Action', 'Status'], (alarmsRes.data || []).map((alarm) => [
         alarm.devices?.name || 'Unknown', date(alarm.trigger_at), alarm.action ? 'ON' : 'OFF', alarm.fired ? 'Executed' : 'Pending',
       ]));
+
+      if (dailyAnalytics.some(unverifiedHistoricalRow)) {
+        addSection('Data note', ['Historical limits'], [[
+          'Unverified means device activity was logged, but the older stored energy total was zero. Activity logs older than seven days have been removed, so that estimate cannot be reconstructed.',
+        ]]);
+      }
 
       const totalPages = pdf.internal.getNumberOfPages();
       for (let page = 1; page <= totalPages; page += 1) {

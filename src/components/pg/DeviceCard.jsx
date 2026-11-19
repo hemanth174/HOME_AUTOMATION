@@ -104,6 +104,7 @@ export default function DeviceCard({
         <button
           role="switch"
           aria-checked={isRelayOn}
+          aria-busy={!!pending}
           aria-label={`Turn ${device.name} ${isRelayOn ? "off" : "on"}`}
           disabled={!!pending}
           title={pending ? "Syncing…" : isRelayOn ? "Turn off" : "Turn on"}
@@ -118,7 +119,11 @@ export default function DeviceCard({
             className={`absolute top-1/2 -translate-y-1/2 h-[22px] w-[22px] rounded-full bg-white shadow transition-all duration-200 ${
               isRelayOn ? "left-[calc(100%-26px)]" : "left-[3px]"
             }`}
-          />
+          >
+            {pending && (
+              <span className="absolute inset-[4px] rounded-full border-2 border-(--pg-muted)/30 border-t-(--pg-ink) animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            )}
+          </span>
         </button>
         <span className="text-[11px] font-semibold text-(--pg-muted)">
           {pending

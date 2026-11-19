@@ -479,6 +479,13 @@ export default function useDashboardData() {
       }
     }
 
+    if (!localDispatched && !cloudSynced) {
+      setDevices(prev => {
+        const restored = prev.map(d => d.id === device.id ? { ...d, is_on: device.is_on } : d);
+        try { localStorage.setItem(LOCAL_STORAGE_DEVICES, JSON.stringify(restored)); } catch {}
+        return restored;
+      });
+    }
     return { success: localDispatched || cloudSynced, localDispatched, cloudSynced, newState };
   }, [isLocalConnected, user, isClientOnline, boards]);
 
@@ -534,6 +541,16 @@ export default function useDashboardData() {
       } catch (err) {
         console.warn('Supabase global sync error:', err);
       }
+    }
+    if (!localDispatched && !cloudSynced) {
+      setDevices(prev => {
+        const restored = prev.map(d => {
+          const original = devices.find(source => source.id === d.id);
+          return original ? { ...d, is_on: original.is_on } : d;
+        });
+        try { localStorage.setItem(LOCAL_STORAGE_DEVICES, JSON.stringify(restored)); } catch {}
+        return restored;
+      });
     }
     return { success: localDispatched || cloudSynced, localDispatched, cloudSynced, newState: targetState };
   }, [isLocalConnected, user, isClientOnline, devices]);

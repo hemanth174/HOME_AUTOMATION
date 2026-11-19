@@ -2,10 +2,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import useDashboardData from "@/hooks/useDashboardData";
-import {
-  getDeviceWattage,
-  getDeviceRunHoursToday,
-} from "@/app/analytics/helpers";
 import { isBoardOnline } from "./pg/deviceKind";
 
 const readCookie = (name) => {
@@ -37,8 +33,8 @@ export default function useDashboardController() {
     setPresets,
     expandedBoards,
     setExpandedBoards,
-    controlDevice,
-    controlAll,
+    controlDevice: dispatchDevice,
+    controlAll: dispatchAll,
     isClientOnline,
     isLocalConnected,
   } = data;
@@ -56,6 +52,9 @@ export default function useDashboardController() {
   const [todayLogs, setTodayLogs] = useState([]),
     [dailyRows, setDailyRows] = useState([]);
   const carouselRef = useRef(null);
+  const commandTimesRef = useRef(new Map());
+  const inFlightRef = useRef(new Set());
+  const groupCommandAtRef = useRef(0);
   const viewCookie = user?.id && `vt_device_view_${user.id}`,
     roomCookie = user?.id && `vt_selected_room_${user.id}`;
   const showToast = useCallback((message) => setToast(message), []);
@@ -153,38 +152,79 @@ export default function useDashboardController() {
       clearInterval(timer);
     };
   }, [user]);
-  useEffect(() => {
+  const reserveCommand = useCallback((deviceIds, group = false) => {
+    const ids = [...new Set(deviceIds.map(String))];
+    const now = Date.now();
+    const storageKey = (id) => `vikatech_control_cooldown_${user?.id || "guest"}_${id}`;
+    const groupStorageKey = `vikatech_group_control_cooldown_${user?.id || "guest"}`;
+    let lastGroupCommand = groupCommandAtRef.current;
+    try { lastGroupCommand = Math.max(lastGroupCommand, Number(localStorage.getItem(groupStorageKey)) || 0); } catch {}
+    if (group && now - lastGroupCommand < 2000) {
+      throw new Error("Please wait a moment before another group command.");
+    }
+    if (ids.some((id) => {
+      let previous = commandTimesRef.current.get(id) || 0;
+      try { previous = Math.max(previous, Number(localStorage.getItem(storageKey(id))) || 0); } catch {}
+      return inFlightRef.current.has(id) || now - previous < 1500;
+    })) {
+      throw new Error("Please wait for the current device command to finish.");
+    }
+    if (group) {
+      groupCommandAtRef.current = now;
+      try { localStorage.setItem(groupStorageKey, String(now)); } catch {}
+    }
+    ids.forEach((id) => {
+      inFlightRef.current.add(id);
+      commandTimesRef.current.set(id, now);
+      try { localStorage.setItem(storageKey(id), String(now)); } catch {}
+    });
     setPending((current) => {
       const next = { ...current };
-      Object.keys(next).forEach((id) => {
-        const device = devices.find((d) => String(d.id) === id);
-        if (device?.is_on === next[id]) delete next[id];
-      });
+      ids.forEach((id) => { next[id] = true; });
       return next;
     });
-  }, [devices]);
-  useEffect(() => {
-    if (!Object.keys(pending).length) return;
-    const timer = setTimeout(() => setPending({}), 6000);
-    return () => clearTimeout(timer);
-  }, [pending]);
+    return { ids, startedAt: now };
+  }, [user?.id]);
+  const releaseCommand = useCallback(async ({ ids, startedAt }) => {
+    const remaining = 450 - (Date.now() - startedAt);
+    if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+    ids.forEach((id) => inFlightRef.current.delete(id));
+    setPending((current) => {
+      const next = { ...current };
+      ids.forEach((id) => { delete next[id]; });
+      return next;
+    });
+  }, []);
+  const controlDevice = useCallback(async (device, desired, source) => {
+    const reservation = reserveCommand([device.id]);
+    try {
+      const result = await dispatchDevice(device, desired, source);
+      if (!result.success) throw new Error(`Could not reach ${device.name}. Please retry.`);
+      return result;
+    } finally {
+      await releaseCommand(reservation);
+    }
+  }, [dispatchDevice, reserveCommand, releaseCommand]);
+  const controlAll = useCallback(async (action, source) => {
+    const reservation = reserveCommand(devices.map((device) => device.id), true);
+    try {
+      const result = await dispatchAll(action, source);
+      if (!result.success) throw new Error("Could not reach the devices. Please retry.");
+      return result;
+    } finally {
+      await releaseCommand(reservation);
+    }
+  }, [devices, dispatchAll, reserveCommand, releaseCommand]);
   const toggleDevice = useCallback(
     async (device) => {
-      if (!device || pending[device.id]) return;
-      const desired = !device.is_on;
-      setPending((p) => ({ ...p, [device.id]: desired }));
+      if (!device) return;
       try {
-        await controlDevice(device, desired, "Manual Dashboard Switch");
+        await controlDevice(device, !device.is_on, "Manual Dashboard Switch");
       } catch (error) {
         showToast(error?.message || "Device update failed. Please retry.");
-        setPending((p) => {
-          const next = { ...p };
-          delete next[device.id];
-          return next;
-        });
       }
     },
-    [pending, controlDevice, showToast],
+    [controlDevice, showToast],
   );
   const applyPreset = useCallback(
     async (preset, deactivate = false) => {
@@ -195,20 +235,41 @@ export default function useDashboardController() {
         } catch {
           actions = [];
         }
-      if (!Array.isArray(actions) || !actions.length)
-        return showToast(`Preset ${preset.name} has no saved device actions.`);
-      for (const action of actions) {
-        const device = devices.find((d) => d.id === action.device_id);
-        if (device)
-          await controlDevice(
+      if (!Array.isArray(actions) || !actions.length) {
+        showToast(`Preset ${preset.name} has no saved device actions.`);
+        return { success: false, succeeded: 0 };
+      }
+      const targets = actions.map((action) => ({
+        action,
+        device: devices.find((device) => String(device.id) === String(action.device_id)),
+      })).filter(({ device }) => device);
+      if (!targets.length) {
+        showToast(`Preset ${preset.name} has no available devices.`);
+        return { success: false, succeeded: 0 };
+      }
+      let reservation;
+      let succeeded = 0;
+      try {
+        reservation = reserveCommand(targets.map(({ device }) => device.id), true);
+        for (const { action, device } of targets) {
+          const result = await dispatchDevice(
             device,
             deactivate ? !action.is_on : action.is_on,
             `Preset: ${preset.name}`,
           );
+          if (!result.success) throw new Error(`Could not reach ${device.name}. Please retry.`);
+          succeeded += 1;
+        }
+        showToast(`${deactivate ? "Deactivated" : "Activated"}: ${preset.name}`);
+        return { success: true, succeeded };
+      } catch (error) {
+        showToast(error?.message || `Could not apply ${preset.name}.`);
+        return { success: false, succeeded };
+      } finally {
+        if (reservation) await releaseCommand(reservation);
       }
-      showToast(`${deactivate ? "Deactivated" : "Activated"}: ${preset.name}`);
     },
-    [devices, controlDevice, showToast],
+    [devices, dispatchDevice, reserveCommand, releaseCommand, showToast],
   );
   const isPresetActive = useCallback(
     (preset) => {
@@ -236,40 +297,39 @@ export default function useDashboardController() {
     },
     [setPresets, showToast],
   );
-  const turnAllDevicesOn = useCallback(
-    () =>
-      devices.length
-        ? controlAll("on", "Global Dashboard").then(() =>
-            showToast("All devices turned ON"),
-          )
-        : showToast(
-            "No devices available to turn ON. Please add a board first.",
-          ),
-    [devices, controlAll, showToast],
-  );
-  const turnAllDevicesOff = useCallback(
-    () =>
-      devices.length
-        ? controlAll("off", "Global Dashboard").then(() =>
-            showToast("All devices turned OFF"),
-          )
-        : showToast(
-            "No devices available to turn OFF. Please add a board first.",
-          ),
-    [devices, controlAll, showToast],
-  );
+  const turnAllDevicesOn = useCallback(async () => {
+    if (!devices.length) return showToast("No devices available to turn ON. Please add a board first.");
+    try {
+      await controlAll("on", "Global Dashboard");
+      showToast("All devices turned ON");
+    } catch (error) { showToast(error.message); }
+  }, [devices, controlAll, showToast]);
+  const turnAllDevicesOff = useCallback(async () => {
+    if (!devices.length) return showToast("No devices available to turn OFF. Please add a board first.");
+    try {
+      await controlAll("off", "Global Dashboard");
+      showToast("All devices turned OFF");
+    } catch (error) { showToast(error.message); }
+  }, [devices, controlAll, showToast]);
   const boardControl = useCallback(
     async (id, name, on) => {
       const list = getDevicesForBoard(id);
       if (!list.length) return showToast(`No devices found on ${name}`);
-      await Promise.all(
-        list.map((d) =>
-          controlDevice(d, on, `Board All ${on ? "ON" : "OFF"}: ${name}`),
-        ),
-      );
-      showToast(`All devices on ${name} turned ${on ? "ON" : "OFF"}`);
+      let reservation;
+      try {
+        reservation = reserveCommand(list.map((device) => device.id), true);
+        const results = await Promise.all(list.map((device) =>
+          dispatchDevice(device, on, `Board All ${on ? "ON" : "OFF"}: ${name}`),
+        ));
+        if (results.some((result) => !result.success)) throw new Error(`Could not reach every device on ${name}.`);
+        showToast(`All devices on ${name} turned ${on ? "ON" : "OFF"}`);
+      } catch (error) {
+        showToast(error?.message || `Could not control ${name}.`);
+      } finally {
+        if (reservation) await releaseCommand(reservation);
+      }
     },
-    [getDevicesForBoard, controlDevice, showToast],
+    [getDevicesForBoard, dispatchDevice, reserveCommand, releaseCommand, showToast],
   );
   const addBoard = useCallback(
     async (e) => {
@@ -347,20 +407,7 @@ export default function useDashboardController() {
     selectedRoomExpanded,
   ]);
   const activeCount = devices.filter((d) => d.is_on).length,
-    onlineBoards = boards.filter(isBoardOnline),
-    liveWatts = Math.round(
-      devices.reduce(
-        (sum, d) => sum + (d.is_on ? getDeviceWattage(d.name) : 0),
-        0,
-      ),
-    ),
-    energyKwhToday = devices.reduce(
-      (sum, d) =>
-        sum +
-        (getDeviceWattage(d.name) * getDeviceRunHoursToday(d, todayLogs)) /
-          1000,
-      0,
-    );
+    onlineBoards = boards.filter(isBoardOnline);
   const statusMessage = useMemo(() => {
     if (!isClientOnline && !isLocalConnected) {
       return [
@@ -376,13 +423,19 @@ export default function useDashboardController() {
         { text: " to get started." },
       ];
     }
+    if (onlineBoards.length === 0) {
+      return [
+        { text: "No room controllers online", tone: "error" },
+        { text: " — live device state is unavailable." },
+      ];
+    }
     const deviceLabel = devices.length === 1 ? "device" : "devices";
     const roomLabel = boards.length === 1 ? "room" : "rooms";
     return [
       { text: String(activeCount), tone: "accent" },
       { text: " of " },
       { text: String(devices.length), tone: "accent" },
-      { text: ` ${deviceLabel} on \u2192 ` },
+      { text: ` ${deviceLabel} set to on \u2192 ` },
       { text: String(onlineBoards.length), tone: "accent" },
       { text: " of " },
       { text: String(boards.length), tone: "accent" },
@@ -425,22 +478,22 @@ export default function useDashboardController() {
     changeDeviceView,
     dashboardViewSwitcherEnabled,
     pending,
+    controlDevice,
+    controlAll,
     toggleDevice,
     todayLogs,
     dailyRows,
     activeCount,
     onlineBoards,
-    liveWatts,
-    energyKwhToday,
     statusMessage,
     systemOk:
-      isClientOnline &&
+      (isClientOnline || isLocalConnected) &&
       boards.length > 0 &&
       onlineBoards.length === boards.length,
     systemMessage:
-      onlineBoards.length === boards.length
-        ? "All rooms responding"
-        : `${boards.length - onlineBoards.length} rooms offline`,
+      onlineBoards.length === boards.length && boards.length > 0
+        ? "Recent board heartbeat"
+        : `${boards.length - onlineBoards.length} of ${boards.length} rooms offline`,
     hasPresets: presets.length > 0,
     hasEnergyHistory: dailyRows.some((r) => Number(r.total_kwh || 0) > 0),
     selectBoard,

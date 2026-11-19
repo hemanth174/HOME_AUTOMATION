@@ -63,22 +63,22 @@ export default function EnergyPanel({ dailyRows }) {
   const hasData = data.some((d) => d.kwh > 0);
 
   return (
-    <section aria-label="Energy usage" className="rounded-2xl border border-(--pg-line) bg-(--pg-card) p-4 sm:p-5 h-full">
-      <div className="flex items-center justify-between gap-2 mb-1">
-        <div>
+    <section aria-label="Energy usage" className="h-full w-full min-w-0 max-w-full overflow-hidden rounded-2xl border border-(--pg-line) bg-(--pg-card) p-4 sm:p-5">
+      <div className="mb-1 flex min-w-0 flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <h2 className="text-base font-extrabold tracking-tight text-(--pg-ink)">Energy Usage</h2>
           <p className="text-[11px] font-semibold text-(--pg-muted) mt-0.5">
             Estimated from device activity · kWh
           </p>
         </div>
-        <div className="flex rounded-xl border border-(--pg-line) bg-(--pg-faint) p-0.5" role="tablist" aria-label="Range">
+        <div className="flex w-full min-w-0 rounded-xl border border-(--pg-line) bg-(--pg-faint) p-0.5 sm:w-auto" role="tablist" aria-label="Range">
           {RANGES.map((r) => (
             <button
               key={r.key}
               role="tab"
               aria-selected={range === r.key}
               onClick={() => setRange(r.key)}
-              className={`min-h-[32px] px-3 rounded-[10px] text-[11px] font-extrabold transition-all cursor-pointer ${
+              className={`min-h-[36px] min-w-0 flex-1 rounded-[10px] px-2 text-[11px] font-extrabold transition-all cursor-pointer sm:min-h-[32px] sm:flex-none sm:px-3 ${
                 range === r.key ? 'bg-(--pg-card) text-(--pg-deep) shadow-sm border border-(--pg-line)' : 'text-(--pg-muted) hover:text-(--pg-ink)'
               }`}
             >
@@ -100,9 +100,9 @@ export default function EnergyPanel({ dailyRows }) {
           </p>
         </div>
       ) : (
-        <div className="h-[220px] w-full mt-2">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -12 }}>
+        <div className="mt-2 h-[220px] w-full min-w-0 max-w-full overflow-hidden">
+          <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+            <AreaChart data={data} margin={{ top: 4, right: 12, bottom: 0, left: -12 }}>
               <defs>
                 <linearGradient id="pgKwh" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="var(--pg-brand)" stopOpacity={0.28} />
@@ -112,6 +112,8 @@ export default function EnergyPanel({ dailyRows }) {
               <CartesianGrid stroke="var(--pg-line)" vertical={false} />
               <XAxis
                 dataKey="name"
+                interval="preserveStartEnd"
+                minTickGap={8}
                 tick={{ fontSize: 10, fontWeight: 700, fill: 'var(--pg-muted)' }}
                 axisLine={false}
                 tickLine={false}

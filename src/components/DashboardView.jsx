@@ -28,12 +28,13 @@ import { isBoardOnline } from "@/components/pg/deviceKind";
 export default function DashboardView({ c }) {
   if (c.loading) return <Loader message="Loading VikaTech Dashboard..." />;
 
-  const button = (label, Icon, onClick) => (
+  const button = (label, Icon, onClick, disabled = false) => (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-label={label}
-      className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-xl border border-(--pg-line) bg-(--pg-card) px-3.5 text-xs font-extrabold text-(--pg-ink) cursor-pointer"
+      className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-xl border border-(--pg-line) bg-(--pg-card) px-3.5 text-xs font-extrabold text-(--pg-ink) cursor-pointer disabled:cursor-wait disabled:opacity-60"
     >
       <Icon size={14} />
       <span className="max-sm:hidden">{label}</span>
@@ -52,6 +53,7 @@ export default function DashboardView({ c }) {
 
   const selectedBoard = c.selectedBoard;
   const selectedDevices = c.selectedDevices;
+  const commandBusy = Object.keys(c.pending).length > 0;
   const roomExpanded = selectedBoard
     ? c.expandedBoards?.[selectedBoard.id] !== false
     : true;
@@ -182,7 +184,7 @@ export default function DashboardView({ c }) {
 
   return (
     <>
-      <div className="dashboard-container animate-fade-up">
+      <div className="dashboard-container min-w-0 max-w-full animate-fade-up">
         <OverviewCards
           userName={
             c.user?.user_metadata?.full_name ||
@@ -192,9 +194,7 @@ export default function DashboardView({ c }) {
           statusMessage={c.statusMessage}
           totalDevices={c.devices.length}
           activeDevices={c.activeCount}
-          energyKwhToday={c.energyKwhToday}
-          energyAvailable={c.devices.length > 0}
-          liveWatts={c.liveWatts}
+          boardConnected={c.systemOk}
           systemOk={c.systemOk}
           systemMessage={c.systemMessage}
         />
@@ -270,19 +270,11 @@ export default function DashboardView({ c }) {
                     ) : null}
 
                     {button("Room On", Power, () =>
-                      c.boardControl(
-                        selectedBoard.id,
-                        selectedBoard.name,
-                        true,
-                      ),
-                    )}
+                      c.boardControl(selectedBoard.id, selectedBoard.name, true),
+                    commandBusy)}
                     {button("Room Off", PowerOff, () =>
-                      c.boardControl(
-                        selectedBoard.id,
-                        selectedBoard.name,
-                        false,
-                      ),
-                    )}
+                      c.boardControl(selectedBoard.id, selectedBoard.name, false),
+                    commandBusy)}
                     <button
                       onClick={() => {
                         c.setEditingBoardObj(selectedBoard);
@@ -344,7 +336,7 @@ export default function DashboardView({ c }) {
                             device={device}
                             roomName={selectedBoard.name}
                             boardOnline={isBoardOnline(selectedBoard)}
-                            pending={c.pending[device.id] !== undefined}
+                            pending={Boolean(c.pending[device.id])}
                             onToggle={() => c.toggleDevice(device)}
                             carousel={c.deviceView === "carousel"}
                             draggable={c.deviceView === "list"}
@@ -363,8 +355,8 @@ export default function DashboardView({ c }) {
                       <span className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-(--pg-muted) mr-1">
                         Property
                       </span>
-                      {button("All On", Power, c.turnAllDevicesOn)}
-                      {button("All Off", PowerOff, c.turnAllDevicesOff)}
+                      {button("All On", Power, c.turnAllDevicesOn, commandBusy)}
+                      {button("All Off", PowerOff, c.turnAllDevicesOff, commandBusy)}
                       {c.deviceView === "carousel" && (
                         <div className="ml-auto flex items-center gap-1.5 sm:hidden">
                           <button
@@ -405,21 +397,35 @@ export default function DashboardView({ c }) {
                   <Plus size={14} />
                   Add Room
                 </button>
+                {c.hasPresets && (
+                  <div className="mt-5 hidden lg:block">
+                    <QuickPresets
+                      presets={c.presets}
+                      isPresetActive={c.isPresetActive}
+                      applyPreset={c.applyPreset}
+                      deletePreset={c.deletePreset}
+                      pending={c.pending}
+                    />
+                  </div>
+                )}
               </div>
 
             </div>
 
             {(c.hasPresets || c.hasEnergyHistory) && (
-              <div className="grid gap-4 lg:grid-cols-2 mt-4">
+              <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2">
                 {c.hasPresets && (
-                  <QuickPresets
-                    presets={c.presets}
-                    isPresetActive={c.isPresetActive}
-                    applyPreset={c.applyPreset}
-                    deletePreset={c.deletePreset}
-                  />
+                  <div className="min-w-0 lg:hidden">
+                    <QuickPresets
+                      presets={c.presets}
+                      isPresetActive={c.isPresetActive}
+                      applyPreset={c.applyPreset}
+                      deletePreset={c.deletePreset}
+                      pending={c.pending}
+                    />
+                  </div>
                 )}
-                {c.hasEnergyHistory && <EnergyPanel dailyRows={c.dailyRows} />}
+                {c.hasEnergyHistory && <div className="min-w-0 lg:col-span-2"><EnergyPanel dailyRows={c.dailyRows} /></div>}
               </div>
             )}
 

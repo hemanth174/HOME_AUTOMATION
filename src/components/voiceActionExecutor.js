@@ -24,12 +24,14 @@ export async function executeVoiceAction(result, { getLatestDevices, applyPreset
         }
 
         if (controlDevice) {
-          const commandResult = await controlDevice(device, isOn, 'Voice Command (AI)');
-          if (!commandResult?.success) {
-            provideFeedback(`Could not turn ${device.name} ${isOn ? 'on' : 'off'}. Please try again.`);
-            break;
+          try {
+            const commandResult = await controlDevice(device, isOn, 'Voice Command (AI)');
+            provideFeedback(commandResult?.success
+              ? `${device.name} turned ${isOn ? 'on' : 'off'}`
+              : `Could not turn ${device.name} ${isOn ? 'on' : 'off'}. Please try again.`);
+          } catch (error) {
+            safeToast(error?.message || `Could not control ${device.name}. Please retry.`);
           }
-          provideFeedback(`${device.name} turned ${isOn ? 'on' : 'off'}`);
           break;
         }
 
@@ -72,12 +74,14 @@ export async function executeVoiceAction(result, { getLatestDevices, applyPreset
 
       case 'TOGGLE_ALL': {
         if (controlAll) {
-          const commandResult = await controlAll(isOn ? 'on' : 'off', 'Voice Command (AI)');
-          if (!commandResult?.success) {
-            provideFeedback(`Could not turn all devices ${isOn ? 'on' : 'off'}. Please try again.`);
-            break;
+          try {
+            const commandResult = await controlAll(isOn ? 'on' : 'off', 'Voice Command (AI)');
+            provideFeedback(commandResult?.success
+              ? `All devices turned ${isOn ? 'on' : 'off'}`
+              : `Could not turn all devices ${isOn ? 'on' : 'off'}. Please try again.`);
+          } catch (error) {
+            safeToast(error?.message || 'Could not control all devices. Please retry.');
           }
-          provideFeedback(`All devices turned ${isOn ? 'on' : 'off'}`);
           break;
         }
 
