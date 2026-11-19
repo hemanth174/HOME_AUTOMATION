@@ -90,7 +90,9 @@ export default function NavbarMobileMenu({
         }}
         className="fixed bottom-0 left-0 right-0 max-h-[80vh] border-t border-border bg-card rounded-t-[24px] z-50 md:hidden flex flex-col select-none overflow-hidden"
       >
-        <div className="w-12 h-1 bg-border rounded-full mx-auto my-3.5 cursor-grab active:cursor-grabbing touch-none shrink-0" />
+        <div data-sheet-handle="1" className="flex h-9 shrink-0 cursor-grab touch-none items-center justify-center active:cursor-grabbing" aria-label="Drag down to close menu">
+          <span className="h-1 w-12 rounded-full bg-border" aria-hidden="true" />
+        </div>
         <div
           ref={sheetContentRef}
           className="overflow-y-auto px-4 pb-8 flex flex-col gap-5"
