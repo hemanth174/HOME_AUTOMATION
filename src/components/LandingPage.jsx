@@ -240,8 +240,8 @@ export default function LandingPage() {
         </aside>
       )}
       {showInstallHelp && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowInstallHelp(false)}>
-          <div role="dialog" aria-modal="true" aria-labelledby="install-help-title" className="w-full max-w-sm rounded-2xl border border-lp-outline-variant bg-lp-surface-low p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="vt-desktop-drawer fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowInstallHelp(false)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="install-help-title" className="vt-desktop-drawer-panel w-full max-w-sm rounded-2xl border border-lp-outline-variant bg-lp-surface-low p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2"><Download size={18} className="text-lp-primary" /><h2 id="install-help-title" className="text-base font-bold">Install VikaTech</h2></div>
               <button type="button" onClick={() => setShowInstallHelp(false)} aria-label="Close install instructions" className="rounded-lg p-1 text-lp-on-surface-variant hover:bg-white/10"><X size={18} /></button>

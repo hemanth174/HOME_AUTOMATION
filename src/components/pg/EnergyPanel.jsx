@@ -125,9 +125,9 @@ export default function EnergyPanel({ dailyRows }) {
                 width={44}
               />
               <Tooltip
-                contentStyle={{ backgroundColor: 'var(--bg-card-alt)', border: '1px solid var(--border)', borderRadius: '10px', padding: '8px 12px' }}
-                labelStyle={{ color: 'var(--text)', fontSize: '11px', fontWeight: 'bold' }}
-                itemStyle={{ color: '#ffffff', fontSize: '11px', fontWeight: '600' }}
+                contentStyle={{ backgroundColor: 'var(--pg-card)', border: '1px solid var(--pg-line)', borderRadius: '10px', padding: '8px 12px', boxShadow: '0 8px 24px rgba(0, 0, 0, 0.14)' }}
+                labelStyle={{ color: 'var(--pg-ink)', fontSize: '11px', fontWeight: 'bold' }}
+                itemStyle={{ color: 'var(--pg-ink)', fontSize: '11px', fontWeight: '600' }}
                 formatter={(v) => [`${Number(v).toFixed(3)} kWh`, 'Usage']}
               />
               <Area type="monotone" dataKey="kwh" stroke="var(--pg-brand)" strokeWidth={2.5} fill="url(#pgKwh)" />

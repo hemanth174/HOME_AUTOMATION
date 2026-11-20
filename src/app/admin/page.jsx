@@ -558,11 +558,11 @@ export default function AdminPage() {
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+          className="vt-desktop-drawer fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4"
           onClick={() => setDenyTarget(null)}
         >
           <div
-            className="w-full max-w-lg rounded-t-3xl border border-border bg-card p-5 shadow-2xl animate-slide-up sm:rounded-2xl sm:p-6"
+            className="vt-desktop-drawer-panel w-full max-w-lg rounded-t-3xl border border-border bg-card p-5 shadow-2xl animate-slide-up sm:rounded-2xl sm:p-6"
             onClick={(event) => event.stopPropagation()}
           >
             {/* Mobile Drag Handle Indicator */}

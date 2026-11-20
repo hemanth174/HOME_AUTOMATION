@@ -680,7 +680,7 @@ export default function AnalyticsPage() {
       {/* Power Calculation & System Guide Modal */}
       {showPowerGuide && (
         <div
-          className="fixed inset-0 z-[10000] flex items-end justify-center bg-black/75 p-0 backdrop-blur-md animate-fade-in sm:p-4"
+          className="vt-desktop-drawer fixed inset-0 z-[10000] flex items-end justify-center bg-black/75 p-0 backdrop-blur-md animate-fade-in sm:p-4"
           onClick={closePowerGuide}
         >
           <div
@@ -688,7 +688,7 @@ export default function AnalyticsPage() {
             aria-modal="true"
             aria-labelledby="power-guide-title"
             data-sheet-drag-owner="1"
-            className="flex w-full max-h-[88svh] flex-col overflow-hidden rounded-t-[28px] border border-border bg-card p-5 text-left shadow-2xl sm:w-[min(100%,620px)] sm:rounded-[24px] sm:p-6"
+            className="vt-desktop-drawer-panel flex w-full max-h-[88svh] flex-col overflow-hidden rounded-t-[28px] border border-border bg-card p-5 text-left shadow-2xl sm:w-[min(100%,620px)] sm:rounded-[24px] sm:p-6"
             style={{
               transform: `translateY(${powerGuideY}px)`,
               transition: isPowerGuideDragging ? "none" : "transform 280ms cubic-bezier(0.16, 1, 0.3, 1)",
@@ -772,7 +772,7 @@ export default function AnalyticsPage() {
 
       {showPdfConfirm && (
         <div
-          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm max-md:items-end max-md:p-0"
+          className="vt-desktop-drawer fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm max-md:items-end max-md:p-0"
           onClick={() => { if (!pdfBusy) setShowPdfConfirm(false); }}
         >
           <div
@@ -780,7 +780,7 @@ export default function AnalyticsPage() {
             aria-modal="true"
             aria-labelledby="pdf-confirm-title"
             aria-describedby="pdf-confirm-description"
-            className="flex w-[min(100%,410px)] flex-col gap-4 rounded-[22px] border border-border bg-card p-5 text-left shadow-2xl max-md:w-full max-md:rounded-b-none max-md:rounded-t-[24px] max-md:p-6 max-md:pb-[calc(1.5rem+env(safe-area-inset-bottom))]"
+            className="vt-desktop-drawer-panel flex w-[min(100%,410px)] flex-col gap-4 rounded-[22px] border border-border bg-card p-5 text-left shadow-2xl max-md:w-full max-md:rounded-b-none max-md:rounded-t-[24px] max-md:p-6 max-md:pb-[calc(1.5rem+env(safe-area-inset-bottom))]"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="mx-auto -mt-1 hidden h-1 w-12 rounded-full bg-border max-md:block" />

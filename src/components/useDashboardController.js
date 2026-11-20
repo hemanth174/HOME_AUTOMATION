@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import useDashboardData from "@/hooks/useDashboardData";
-import { getDeviceWattage } from "@/app/analytics/helpers";
+import { getDeviceWattage, getDeviceRunHoursToday } from "@/app/analytics/helpers";
 import { isBoardOnline } from "./pg/deviceKind";
 
 const readCookie = (name) => {
@@ -52,6 +52,7 @@ export default function useDashboardController() {
     [pending, setPending] = useState({});
   const [collapseCookieReady, setCollapseCookieReady] = useState(null);
   const [todayLogs, setTodayLogs] = useState([]),
+    [energyLogs, setEnergyLogs] = useState([]),
     [dailyRows, setDailyRows] = useState([]);
   const carouselRef = useRef(null);
   const commandTimesRef = useRef(new Map());
@@ -144,7 +145,9 @@ export default function useDashboardController() {
     if (!user) return;
     let active = true;
     const fetchHistory = async () => {
-      const [logs, daily] = await Promise.all([
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const [logs, energy, daily] = await Promise.all([
         supabase
           .from("activity_logs")
           .select(
@@ -154,6 +157,13 @@ export default function useDashboardController() {
           .order("created_at", { ascending: false })
           .limit(200),
         supabase
+          .from("activity_logs")
+          .select("created_at, action, device_id")
+          .eq("user_id", user.id)
+          .gte("created_at", startOfToday.toISOString())
+          .order("created_at", { ascending: false })
+          .limit(1000),
+        supabase
           .from("daily_analytics")
           .select("date, total_kwh")
           .eq("user_id", user.id)
@@ -162,6 +172,7 @@ export default function useDashboardController() {
       ]);
       if (active) {
         if (logs.data) setTodayLogs(logs.data);
+        if (energy.data) setEnergyLogs(energy.data);
         if (daily.data) setDailyRows(daily.data);
       }
     };
@@ -434,6 +445,13 @@ export default function useDashboardController() {
         watts + (device.is_on && onlineBoardIds.has(device.board_id)
           ? getDeviceWattage(device.name || "") : 0), 0))
     : null;
+  const estimatedEnergyTodayKwh = onlineBoards.length
+    ? devices.reduce((kwh, device) => kwh + (
+        onlineBoardIds.has(device.board_id)
+          ? getDeviceWattage(device.name || "") * getDeviceRunHoursToday(device, energyLogs) / 1000
+          : 0
+      ), 0)
+    : null;
   const statusMessage = useMemo(() => {
     if (!isClientOnline && !isLocalConnected) {
       return [
@@ -512,6 +530,7 @@ export default function useDashboardController() {
     activeCount,
     onlineBoards,
     estimatedLoadWatts,
+    estimatedEnergyTodayKwh,
     statusMessage,
     systemOk:
       (isClientOnline || isLocalConnected) &&

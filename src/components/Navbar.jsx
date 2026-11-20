@@ -1699,12 +1699,12 @@ export default function Navbar() {
       />{" "}
       {showLogoutModal && (
         <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in"
+          className="vt-desktop-drawer fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in"
           onClick={() => setShowLogoutModal(false)}
         >
           {" "}
           <div
-            className="bg-card border border-border rounded-[18px] p-6 w-[min(100%-40px,360px)] shadow-2xl flex flex-col gap-4"
+            className="vt-desktop-drawer-panel bg-card border border-border rounded-[18px] p-6 w-[min(100%-40px,360px)] shadow-2xl flex flex-col gap-4"
             onClick={(e) => e.stopPropagation()}
           >
             {" "}

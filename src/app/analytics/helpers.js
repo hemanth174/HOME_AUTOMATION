@@ -12,62 +12,54 @@ export const getDeviceWattage = (name) => {
   return 60; // default wattage
 };
 
-// Real calculations: Compute actual duration (in hours) a device has been running today
-export const getDeviceRunHoursToday = (device, deviceLogs) => {
-  let totalMs = 0;
-  const now = new Date();
-  const startOfToday = new Date();
+// Reconstruct only intervals supported by a state change or a known
+// last_changed timestamp. Missing logs must never imply a whole day of use.
+export const getDeviceRunHoursToday = (device, deviceLogs, currentTime = new Date()) => {
+  const now = new Date(currentTime).getTime();
+  if (!Number.isFinite(now)) return 0;
+  const startOfToday = new Date(now);
   startOfToday.setHours(0, 0, 0, 0);
+  const dayStart = startOfToday.getTime();
+  const lastChanged = device.last_changed ? new Date(device.last_changed).getTime() : NaN;
+  const logs = (deviceLogs || [])
+    .filter((log) => String(log.device_id) === String(device.id))
+    .map((log) => ({ time: new Date(log.created_at).getTime(), action: String(log.action || '').toLowerCase() }))
+    .filter((log) => Number.isFinite(log.time) && log.time <= now)
+    .sort((a, b) => a.time - b.time);
+  const stateOf = (action) => {
+    if (/\b(off|deactivate|disabled)\b/.test(action)) return false;
+    if (/\b(on|activate|enabled)\b/.test(action)) return true;
+    return null;
+  };
 
-  // Filter logs for this device
-  const dLogs = deviceLogs.filter(l => l.device_id === device.id);
-
-  if (dLogs.length === 0) {
-    if (device.is_on) {
-      // Device is currently ON and has been ON all day (or since last_changed)
-      const lastChanged = device.last_changed ? new Date(device.last_changed) : startOfToday;
-      const startTime = Math.max(lastChanged.getTime(), startOfToday.getTime());
-      return Math.max(0, (now.getTime() - startTime) / (1000 * 60 * 60));
-    }
-    return 0;
-  }
-
-  // Process logs chronologically to reconstruct state intervals
-  let isCurrentlyOn = false;
-  let lastOnTime = null;
-
-  // If the first log of today is a "turn OFF" action, it implies it was ON from midnight
-  if (dLogs[0].action?.toLowerCase().includes('off')) {
-    isCurrentlyOn = true;
-    lastOnTime = startOfToday.getTime();
-  }
-
-  for (const log of dLogs) {
-    const logTime = new Date(log.created_at).getTime();
-    const isOnAction = log.action?.toLowerCase().includes('on') || log.action?.toLowerCase().includes('activate');
-
-    if (isOnAction) {
-      if (!isCurrentlyOn) {
-        isCurrentlyOn = true;
-        lastOnTime = logTime;
-      }
-    } else {
-      if (isCurrentlyOn) {
-        isCurrentlyOn = false;
-        if (lastOnTime !== null) {
-          totalMs += Math.max(0, logTime - lastOnTime);
-        }
-        lastOnTime = null;
-      }
+  const prior = [...logs].reverse().find((log) => log.time < dayStart && stateOf(log.action) !== null);
+  let onSince = prior && stateOf(prior.action) === true ? dayStart : null;
+  let totalMs = 0;
+  for (const log of logs) {
+    if (log.time < dayStart) continue;
+    const state = stateOf(log.action);
+    if (state === true && onSince === null) onSince = log.time;
+    if (state === false && onSince !== null) {
+      totalMs += Math.max(0, log.time - onSince);
+      onSince = null;
     }
   }
 
-  // If the device is still ON, add time from last switch until now
-  if (isCurrentlyOn && lastOnTime !== null) {
-    totalMs += Math.max(0, now.getTime() - lastOnTime);
+  if (onSince !== null) {
+    const end = device.is_on
+      ? now
+      : Number.isFinite(lastChanged)
+        ? Math.min(now, Math.max(onSince, lastChanged))
+        : onSince;
+    totalMs += Math.max(0, end - onSince);
+  } else if (device.is_on && Number.isFinite(lastChanged) && lastChanged <= now) {
+    const lastOff = [...logs].reverse().find((log) => log.time >= dayStart && stateOf(log.action) === false);
+    if (!lastOff || lastChanged > lastOff.time) {
+      totalMs += Math.max(0, now - Math.max(dayStart, lastChanged));
+    }
   }
 
-  return totalMs / (1000 * 60 * 60);
+  return Math.min(now - dayStart, totalMs) / 3_600_000;
 };
 
 // Helper to calculate exact milliseconds of device activity inside a specific window

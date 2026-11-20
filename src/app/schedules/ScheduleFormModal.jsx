@@ -32,11 +32,11 @@ export default function ScheduleFormModal({ state }) {
 
   return (
     <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md animate-scale-in max-md:items-end max-md:p-0"
+      className="vt-desktop-drawer fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md animate-scale-in max-md:items-end max-md:p-0"
       onClick={closeModal}
     >
       <div
-        className="max-h-[88vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl animate-fade-up max-md:w-full max-md:max-h-[92vh] max-md:rounded-t-[24px] max-md:rounded-b-none max-md:pb-10"
+        className="vt-desktop-drawer-panel max-h-[88vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl animate-fade-up max-md:w-full max-md:max-h-[92vh] max-md:rounded-t-[24px] max-md:rounded-b-none max-md:pb-10"
         onClick={(event) => event.stopPropagation()}
       >
         <div data-sheet-drag-zone="1" className="shrink-0 touch-none">

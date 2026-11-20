@@ -5,8 +5,8 @@ export function AlarmModal({ manager }) {
   const { showModal, closeModal, editingAlarm, selectedDevice, devices, addAlarm, pickerParts, handlePartsChange, dateError, confirmed, previewDisplay, handleConfirmDateTime, alarmAction, setAlarmAction, isSaving, alarmDraftChanged } = manager;
   if (!showModal) return null;
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md max-md:items-end max-md:p-0" onClick={closeModal}>
-      <div className="max-h-[88vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl max-md:w-full max-md:max-h-[92vh] max-md:rounded-t-[24px] max-md:rounded-b-none" onClick={(event) => event.stopPropagation()}>
+    <div className="vt-desktop-drawer fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-[22px] backdrop-blur-md max-md:items-end max-md:p-0" onClick={closeModal}>
+      <div className="vt-desktop-drawer-panel max-h-[88vh] w-[min(100%,440px)] overflow-auto rounded-[18px] border border-border bg-card p-6 shadow-2xl max-md:w-full max-md:max-h-[92vh] max-md:rounded-t-[24px] max-md:rounded-b-none" onClick={(event) => event.stopPropagation()}>
         <div data-sheet-drag-zone="1" className="shrink-0 touch-none">
           <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto mb-5 active:cursor-grabbing" />
           <div className="flex items-center justify-between mb-4">
@@ -64,8 +64,8 @@ export function AlarmModal({ manager }) {
 export function DeleteAllModal({ alarms, show, onClose, onDelete }) {
   if (!show) return null;
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 max-md:items-end max-md:p-0" onClick={onClose}>
-      <div className="bg-card border border-border rounded-[18px] p-6 w-[min(100%-40px,360px)] shadow-2xl flex flex-col gap-4 max-md:w-full max-md:rounded-b-none max-md:rounded-t-[24px] max-md:pb-8" onClick={(event) => event.stopPropagation()}>
+    <div className="vt-desktop-drawer fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 max-md:items-end max-md:p-0" onClick={onClose}>
+      <div className="vt-desktop-drawer-panel bg-card border border-border rounded-[18px] p-6 w-[min(100%-40px,360px)] shadow-2xl flex flex-col gap-4 max-md:w-full max-md:rounded-b-none max-md:rounded-t-[24px] max-md:pb-8" onClick={(event) => event.stopPropagation()}>
         <div data-sheet-drag-zone="1" className="shrink-0 touch-none">
           <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto -mt-1 shrink-0 active:cursor-grabbing" />
           <h3 className="text-base font-extrabold text-text">Delete All Alarms?</h3>

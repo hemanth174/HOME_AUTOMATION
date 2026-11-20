@@ -69,9 +69,9 @@ export default function OnboardingGuide({ isOpen, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/75 p-3 sm:p-5 backdrop-blur-md animate-fade-in" onClick={onClose}>
+    <div className="vt-desktop-drawer fixed inset-0 z-[10000] flex items-center justify-center bg-black/75 p-3 sm:p-5 backdrop-blur-md animate-fade-in" onClick={onClose}>
       <div 
-        className="relative flex max-h-[calc(100dvh-24px)] w-full max-w-[460px] flex-col overflow-hidden rounded-[24px] border border-border bg-card shadow-[0_12px_40px_rgba(0,0,0,0.6)] shadow-gold-glow select-none animate-scale-in"
+        className="vt-desktop-drawer-panel relative flex max-h-[calc(100dvh-24px)] w-full max-w-[460px] flex-col overflow-hidden rounded-[24px] border border-border bg-card shadow-[0_12px_40px_rgba(0,0,0,0.6)] shadow-gold-glow select-none animate-scale-in"
         onClick={e => e.stopPropagation()}
       >
         {/* Close Button */}

@@ -29,7 +29,7 @@ export default function ConfirmModal({
   // ancestor (e.g. `.dashboard-container` keeps a transform after fade-up).
   return createPortal(
     <div
-      className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm max-md:items-end max-md:p-0"
+      className="vt-desktop-drawer fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm max-md:items-end max-md:p-0"
       onClick={() => {
         if (!busy) onCancel?.();
       }}
@@ -39,7 +39,7 @@ export default function ConfirmModal({
         aria-modal="true"
         aria-labelledby="confirm-modal-title"
         aria-describedby="confirm-modal-description"
-        className="flex w-[min(100%,380px)] flex-col gap-4 rounded-[20px] border border-border bg-card p-5 shadow-2xl max-md:w-full max-md:rounded-b-none max-md:rounded-t-[24px] max-md:p-6 max-md:pb-8"
+        className="vt-desktop-drawer-panel flex w-[min(100%,380px)] flex-col gap-4 rounded-[20px] border border-border bg-card p-5 shadow-2xl max-md:w-full max-md:rounded-b-none max-md:rounded-t-[24px] max-md:p-6 max-md:pb-8"
         onClick={(event) => event.stopPropagation()}
       >
         <div data-sheet-drag-zone="1" className="shrink-0 touch-none">

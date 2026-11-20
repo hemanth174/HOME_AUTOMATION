@@ -125,7 +125,7 @@ export default function useDashboardData() {
       try {
         const [boardsRes, devicesRes, presetsRes] = await Promise.all([
           supabase.from('boards').select('id, name, board_identifier, last_seen').eq('user_id', user.id).order('created_at'),
-          supabase.from('devices').select('id, name, is_on, feedback_on, relay_index, board_id').eq('user_id', user.id).order('relay_index'),
+          supabase.from('devices').select('id, name, is_on, feedback_on, last_changed, relay_index, board_id').eq('user_id', user.id).order('relay_index'),
           supabase.from('presets').select('id, name, actions').eq('user_id', user.id).order('created_at'),
         ]);
 
@@ -197,7 +197,7 @@ export default function useDashboardData() {
             .eq('user_id', user.id)
             .order('created_at'),
           supabase.from('devices')
-            .select('id, name, is_on, feedback_on, relay_index, board_id')
+            .select('id, name, is_on, feedback_on, last_changed, relay_index, board_id')
             .eq('user_id', user.id)
             .order('relay_index'),
         ]);
@@ -299,7 +299,7 @@ export default function useDashboardData() {
             // Background silent refetch on reconnect
             const [boardsRes, devicesRes, presetsRes] = await Promise.all([
               supabase.from('boards').select('id, name, board_identifier, last_seen').eq('user_id', user.id).order('created_at'),
-              supabase.from('devices').select('id, name, is_on, feedback_on, relay_index, board_id').eq('user_id', user.id).order('relay_index'),
+              supabase.from('devices').select('id, name, is_on, feedback_on, last_changed, relay_index, board_id').eq('user_id', user.id).order('relay_index'),
               supabase.from('presets').select('id, name, actions').eq('user_id', user.id).order('created_at'),
             ]);
             if (boardsRes.data) setBoards(boardsRes.data);

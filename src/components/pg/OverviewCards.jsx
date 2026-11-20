@@ -10,6 +10,7 @@ export default function OverviewCards({
   activeDevices,
   boardConnected,
   estimatedLoadWatts,
+  estimatedEnergyTodayKwh,
   systemOk,
   systemMessage,
 }) {
@@ -49,7 +50,7 @@ export default function OverviewCards({
           </p>
         </div>
 
-        <div className="hidden min-w-0 flex-wrap items-center gap-x-6 gap-y-3 border-t border-(--pg-line) pt-3 sm:flex lg:flex-nowrap lg:border-t-0 lg:border-l lg:py-0 lg:pl-6">
+        <div className="hidden min-w-0 flex-wrap items-center gap-x-4 gap-y-3 border-t border-(--pg-line) pt-3 sm:flex lg:flex-nowrap lg:border-t-0 lg:border-l lg:py-0 lg:pl-4 xl:gap-x-6 xl:pl-6">
           <div className="min-w-[90px]">
             <p className="text-[10px] font-extrabold uppercase tracking-wider text-(--pg-muted)">Set to on</p>
             <p className="mt-0.5 text-xl font-extrabold tabular-nums text-(--pg-ink)">{boardConnected ? activeDevices : "—"}<span className="mx-1 text-sm text-(--pg-muted)">/</span>{totalDevices}</p>
@@ -64,6 +65,14 @@ export default function OverviewCards({
             <p className="text-[10px] font-semibold text-(--pg-muted)">
               {estimatedLoadWatts === null ? "Waiting for board" : "From relay settings · no meter"}
             </p>
+          </div>
+          <div className="min-w-[115px]">
+            <p className="text-[10px] font-extrabold uppercase tracking-wider text-(--pg-muted)">Energy today</p>
+            <p className="mt-0.5 text-xl font-extrabold tabular-nums text-(--pg-ink)">
+              {estimatedEnergyTodayKwh === null ? "—" : estimatedEnergyTodayKwh.toFixed(4)}
+              {estimatedEnergyTodayKwh !== null && <span className="ml-1 text-xs text-(--pg-muted)">kWh est.</span>}
+            </p>
+            <p className="text-[10px] font-semibold text-(--pg-muted)">From logged relay time</p>
           </div>
           <div className="min-w-[130px]">
             <p className="text-[10px] font-extrabold uppercase tracking-wider text-(--pg-muted)">Board link</p>

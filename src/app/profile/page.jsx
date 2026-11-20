@@ -426,7 +426,7 @@ export default function ProfilePage() {
 
         {/* MFA Verification Modal */}
         {showMfaModal && (
-          <div className="fixed inset-0 z-[10000] flex items-center justify-center p-3">
+          <div className="vt-desktop-drawer fixed inset-0 z-[10000] flex items-center justify-center p-3">
             <div 
               className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"
               onClick={() => {
@@ -437,7 +437,7 @@ export default function ProfilePage() {
             />
             
             <div 
-              className="relative bg-card w-full border border-border max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:rounded-t-[24px] max-md:p-6 max-md:pb-10 max-md:border-t max-md:border-x-0 md:w-[420px] md:rounded-[20px] md:p-8 md:shadow-2xl flex flex-col items-center"
+              className="vt-desktop-drawer-panel relative bg-card w-full border border-border max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:rounded-t-[24px] max-md:p-6 max-md:pb-10 max-md:border-t max-md:border-x-0 md:w-[420px] md:rounded-[20px] md:p-8 md:shadow-2xl flex flex-col items-center"
             >
               <button
                 type="button"

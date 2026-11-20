@@ -93,11 +93,11 @@ export default function SchedulesPage() {
 
       {showDeleteAllModal && (
         <div
-          className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 max-md:items-end max-md:p-0"
+          className="vt-desktop-drawer fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 max-md:items-end max-md:p-0"
           onClick={() => setShowDeleteAllModal(false)}
         >
           <div
-            className="bg-card border border-border rounded-[18px] p-6 w-[min(100%-40px,360px)] max-md:w-full max-md:rounded-b-none max-md:rounded-t-[24px] max-md:pb-8"
+            className="vt-desktop-drawer-panel bg-card border border-border rounded-[18px] p-6 w-[min(100%-40px,360px)] max-md:w-full max-md:rounded-b-none max-md:rounded-t-[24px] max-md:pb-8"
             onClick={(e) => e.stopPropagation()}
           >
             <div data-sheet-drag-zone="1" className="shrink-0 touch-none">

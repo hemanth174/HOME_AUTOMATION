@@ -1,5 +1,40 @@
 
 /* Mobile dashboard prioritizes room controls over summary metrics. */
+
+/* Desktop dialogs use one right-side panel; mobile sheets retain their layouts. */
+@media (min-width: 768px) {
+    .vt-desktop-drawer {
+        align-items: stretch;
+        justify-content: flex-end;
+        padding: 0;
+        animation: none;
+    }
+
+    .vt-desktop-drawer-panel {
+        box-sizing: border-box;
+        width: min(100vw, var(--vt-drawer-width, 480px));
+        max-width: none;
+        height: 100dvh;
+        max-height: 100dvh;
+        min-height: 0;
+        margin: 0;
+        border-radius: 0;
+        border-right: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        animation: vt-drawer-enter 260ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+}
+
+@keyframes vt-drawer-enter {
+    from { transform: translateX(24px); opacity: 0.85; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-desktop-drawer-panel { animation: none; }
+}
+
 @media (max-width: 639px) {
     .dashboard-container {
         width: min(100% - 20px, 620px);
