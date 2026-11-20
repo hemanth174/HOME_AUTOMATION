@@ -9,6 +9,7 @@ export default function OverviewCards({
   totalDevices,
   activeDevices,
   boardConnected,
+  estimatedLoadWatts,
   systemOk,
   systemMessage,
 }) {
@@ -55,9 +56,14 @@ export default function OverviewCards({
             {!boardConnected && <p className="text-[10px] font-semibold text-(--pg-muted)">No live board link</p>}
           </div>
           <div className="min-w-[115px]">
-            <p className="text-[10px] font-extrabold uppercase tracking-wider text-(--pg-muted)">Power usage</p>
-            <p className="mt-0.5 text-sm font-extrabold text-(--pg-ink)">Not measured</p>
-            <p className="text-[10px] font-semibold text-(--pg-muted)">No power meter data</p>
+            <p className="text-[10px] font-extrabold uppercase tracking-wider text-(--pg-muted)">Estimated load</p>
+            <p className="mt-0.5 text-xl font-extrabold tabular-nums text-(--pg-ink)">
+              {estimatedLoadWatts === null ? "—" : estimatedLoadWatts}
+              {estimatedLoadWatts !== null && <span className="ml-1 text-xs text-(--pg-muted)">W est.</span>}
+            </p>
+            <p className="text-[10px] font-semibold text-(--pg-muted)">
+              {estimatedLoadWatts === null ? "Waiting for board" : "From relay settings · no meter"}
+            </p>
           </div>
           <div className="min-w-[130px]">
             <p className="text-[10px] font-extrabold uppercase tracking-wider text-(--pg-muted)">Board link</p>

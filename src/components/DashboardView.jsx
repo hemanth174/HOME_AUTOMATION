@@ -195,6 +195,7 @@ export default function DashboardView({ c }) {
           totalDevices={c.devices.length}
           activeDevices={c.activeCount}
           boardConnected={c.systemOk}
+          estimatedLoadWatts={c.estimatedLoadWatts}
           systemOk={c.systemOk}
           systemMessage={c.systemMessage}
         />

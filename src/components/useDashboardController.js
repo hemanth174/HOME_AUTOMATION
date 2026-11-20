@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import useDashboardData from "@/hooks/useDashboardData";
+import { getDeviceWattage } from "@/app/analytics/helpers";
 import { isBoardOnline } from "./pg/deviceKind";
 
 const readCookie = (name) => {
@@ -427,6 +428,12 @@ export default function useDashboardController() {
   ]);
   const activeCount = devices.filter((d) => d.is_on).length,
     onlineBoards = boards.filter((board) => isBoardOnline(board));
+  const onlineBoardIds = new Set(onlineBoards.map((board) => board.id));
+  const estimatedLoadWatts = onlineBoards.length
+    ? Math.round(devices.reduce((watts, device) =>
+        watts + (device.is_on && onlineBoardIds.has(device.board_id)
+          ? getDeviceWattage(device.name || "") : 0), 0))
+    : null;
   const statusMessage = useMemo(() => {
     if (!isClientOnline && !isLocalConnected) {
       return [
@@ -504,6 +511,7 @@ export default function useDashboardController() {
     dailyRows,
     activeCount,
     onlineBoards,
+    estimatedLoadWatts,
     statusMessage,
     systemOk:
       (isClientOnline || isLocalConnected) &&
