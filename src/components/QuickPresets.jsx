@@ -31,9 +31,11 @@ export default function QuickPresets({ presets, isPresetActive, applyPreset, del
     if (!pendingDelete) return;
     setDeleting(true);
     try {
-      await deletePreset(pendingDelete.id);
-      setPendingDelete(null);
-      setVisibleIndex((index) => Math.max(0, Math.min(index, presets.length - 2)));
+      const moved = await deletePreset(pendingDelete.id);
+      if (moved) {
+        setPendingDelete(null);
+        setVisibleIndex((index) => Math.max(0, Math.min(index, presets.length - 2)));
+      }
     } finally {
       setDeleting(false);
     }
@@ -81,8 +83,8 @@ export default function QuickPresets({ presets, isPresetActive, applyPreset, del
       <ConfirmModal
         open={Boolean(pendingDelete)}
         title="Delete this preset?"
-        description={`“${pendingDelete?.name || "This preset"}” will be permanently deleted. This action cannot be undone.`}
-        confirmLabel="Delete Preset"
+        description={`“${pendingDelete?.name || "This preset"}” will move to Trash. You can restore it within 30 days.`}
+        confirmLabel="Move to Trash"
         busy={deleting}
         onCancel={() => setPendingDelete(null)}
         onConfirm={confirmDelete}

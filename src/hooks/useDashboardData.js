@@ -259,7 +259,9 @@ export default function useDashboardData() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'devices', filter: `user_id=eq.${user.id}` }, (payload) => {
         if (payload.eventType === 'UPDATE') {
           setDevices(prev => {
-            const updated = prev.map(d => d.id === payload.new.id ? payload.new : d);
+            const updated = payload.new.deleted_at
+              ? prev.filter(d => d.id !== payload.new.id)
+              : prev.map(d => d.id === payload.new.id ? payload.new : d);
             try { localStorage.setItem(LOCAL_STORAGE_DEVICES, JSON.stringify(updated)); } catch {}
             return updated;
           });
@@ -282,12 +284,16 @@ export default function useDashboardData() {
         if (newPreset && typeof newPreset.actions === 'string') {
           try { newPreset.actions = JSON.parse(newPreset.actions); } catch(e) { newPreset.actions = []; }
         }
-        if (payload.eventType === 'UPDATE') setPresets(prev => prev.map(p => p.id === newPreset.id ? newPreset : p));
+        if (payload.eventType === 'UPDATE') setPresets(prev => newPreset.deleted_at
+          ? prev.filter(p => p.id !== newPreset.id)
+          : prev.map(p => p.id === newPreset.id ? newPreset : p));
         else if (payload.eventType === 'INSERT') setPresets(prev => [...prev, newPreset]);
         else if (payload.eventType === 'DELETE') setPresets(prev => prev.filter(p => p.id !== payload.old.id));
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'boards', filter: `user_id=eq.${user.id}` }, (payload) => {
-        if (payload.eventType === 'UPDATE') setBoards(prev => prev.map(b => b.id === payload.new.id ? payload.new : b));
+        if (payload.eventType === 'UPDATE') setBoards(prev => payload.new.deleted_at
+          ? prev.filter(b => b.id !== payload.new.id)
+          : prev.map(b => b.id === payload.new.id ? payload.new : b));
         else if (payload.eventType === 'INSERT') setBoards(prev => [...prev, payload.new]);
         else if (payload.eventType === 'DELETE') setBoards(prev => prev.filter(b => b.id !== payload.old.id));
       })

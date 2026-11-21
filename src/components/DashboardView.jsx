@@ -26,8 +26,6 @@ import ActivityFeed from "@/components/pg/ActivityFeed";
 import { isBoardOnline } from "@/components/pg/deviceKind";
 
 export default function DashboardView({ c }) {
-  if (c.loading) return <Loader message="Loading VikaTech Dashboard..." />;
-
   const button = (label, Icon, onClick, disabled = false) => (
     <button
       type="button"
@@ -181,6 +179,9 @@ export default function DashboardView({ c }) {
     event.currentTarget.releasePointerCapture?.(event.pointerId);
     setIsCarouselDragging(false);
   };
+
+  // Hooks above must run on both the loading and loaded renders.
+  if (c.loading) return <Loader message="Loading VikaTech Dashboard..." />;
 
   return (
     <>

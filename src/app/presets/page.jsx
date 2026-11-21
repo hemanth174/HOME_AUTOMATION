@@ -138,6 +138,7 @@ export default function PresetsPage() {
             );
           } else if (payload.eventType === "UPDATE") {
             setPresets((prev) =>
+              newPreset.deleted_at ? prev.filter((p) => p.id !== newPreset.id) :
               prev.map((p) => (p.id === newPreset.id ? newPreset : p)),
             );
           } else if (payload.eventType === "DELETE") {
@@ -360,18 +361,15 @@ export default function PresetsPage() {
   const deletePreset = async () => {
     if (!pendingDelete) return;
     setDeleting(true);
-    const { error } = await supabase
-      .from("presets")
-      .delete()
-      .eq("id", pendingDelete.id);
+    const { data: moved, error } = await supabase.rpc("move_to_trash", { p_kind: "preset", p_id: pendingDelete.id });
     setDeleting(false);
-    if (error) {
-      setToast(`Could not delete preset: ${error.message}`);
+    if (error || !moved) {
+      setToast(`Could not move preset to Trash: ${error?.message || "Item not found"}`);
       return;
     }
     setPresets((prev) => prev.filter((p) => p.id !== pendingDelete.id));
     setPendingDelete(null);
-    setToast("Preset deleted");
+    setToast("Preset moved to Trash. Restore it within 30 days.");
   };
 
   const allOn = async () => {
@@ -635,8 +633,8 @@ export default function PresetsPage() {
       <ConfirmModal
         open={Boolean(pendingDelete)}
         title="Delete this preset?"
-        description={`“${pendingDelete?.name || "This preset"}” will be permanently deleted. This action cannot be undone.`}
-        confirmLabel="Delete Preset"
+        description={`“${pendingDelete?.name || "This preset"}” will move to Trash for 30 days.`}
+        confirmLabel="Move to Trash"
         busy={deleting}
         onCancel={() => setPendingDelete(null)}
         onConfirm={deletePreset}

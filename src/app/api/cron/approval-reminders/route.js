@@ -8,6 +8,10 @@ export async function GET(request) {
   if (process.env.CRON_SECRET && request.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const admin = getAdminSupabase();
   if (!admin) return NextResponse.json({ error: 'Admin service is not configured' }, { status: 503 });
+  const { error: trashError } = await admin.rpc('purge_expired_trash');
+  if (trashError && trashError.code !== 'PGRST202') {
+    return NextResponse.json({ error: `Trash cleanup failed: ${trashError.message}` }, { status: 500 });
+  }
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data: requests, error } = await admin.from('account_approval_requests').select('*').eq('account_status', 'pending').not('admin_one_approved_at', 'is', null).is('admin_two_approved_at', null).lte('last_requested_at', cutoff);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

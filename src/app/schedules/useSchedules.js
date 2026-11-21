@@ -64,7 +64,7 @@ export default function useSchedules() {
     (scheduleMode === "once" ? scheduleDate : "") !== (editingSchedule.run_date ? String(editingSchedule.run_date).slice(0, 10) : "") ||
     JSON.stringify(normalizeDays(scheduleDays)) !== JSON.stringify(normalizeDays(editingSchedule.days)) ||
     scheduleAction !== editingSchedule.action;
-  const deleteSchedule = useCallback(async (id) => { const { error } = await supabase.from("schedules").delete().eq("id", id).eq("user_id", user.id); if (error) { setToast(`Could not delete schedule: ${error.message}`); return false; } void wakeAutomationScheduler(); setSchedules((all) => all.filter((s) => s.id !== id)); setToast("Schedule deleted"); return true; }, [user]);
+  const deleteSchedule = useCallback(async (id) => { const { data: moved, error } = await supabase.rpc("move_to_trash", { p_kind: "schedule", p_id: id }); if (error || !moved) { setToast(`Could not move schedule to Trash: ${error?.message || "Item not found"}`); return false; } void wakeAutomationScheduler(); setSchedules((all) => all.filter((s) => s.id !== id)); setToast("Schedule moved to Trash for 30 days"); return true; }, [user]);
   const toggleSchedule = useCallback(async (schedule) => { const { error } = await supabase.from("schedules").update({ enabled: !schedule.enabled }).eq("id", schedule.id).eq("user_id", user.id); if (error) { setToast(`Could not ${schedule.enabled ? "disable" : "enable"} schedule: ${error.message}`); return false; } void wakeAutomationScheduler(); setSchedules((all) => all.map((s) => s.id === schedule.id ? { ...s, enabled: !schedule.enabled } : s)); return true; }, [user]);
   const addSchedule = useCallback(async (event) => {
     event.preventDefault();
@@ -126,6 +126,6 @@ export default function useSchedules() {
       setIsSaving(false);
     }
   }, [selectedDevices, scheduleDays, timeConfirmed, scheduleTime, schedules, editingSchedule, scheduleAction, scheduleMode, scheduleDate, devices, user, closeModal, isSaving, scheduleDraftChanged]);
-  const deleteAllSchedules = useCallback(async () => { const { error } = await supabase.from("schedules").delete().eq("user_id", user.id); if (error) return setToast(`Could not delete schedules: ${error.message}`); void wakeAutomationScheduler(); setSchedules([]); setShowDeleteAllModal(false); setToast("All schedules deleted"); }, [user]);
+  const deleteAllSchedules = useCallback(async () => { const { error } = await supabase.rpc("move_to_trash", { p_kind: "schedule" }); if (error) return setToast(`Could not move schedules to Trash: ${error.message}`); void wakeAutomationScheduler(); setSchedules([]); setShowDeleteAllModal(false); setToast("Schedules moved to Trash for 30 days"); }, [user]);
   return { user, schedules, devices, loading, toast, setToast, showModal, setShowModal, showDeleteAllModal, setShowDeleteAllModal, selectedDevices, scheduleTime, scheduleDays, scheduleAction, setScheduleAction, scheduleMode, scheduleDate, setScheduleDate, changeScheduleMode, timeConfirmed, timeError, editingSchedule, isSaving, scheduleDraftChanged, closeModal, openCreateModal, openEditModal, handleTimeChange, toggleDay, toggleDeviceSelection, addSchedule, deleteSchedule, toggleSchedule, deleteAllSchedules, confirmTime: () => { const result = validateTime(scheduleTime); setTimeError(result.error); if (result.valid) setTimeConfirmed(true); } };
 }

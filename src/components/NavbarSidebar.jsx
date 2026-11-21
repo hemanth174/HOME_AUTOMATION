@@ -1,6 +1,5 @@
 import Link from "next/link";
 import {
-  Download,
   FileText,
   HelpCircle,
   PanelLeftClose,
@@ -28,7 +27,7 @@ function SidebarLink({
       onClick={(event) => handleOfflineLinkClick(event, link)}
       aria-current={active ? "page" : undefined}
       title={!sidebarExpanded ? link.label : undefined}
-      className={`rounded-full py-2.5 text-sm font-bold transition-all duration-200 ease-out flex items-center ${sidebarExpanded ? "px-3 justify-between" : "px-0 justify-center"} ${isCloudDisabled ? "opacity-40 cursor-not-allowed text-(--pg-muted) bg-transparent hover:bg-transparent" : active ? (link.href === "/local" ? "bg-(--pg-faint) text-(--pg-ink) border border-(--pg-line)" : "bg-(--pg-faint) text-(--pg-ink)") : "text-(--pg-navtext) bg-transparent hover:bg-black/[0.04] hover:text-(--pg-deep)"}`}
+      className={`rounded-full py-2.5 text-sm font-bold transition-colors duration-200 ease-out flex items-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--pg-brand) ${sidebarExpanded ? "px-3 justify-between" : "px-0 justify-center"} ${isCloudDisabled ? "opacity-40 cursor-not-allowed text-(--pg-muted) bg-transparent hover:bg-transparent" : active ? "bg-(--pg-brand-faint) text-(--pg-brand) hover:bg-(--pg-brand-soft)" : "text-(--pg-navtext) bg-transparent hover:bg-(--pg-brand-faint) hover:text-(--pg-brand)"}`}
     >
       <div
         className={`flex items-center ${sidebarExpanded ? "gap-3" : "justify-center"}`}
@@ -74,8 +73,6 @@ export default function NavbarSidebar({
   sidebarLocalHover,
   toggleSidebarPinned,
   collapseSidebar,
-  showInstallBtn,
-  handleInstallClick,
   timezone,
   avatarUrl,
   fullName,
@@ -162,7 +159,8 @@ export default function NavbarSidebar({
           )}
           <Link
             href="/faq"
-            className={`rounded-xl py-2.5 text-sm font-bold transition-all duration-200 text-(--pg-navtext) hover:bg-black/[0.04] hover:text-(--pg-deep) flex items-center ${sidebarExpanded ? "px-3 gap-3" : "px-0 justify-center"}`}
+            aria-current={pathname === "/faq" ? "page" : undefined}
+            className={`rounded-xl py-2.5 text-sm font-bold transition-colors duration-200 flex items-center ${pathname === "/faq" ? "bg-(--pg-brand-faint) text-(--pg-brand)" : "text-(--pg-navtext) hover:bg-(--pg-brand-faint) hover:text-(--pg-brand)"} ${sidebarExpanded ? "px-3 gap-3" : "px-0 justify-center"}`}
           >
             <HelpCircle size={16} className="stroke-[2.5px]" />
             <span
@@ -173,7 +171,8 @@ export default function NavbarSidebar({
           </Link>
           <Link
             href="/terms"
-            className={`rounded-xl py-2.5 text-sm font-bold transition-all duration-200 text-(--pg-navtext) hover:bg-black/[0.04] hover:text-(--pg-deep) flex items-center ${sidebarExpanded ? "px-3 gap-3" : "px-0 justify-center"}`}
+            aria-current={pathname === "/terms" ? "page" : undefined}
+            className={`rounded-xl py-2.5 text-sm font-bold transition-colors duration-200 flex items-center ${pathname === "/terms" ? "bg-(--pg-brand-faint) text-(--pg-brand)" : "text-(--pg-navtext) hover:bg-(--pg-brand-faint) hover:text-(--pg-brand)"} ${sidebarExpanded ? "px-3 gap-3" : "px-0 justify-center"}`}
           >
             <FileText size={16} className="stroke-[2.5px]" />
             <span
@@ -188,15 +187,6 @@ export default function NavbarSidebar({
       <div
         className={`flex flex-col gap-4 border-t border-(--pg-line) pt-4 ${sidebarExpanded ? "" : "items-center"}`}
       >
-        {showInstallBtn && sidebarExpanded && (
-          <button
-            onClick={handleInstallClick}
-            className="mx-2 px-3 py-2.5 rounded-xl text-xs font-extrabold bg-(--pg-brand) text-(--pg-onbrand) hover:bg-(--pg-brand-hover) cursor-pointer flex items-center justify-center gap-2 transition-colors"
-          >
-            <Download size={14} />
-            <span>Install Web App</span>
-          </button>
-        )}
         <div
           className={`flex flex-col gap-0.5 px-2 ${sidebarExpanded ? "" : "hidden"}`}
         >
@@ -212,7 +202,8 @@ export default function NavbarSidebar({
         </div>
         <Link
           href="/profile"
-          className="flex items-center gap-3 p-2 rounded-xl bg-(--pg-card) border border-(--pg-line) hover:border-(--pg-brand-line) transition-all"
+          aria-current={pathname === "/profile" ? "page" : undefined}
+          className={`flex items-center gap-3 p-2 rounded-xl border transition-colors ${pathname === "/profile" ? "border-(--pg-brand-line) bg-(--pg-brand-faint)" : "border-(--pg-line) bg-(--pg-card) hover:border-(--pg-brand-line) hover:bg-(--pg-brand-faint)"}`}
         >
           <div className="w-8 h-8 rounded-full border border-(--pg-line) bg-(--pg-brand-faint) flex items-center justify-center text-xs font-black text-(--pg-brand) overflow-hidden shrink-0">
             {avatarUrl ? (

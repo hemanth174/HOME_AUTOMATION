@@ -102,11 +102,10 @@ export default function SchedulesPage() {
           >
             <div data-sheet-drag-zone="1" className="shrink-0 touch-none">
               <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto -mt-1 mb-3 shrink-0 active:cursor-grabbing" />
-              <h3 className="text-base font-extrabold text-text">Delete All Schedules?</h3>
+              <h3 className="text-base font-extrabold text-text">Move All Schedules to Trash?</h3>
             </div>
             <p className="text-xs text-text-muted my-4">
-              This will permanently delete all <strong>{schedules.length}</strong> schedules. This
-              action cannot be undone.
+              All <strong>{schedules.length}</strong> schedules can be restored within 30 days.
             </p>
             <div className="flex gap-2 justify-end">
               <button
@@ -121,7 +120,7 @@ export default function SchedulesPage() {
                 onClick={deleteAllSchedules}
                 className="rounded-lg bg-red-500 px-4 py-2 text-xs font-extrabold text-white cursor-pointer"
               >
-                Delete All
+                Move to Trash
               </button>
             </div>
           </div>
@@ -130,9 +129,9 @@ export default function SchedulesPage() {
 
       <ConfirmModal
         open={Boolean(pendingDelete)}
-        title="Delete this schedule?"
-        description={`The schedule for ${pendingDelete?.devices?.name || "this device"} will be permanently deleted. This action cannot be undone.`}
-        confirmLabel="Delete Schedule"
+        title="Move this schedule to Trash?"
+        description={`The schedule for ${pendingDelete?.devices?.name || "this device"} can be restored within 30 days.`}
+        confirmLabel="Move to Trash"
         busy={deleting}
         onCancel={() => setPendingDelete(null)}
         onConfirm={confirmDelete}

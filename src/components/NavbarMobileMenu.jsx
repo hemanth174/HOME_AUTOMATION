@@ -1,6 +1,5 @@
 import Link from "next/link";
 import {
-  Download,
   FileText,
   HelpCircle,
   LogOut,
@@ -26,8 +25,6 @@ export default function NavbarMobileMenu({
   email,
   avatarUrl,
   initial,
-  showInstallBtn,
-  handleInstallClick,
   onRequestLogout,
   timezone,
 }) {
@@ -49,7 +46,8 @@ export default function NavbarMobileMenu({
                 handleOfflineLinkClick(event, link);
                 setMobileOpen(false);
               }}
-              className={`flex flex-col items-center justify-center gap-1 flex-1 py-1 transition-all ${isCloudDisabled ? "opacity-40 cursor-not-allowed" : active ? "text-accent" : "text-text-muted"}`}
+              aria-current={active ? "page" : undefined}
+              className={`flex flex-col items-center justify-center gap-1 flex-1 rounded-xl py-1 transition-colors ${isCloudDisabled ? "opacity-40 cursor-not-allowed" : active ? "bg-accent-bg text-accent" : "text-text-muted hover:bg-accent-bg/60 hover:text-accent"}`}
             >
               <Icon size={18} className="stroke-[2.5px]" />
               <span className="text-[9px] font-black tracking-tight truncate px-0.5">
@@ -117,7 +115,8 @@ export default function NavbarMobileMenu({
                     setMobileOpen(false);
                     setCurrentY(0);
                   }}
-                  className={`rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all flex items-center justify-between ${isCloudDisabled ? "opacity-40 cursor-not-allowed text-text-muted/60" : active ? "bg-accent-bg text-accent" : "text-text hover:bg-accent-bg/30"}`}
+                  aria-current={active ? "page" : undefined}
+                  className={`rounded-xl px-3 py-2.5 text-sm font-extrabold transition-colors flex items-center justify-between ${isCloudDisabled ? "opacity-40 cursor-not-allowed text-text-muted/60" : active ? "bg-accent-bg text-accent" : "text-text hover:bg-accent-bg/70 hover:text-accent"}`}
                 >
                   <div className="flex items-center gap-3">
                     <Icon size={16} className="stroke-[2.5px]" />
@@ -139,22 +138,24 @@ export default function NavbarMobileMenu({
             </span>
             <Link
               href="/faq"
+              aria-current={pathname === "/faq" ? "page" : undefined}
               onClick={() => {
                 setMobileOpen(false);
                 setCurrentY(0);
               }}
-              className="rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all text-text hover:bg-accent-bg/30 flex items-center gap-3"
+              className={`rounded-xl px-3 py-2.5 text-sm font-extrabold transition-colors flex items-center gap-3 ${pathname === "/faq" ? "bg-accent-bg text-accent" : "text-text hover:bg-accent-bg/70 hover:text-accent"}`}
             >
               <HelpCircle size={16} className="stroke-[2.5px]" />
               <span>FAQ&apos;s</span>
             </Link>
             <Link
               href="/terms"
+              aria-current={pathname === "/terms" ? "page" : undefined}
               onClick={() => {
                 setMobileOpen(false);
                 setCurrentY(0);
               }}
-              className="rounded-xl px-3 py-2.5 text-sm font-extrabold transition-all text-text hover:bg-accent-bg/30 flex items-center gap-3"
+              className={`rounded-xl px-3 py-2.5 text-sm font-extrabold transition-colors flex items-center gap-3 ${pathname === "/terms" ? "bg-accent-bg text-accent" : "text-text hover:bg-accent-bg/70 hover:text-accent"}`}
             >
               <FileText size={16} className="stroke-[2.5px]" />
               <span>Terms &amp; Conditions</span>
@@ -167,11 +168,12 @@ export default function NavbarMobileMenu({
             </span>
             <Link
               href="/profile"
+              aria-current={pathname === "/profile" ? "page" : undefined}
               onClick={() => {
                 setMobileOpen(false);
                 setCurrentY(0);
               }}
-              className="flex items-center gap-3 p-2.5 rounded-xl bg-card-alt border border-border hover:border-accent/45 transition-all"
+              className={`flex items-center gap-3 p-2.5 rounded-xl border transition-colors ${pathname === "/profile" ? "border-accent/45 bg-accent-bg" : "border-border bg-card-alt hover:border-accent/45 hover:bg-accent-bg/70"}`}
             >
               <div className="w-8 h-8 rounded-full border border-border bg-accent-bg flex items-center justify-center text-xs font-black text-accent overflow-hidden shrink-0">
                 {avatarUrl ? (
@@ -196,17 +198,6 @@ export default function NavbarMobileMenu({
             </Link>
           </div>
 
-          {showInstallBtn && (
-            <div className="px-2">
-              <button
-                onClick={handleInstallClick}
-                className="w-full py-3 rounded-xl text-xs font-extrabold bg-accent text-[var(--btn-text)] hover:bg-accent-hover cursor-pointer flex items-center justify-center gap-2"
-              >
-                <Download size={15} />
-                <span>Install Web App</span>
-              </button>
-            </div>
-          )}
 
           <div className="px-2">
             <button

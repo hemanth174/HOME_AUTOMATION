@@ -95,6 +95,7 @@ export default function BoardsPage() {
             });
           } else if (payload.eventType === "UPDATE") {
             setBoards((prev) =>
+              payload.new.deleted_at ? prev.filter((b) => b.id !== payload.new.id) :
               prev.map((b) => (b.id === payload.new.id ? payload.new : b)),
             );
           } else if (payload.eventType === "DELETE") {
@@ -185,57 +186,17 @@ export default function BoardsPage() {
 
   const deleteBoard = async (id) => {
     setDeleting(true);
-    const { data: boardDevices } = await supabase
-      .from("devices")
-      .select("id")
-      .eq("board_id", id)
-      .eq("user_id", user.id);
-    const deviceIds = (boardDevices || []).map((device) => device.id);
+    const { data: moved, error } = await supabase.rpc("move_to_trash", { p_kind: "board", p_id: id });
 
-    const { error } = await supabase
-      .from("boards")
-      .delete()
-      .eq("id", id)
-      .eq("user_id", user.id);
-
-    if (error) {
+    if (error || !moved) {
       setDeleting(false);
-      setToast(`Could not delete board: ${error.message}`);
+      setToast(`Could not move room to Trash: ${error?.message || "Item not found"}`);
       return;
     }
-
-    let cleanupError = null;
-    if (deviceIds.length) {
-      const cleanupResults = await Promise.all([
-        supabase
-          .from("activity_logs")
-          .delete()
-          .eq("user_id", user.id)
-          .in("device_id", deviceIds),
-        ...deviceIds.flatMap((deviceId) => [
-          supabase
-            .from("user_notifications")
-            .delete()
-            .eq("user_id", user.id)
-            .eq("data->>device_id", deviceId),
-          supabase
-            .from("user_notifications")
-            .delete()
-            .eq("user_id", user.id)
-            .contains("data", { device_ids: [deviceId] }),
-        ]),
-      ]);
-      cleanupError = cleanupResults.find((result) => result.error)?.error;
-    }
-
     setDeleting(false);
     setBoards((prev) => prev.filter((b) => b.id !== id));
     setPendingDelete(null);
-    setToast(
-      cleanupError
-        ? `Board deleted, but related history could not be cleared: ${cleanupError.message}`
-        : "Board deleted and related history cleared",
-    );
+    setToast("Room and its devices moved to Trash for 30 days.");
   };
 
   const startEdit = (board) => {
@@ -393,9 +354,9 @@ export default function BoardsPage() {
 
       <ConfirmModal
         open={Boolean(pendingDelete)}
-        title="Delete this board?"
-        description={`Delete “${pendingDelete?.name || "this board"}” and all of its devices, notifications, and activity logs? This action cannot be undone.`}
-        confirmLabel="Delete Board"
+        title="Move this room to Trash?"
+        description={`“${pendingDelete?.name || "This room"}” and its devices, schedules, and alarms will be hidden. You can restore them within 30 days.`}
+        confirmLabel="Move to Trash"
         busy={deleting}
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => deleteBoard(pendingDelete.id)}

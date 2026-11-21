@@ -322,9 +322,11 @@ export default function useDashboardController() {
   );
   const deletePreset = useCallback(
     async (id) => {
-      await supabase.from("presets").delete().eq("id", id);
+      const { data: moved, error } = await supabase.rpc("move_to_trash", { p_kind: "preset", p_id: id });
+      if (error || !moved) { showToast(`Could not move preset to Trash: ${error?.message || "Item not found"}`); return false; }
       setPresets((all) => all.filter((p) => p.id !== id));
-      showToast("Preset deleted");
+      showToast("Preset moved to Trash. You can restore it within 30 days.");
+      return true;
     },
     [setPresets, showToast],
   );

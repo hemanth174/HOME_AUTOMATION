@@ -351,16 +351,16 @@ export async function executeVoiceAction(result, { getLatestDevices, applyPreset
       }
 
       case 'DELETE_ALL_ALARMS': {
-        const { error } = await supabase.from('alarms').delete().eq('user_id', user.id);
+        const { error } = await supabase.rpc('move_to_trash', { p_kind: 'alarm' });
         if (!error) void wakeAutomationScheduler();
-        provideFeedback(error ? 'Could not clear alarms. Please try again.' : 'All alarms cleared');
+        provideFeedback(error ? 'Could not clear alarms. Please try again.' : 'Alarms moved to Trash');
         break;
       }
 
       case 'DELETE_ALL_SCHEDULES': {
-        const { error } = await supabase.from('schedules').delete().eq('user_id', user.id);
+        const { error } = await supabase.rpc('move_to_trash', { p_kind: 'schedule' });
         if (!error) void wakeAutomationScheduler();
-        provideFeedback(error ? 'Could not clear schedules. Please try again.' : 'All schedules cleared');
+        provideFeedback(error ? 'Could not clear schedules. Please try again.' : 'Schedules moved to Trash');
         break;
       }
 

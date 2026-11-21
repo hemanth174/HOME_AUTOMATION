@@ -48,6 +48,7 @@ function groupByUser(rows) {
 
 async function notifyFiredAlarms(admin, getSettings, now, stats) {
   const { data: alarms, error } = await admin.from('alarms')
+    .is('deleted_at', null)
     .select('id,user_id,device_id,action,trigger_at,devices(name)')
     .eq('fired', true)
     .gte('trigger_at', new Date(now.getTime() - 5 * 60 * 1000).toISOString())
@@ -79,6 +80,7 @@ async function notifyFiredAlarms(admin, getSettings, now, stats) {
 async function runSchedules(admin, getSettings, now, stats) {
   const { data: schedules, error } = await admin
     .from('schedules')
+    .is('deleted_at', null)
     .select('id, user_id, time, days, action, device_id, enabled, run_date, devices(name)')
     .eq('enabled', true);
 
@@ -223,7 +225,7 @@ async function runDailyChecks(admin, getSettings, devices, now, stats) {
 async function runDeviceOfflineChecks(admin, getSettings, now, stats) {
   const { data: configs, error } = await admin
     .from('device_runtime_configs')
-    .select('board_id, user_id, last_direct_seen_at, last_mesh_seen_at, last_seen_at, revoked_at, boards(name, board_identifier, last_seen)')
+    .select('board_id, user_id, last_direct_seen_at, last_mesh_seen_at, last_seen_at, revoked_at, boards(name, board_identifier, last_seen, deleted_at)')
     .is('revoked_at', null);
 
   if (error) {
@@ -233,6 +235,7 @@ async function runDeviceOfflineChecks(admin, getSettings, now, stats) {
 
   for (const config of configs || []) {
     const board = Array.isArray(config.boards) ? config.boards[0] : config.boards;
+    if (!board || board.deleted_at) continue;
     // The WSS gateway refreshes boards.last_seen; direct and mesh check-ins
     // update the runtime timestamps. Use the freshest signal for this board.
     const lastSeenAt = [
@@ -392,6 +395,7 @@ export async function GET(request) {
 
   const { data: devices, error: devicesError } = await admin
     .from('devices')
+    .is('deleted_at', null)
     .select('id, user_id, name, is_on, last_changed');
 
   if (devicesError) {

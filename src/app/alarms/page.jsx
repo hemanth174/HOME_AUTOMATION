@@ -64,9 +64,9 @@ export default function AlarmsPage() {
       />
       <ConfirmModal
         open={Boolean(pendingDelete)}
-        title="Delete this alarm?"
-        description={`The alarm for ${pendingDelete?.devices?.name || "this device"} will be permanently deleted. This action cannot be undone.`}
-        confirmLabel="Delete Alarm"
+        title="Move this alarm to Trash?"
+        description={`The alarm for ${pendingDelete?.devices?.name || "this device"} can be restored within 30 days.`}
+        confirmLabel="Move to Trash"
         busy={deleting}
         onCancel={() => setPendingDelete(null)}
         onConfirm={confirmDelete}

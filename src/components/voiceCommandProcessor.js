@@ -414,20 +414,24 @@ export function useVoiceCommandProcessor({ getLatestDevices, onToast, applyPrese
       }
 
       if (type === 'alarm') {
-        const { error } = await supabase.from('alarms').delete().eq('user_id', user.id).eq('device_id', matchedDevice.id);
+        const { data: rows, error: findError } = await supabase.from('alarms').select('id').eq('user_id', user.id).eq('device_id', matchedDevice.id);
+        const results = findError ? [] : await Promise.all((rows || []).map((row) => supabase.rpc('move_to_trash', { p_kind: 'alarm', p_id: row.id })));
+        const error = findError || results.find((result) => result.error)?.error;
         if (error) safeToast(`⚠ Could not delete alarms for ${matchedDevice.name}. Please try again.`);
         else {
           void wakeAutomationScheduler();
-          safeToast(`✅ Alarms deleted for ${matchedDevice.name}`);
-          speak(`Alarms deleted for ${matchedDevice.name}`);
+          safeToast(`✅ Alarms moved to Trash for ${matchedDevice.name}`);
+          speak(`Alarms moved to Trash for ${matchedDevice.name}`);
         }
       } else {
-        const { error } = await supabase.from('schedules').delete().eq('user_id', user.id).eq('device_id', matchedDevice.id);
+        const { data: rows, error: findError } = await supabase.from('schedules').select('id').eq('user_id', user.id).eq('device_id', matchedDevice.id);
+        const results = findError ? [] : await Promise.all((rows || []).map((row) => supabase.rpc('move_to_trash', { p_kind: 'schedule', p_id: row.id })));
+        const error = findError || results.find((result) => result.error)?.error;
         if (error) safeToast(`⚠ Could not delete schedules for ${matchedDevice.name}. Please try again.`);
         else {
           void wakeAutomationScheduler();
-          safeToast(`✅ Schedules deleted for ${matchedDevice.name}`);
-          speak(`Schedules deleted for ${matchedDevice.name}`);
+          safeToast(`✅ Schedules moved to Trash for ${matchedDevice.name}`);
+          speak(`Schedules moved to Trash for ${matchedDevice.name}`);
         }
       }
       setAgentState('idle');

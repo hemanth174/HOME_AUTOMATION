@@ -106,7 +106,7 @@ async function getDevice(request: Request, boardIdentifier: unknown) {
   if (!config) return null;
 
   const boards = await rest(
-    `boards?id=eq.${encodeURIComponent(config.board_id)}&select=id,board_identifier,user_id`,
+    `boards?id=eq.${encodeURIComponent(config.board_id)}&deleted_at=is.null&select=id,board_identifier,user_id`,
   );
   const board = Array.isArray(boards) ? boards[0] : null;
   if (!board || board.board_identifier !== boardIdentifier || board.user_id !== config.user_id) return null;
@@ -195,6 +195,11 @@ async function poll(request: Request, body: Record<string, unknown>) {
   const board = snapshot.board as Record<string, unknown>;
   const userId = String(board.user_id || "");
   const boardId = String(board.id || "");
+  const activeBoard = await rest("boards?id=eq." + encodeURIComponent(boardId) +
+    "&deleted_at=is.null&select=id");
+  if (!Array.isArray(activeBoard) || activeBoard.length === 0) {
+    return json({ error: "Device authentication failed" }, 401);
+  }
 
   // The snapshot RPC intentionally excludes encrypted secrets from its JSON
   // contract. Fetch the pending encrypted Wi-Fi value separately inside this
@@ -373,7 +378,7 @@ async function poll(request: Request, body: Record<string, unknown>) {
   const isMeshGateway = body.mesh_gateway === true;
   if (isMeshGateway && userId && boardId) {
     const userBoards = await rest(
-      "boards?user_id=eq." + encodeURIComponent(userId) + "&select=id,board_identifier",
+      "boards?user_id=eq." + encodeURIComponent(userId) + "&deleted_at=is.null&select=id,board_identifier",
     );
     const knownBoardIdByIdentifier: Record<string, string> = { [String(board.board_identifier)]: boardId };
     const knownIdentifierByBoardId: Record<string, string> = { [boardId]: String(board.board_identifier) };
@@ -407,7 +412,7 @@ async function poll(request: Request, body: Record<string, unknown>) {
         },
       );
       await rest(
-        "boards?id=" + idFilter + "&user_id=eq." + encodeURIComponent(userId),
+        "boards?id=" + idFilter + "&user_id=eq." + encodeURIComponent(userId) + "&deleted_at=is.null",
         { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_seen: now }) },
       );
 
@@ -661,7 +666,7 @@ async function acknowledgeCommand(device: { config: Record<string, unknown>; boa
     }
     const targetRows = await rest(
       "boards?board_identifier=eq." + encodeURIComponent(requestedTarget) +
-        "&user_id=eq." + encodeURIComponent(userId) + "&select=id,board_identifier",
+        "&user_id=eq." + encodeURIComponent(userId) + "&deleted_at=is.null&select=id,board_identifier",
     );
     const targetBoard = Array.isArray(targetRows) ? targetRows[0] : null;
     if (!targetBoard || String(targetBoard.id) === gatewayBoardId) {
@@ -707,7 +712,7 @@ async function handleDeviceDataAction(
 
   const deviceRows = await rest(
     "devices?board_id=eq." + encodeURIComponent(boardId) +
-      "&user_id=eq." + encodeURIComponent(userId) +
+      "&user_id=eq." + encodeURIComponent(userId) + "&deleted_at=is.null" +
       "&select=id,name,relay_index,is_on,last_changed,feedback_on&order=relay_index.asc",
   );
   const devices = Array.isArray(deviceRows) ? deviceRows : [];
@@ -761,7 +766,7 @@ async function handleDeviceDataAction(
     if (!deviceIds.length) return json({ ok: true, alarms: [] });
     const idFilter = "in.(" + deviceIds.map((id) => encodeURIComponent(id)).join(",") + ")";
     const rows = await rest(
-      "alarms?user_id=eq." + encodeURIComponent(userId) +
+      "alarms?user_id=eq." + encodeURIComponent(userId) + "&deleted_at=is.null" +
         "&device_id=" + idFilter + "&fired=eq.false" +
         "&select=id,device_id,trigger_at,action,fired&order=trigger_at.asc",
     );
@@ -772,7 +777,7 @@ async function handleDeviceDataAction(
     if (!deviceIds.length) return json({ ok: true, schedules: [] });
     const idFilter = "in.(" + deviceIds.map((id) => encodeURIComponent(id)).join(",") + ")";
     const rows = await rest(
-      "schedules?user_id=eq." + encodeURIComponent(userId) +
+      "schedules?user_id=eq." + encodeURIComponent(userId) + "&deleted_at=is.null" +
         "&device_id=" + idFilter + "&enabled=eq.true" +
         "&select=id,device_id,time,days,action,enabled&order=time.asc",
     );
@@ -788,7 +793,7 @@ async function handleDeviceDataAction(
     const idFilter = "in.(" + deviceIds.map((id) => encodeURIComponent(id)).join(",") + ")";
     const rows = await rest(
       "alarms?id=eq." + encodeURIComponent(alarmId) +
-        "&user_id=eq." + encodeURIComponent(userId) +
+        "&user_id=eq." + encodeURIComponent(userId) + "&deleted_at=is.null" +
         "&device_id=" + idFilter + "&fired=eq.false&select=id",
       {
         method: "PATCH",

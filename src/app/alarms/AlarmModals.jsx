@@ -68,9 +68,9 @@ export function DeleteAllModal({ alarms, show, onClose, onDelete }) {
       <div className="vt-desktop-drawer-panel bg-card border border-border rounded-[18px] p-6 w-[min(100%-40px,360px)] shadow-2xl flex flex-col gap-4 max-md:w-full max-md:rounded-b-none max-md:rounded-t-[24px] max-md:pb-8" onClick={(event) => event.stopPropagation()}>
         <div data-sheet-drag-zone="1" className="shrink-0 touch-none">
           <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto -mt-1 shrink-0 active:cursor-grabbing" />
-          <h3 className="text-base font-extrabold text-text">Delete All Alarms?</h3>
+          <h3 className="text-base font-extrabold text-text">Move All Alarms to Trash?</h3>
         </div>
-        <p className="text-xs text-text-muted font-semibold">This will permanently delete all <strong className="text-text">{alarms.length}</strong> alarm{alarms.length !== 1 ? "s" : ""}. This action cannot be undone.</p>
+        <p className="text-xs text-text-muted font-semibold">All <strong className="text-text">{alarms.length}</strong> alarm{alarms.length !== 1 ? "s" : ""} can be restored within 30 days.</p>
         <div className="flex gap-2.5 justify-end">
           <button type="button" data-sheet-close="1" onClick={onClose} className="inline-flex min-h-[34px] items-center rounded-lg border border-border bg-card px-4 text-xs font-semibold text-text">Cancel</button>
           <button type="button" onClick={onDelete} className="inline-flex min-h-[34px] items-center rounded-lg bg-red-500 px-4 text-xs font-extrabold text-white">Delete All</button>

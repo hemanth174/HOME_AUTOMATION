@@ -23,6 +23,8 @@ import {
   WifiOff,
   Zap,
   Settings,
+  Trash2,
+  Download,
 } from "lucide-react";
 import useLocalConnection from "@/hooks/useLocalConnection";
 import { checkInternet } from "@/lib/netCheck";
@@ -556,6 +558,7 @@ export default function Navbar() {
     "/alarms",
     "/analytics",
     "/logs",
+    "/trash",
     "/profile",
     "/settings",
     "/faq",
@@ -591,6 +594,7 @@ export default function Navbar() {
   ];
   const manageLinks = [
     { href: "/settings", label: "Settings", icon: Settings },
+    { href: "/trash", label: "Trash", icon: Trash2 },
     ...(isAdminEmail(user?.email)
       ? [{ href: "/admin", label: "Admin Settings", icon: ShieldCheck }]
       : []),
@@ -615,6 +619,7 @@ export default function Navbar() {
       "/alarms": "Alarms - Overview",
       "/analytics": "Energy - Overview",
       "/logs": "Activity Logs - Overview",
+      "/trash": "Trash - Restore deleted items",
       "/profile": "Profile - Account",
       "/settings": "Settings",
       "/admin": "Admin Settings",
@@ -672,6 +677,7 @@ export default function Navbar() {
     { href: "/settings", label: "Settings", icon: Settings },
     { href: "/analytics", label: "Analytics", icon: TrendingUp },
     { href: "/logs", label: "Logs", icon: History },
+    { href: "/trash", label: "Trash", icon: Trash2 },
     ...(isAdminEmail(user?.email)
       ? [{ href: "/admin", label: "Admin Console", icon: ShieldCheck }]
       : []),
@@ -701,8 +707,6 @@ export default function Navbar() {
           sidebarLocalHover={sidebarLocalHover}
           toggleSidebarPinned={toggleSidebarPinned}
           collapseSidebar={collapseSidebar}
-          showInstallBtn={showInstallBtn}
-          handleInstallClick={handleInstallClick}
           timezone={timezone}
           avatarUrl={avatarUrl}
           fullName={fullName}
@@ -1226,6 +1230,13 @@ export default function Navbar() {
                   </span>{" "}
                   Settings{" "}
                 </Link>{" "}
+                {showInstallBtn && (
+                  <button type="button" onClick={() => { setShowProfileMenu(false); void handleInstallClick(); }}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-bold text-text-muted transition-colors hover:bg-accent-bg hover:text-accent">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-accent-bg text-accent"><Download size={14} /></span>
+                    Install App
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setShowProfileMenu(false);
@@ -1692,8 +1703,6 @@ export default function Navbar() {
         email={email}
         avatarUrl={avatarUrl}
         initial={initial}
-        showInstallBtn={showInstallBtn}
-        handleInstallClick={handleInstallClick}
         onRequestLogout={() => setShowLogoutModal(true)}
         timezone={timezone}
       />{" "}

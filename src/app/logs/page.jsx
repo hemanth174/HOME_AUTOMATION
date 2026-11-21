@@ -45,14 +45,6 @@ export default function LogsPage() {
     const fetchLogs = async () => {
       const startTime = Date.now();
       try {
-        // Delete logs older than 7 days (does not affect analytics)
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-        await supabase
-          .from('activity_logs')
-          .delete()
-          .eq('user_id', user.id)
-          .lt('created_at', sevenDaysAgo);
-
         const [logsRes, boardsRes, devicesRes] = await Promise.all([
           supabase
             .from('activity_logs')
@@ -149,10 +141,10 @@ export default function LogsPage() {
 
   const executeClearLogs = async () => {
     try {
-      const { error } = await supabase.from('activity_logs').delete().eq('user_id', user.id);
+      const { error } = await supabase.rpc('move_to_trash', { p_kind: 'activity_log' });
       if (error) throw error;
       setLogs([]);
-      setToast('Logs cleared successfully');
+      setToast('Logs moved to Trash for 30 days');
       setShowConfirmModal(false);
     } catch (e) {
       setToast('Failed to clear logs');
@@ -583,7 +575,7 @@ export default function LogsPage() {
               <div data-sheet-handle="1" className="hidden max-md:block w-12 h-1 cursor-grab touch-none bg-border rounded-full mx-auto mb-5 shrink-0 active:cursor-grabbing" />
               <h2 className="mb-2 text-lg font-extrabold text-text">Clear Activity Logs</h2>
               <p className="text-xs text-text-muted mb-6 leading-relaxed font-semibold">
-                Are you sure you want to clear all activity logs? This action cannot be undone and will delete all local history.
+                Move all activity logs to Trash? You can restore them within 30 days.
               </p>
             </div>
             <div className="flex justify-end gap-2.5 max-md:w-full max-md:flex-col-reverse">

@@ -389,7 +389,7 @@ export default function AnalyticsPage() {
 
       if (dailyAnalytics.some(unverifiedHistoricalRow)) {
         addSection('Data note', ['Historical limits'], [[
-          'Unverified means device activity was logged, but the older stored energy total was zero. Activity logs older than seven days have been removed, so that estimate cannot be reconstructed.',
+          'Unverified means device activity was logged, but the older stored energy total was zero. If the underlying activity logs were already removed, that estimate cannot be reconstructed.',
         ]]);
       }
 
