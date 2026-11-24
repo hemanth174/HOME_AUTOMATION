@@ -12,6 +12,10 @@ export async function GET(request) {
   if (trashError && trashError.code !== 'PGRST202') {
     return NextResponse.json({ error: `Trash cleanup failed: ${trashError.message}` }, { status: 500 });
   }
+  const { error: supportTrashError } = await admin.rpc('purge_expired_support_tickets');
+  if (supportTrashError && supportTrashError.code !== 'PGRST202') {
+    return NextResponse.json({ error: `Support ticket cleanup failed: ${supportTrashError.message}` }, { status: 500 });
+  }
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data: requests, error } = await admin.from('account_approval_requests').select('*').eq('account_status', 'pending').not('admin_one_approved_at', 'is', null).is('admin_two_approved_at', null).lte('last_requested_at', cutoff);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

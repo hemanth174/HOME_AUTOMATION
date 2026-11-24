@@ -35,8 +35,9 @@ const clearOAuthStarted = () => {
   } catch {}
 };
 
-const routeForApproval = (approval, email) => {
+const routeForApproval = (approval, email, staffAccess = false) => {
   if (isAdminEmail(email)) return '/';
+  if (staffAccess) return '/admin';
   if (approval?.account_status === 'rejected' || approval?.account_status === 'revoked') {
     return '/denied';
   }
@@ -90,7 +91,7 @@ export default function LoginPage() {
           });
           if (response.ok) {
             const payload = await response.json();
-            destination = routeForApproval(payload.approval, session.user?.email);
+            destination = routeForApproval(payload.approval, session.user?.email, payload.staff_access);
           }
         } catch {
           destination = '/pending';

@@ -3,6 +3,8 @@
 import { useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { publishClientNotification } from '@/lib/clientNotifications';
+import { showBrowserNotification } from '@/lib/browserNotifications';
+import { isBoardRecentlyOnline } from '@/lib/boardPresence';
 import {
   getDeviceRunHoursToday,
   getDeviceWattage,
@@ -31,6 +33,33 @@ function money(value, currency) {
 
 export default function NotificationEngine({ user }) {
   useEffect(() => {
+    if (!user?.id) return undefined;
+    let active = true;
+    const channel = supabase.channel(`alarm-browser-alerts-${user.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'alarms', filter: `user_id=eq.${user.id}`,
+      }, async ({ new: alarm }) => {
+        if (!active || !alarm?.fired || alarm.deleted_at) return;
+        const { data: settings, error: settingsError } = await supabase.from('user_settings')
+          .select('notifications_enabled,notify_alarm').eq('user_id', user.id).maybeSingle();
+        if (!active || settingsError || settings?.notifications_enabled === false || settings?.notify_alarm === false) return;
+        const { data: device } = await supabase.from('devices').select('name')
+          .eq('id', alarm.device_id).eq('user_id', user.id).maybeSingle();
+        if (!active) return;
+        const body = `${device?.name || 'Device'} turned ${alarm.action ? 'ON' : 'OFF'}.`;
+        const dedupeKey = `alarm:${alarm.id}`;
+        const result = await publishClientNotification({
+          userId: user.id, type: 'alarm', title: 'Alarm fired', body,
+          url: '/alarms', dedupeKey, data: { alarm_id: alarm.id, device_id: alarm.device_id },
+        });
+        if (result?.status === 'duplicate') {
+          await showBrowserNotification({ title: 'Alarm fired', body, tag: dedupeKey, url: '/alarms' });
+        }
+      }).subscribe();
+    return () => { active = false; supabase.removeChannel(channel); };
+  }, [user?.id]);
+
+  useEffect(() => {
     if (!user) return undefined;
 
     let active = true;
@@ -40,7 +69,7 @@ export default function NotificationEngine({ user }) {
       if (!active || running) return;
       running = true;
       try {
-        const [{ data: settings }, { data: devices }] = await Promise.all([
+        const [{ data: settings }, { data: devices }, { data: boards }] = await Promise.all([
           supabase
             .from('user_settings')
             .select(
@@ -50,8 +79,10 @@ export default function NotificationEngine({ user }) {
             .maybeSingle(),
           supabase
             .from('devices')
-            .select('id, name, is_on, last_changed')
-            .eq('user_id', user.id),
+            .select('id, board_id, name, is_on, last_changed')
+            .eq('user_id', user.id).is('deleted_at', null),
+          supabase.from('boards').select('id, last_seen')
+            .eq('user_id', user.id).is('deleted_at', null),
         ]);
 
         if (!active || !devices?.length) return;
@@ -59,6 +90,9 @@ export default function NotificationEngine({ user }) {
         if (prefs.notifications_enabled === false) return;
 
         const now = new Date();
+        const liveBoards = new Set((boards || []).filter((board) => isBoardRecentlyOnline(board, now)).map((board) => board.id));
+        const liveDevices = devices.filter((device) => liveBoards.has(device.board_id));
+        if (!liveDevices.length) return;
         const startOfToday = new Date(now);
         startOfToday.setHours(0, 0, 0, 0);
 
@@ -72,7 +106,7 @@ export default function NotificationEngine({ user }) {
 
         if (!active) return;
         const dateKey = localDateKey(now);
-        const stats = devices.map((device) => {
+        const stats = liveDevices.map((device) => {
           const runHours = getDeviceRunHoursToday(device, logs || []);
           const kwh = (getDeviceWattage(device.name || '') * runHours) / 1000;
           return { device, runHours, kwh };

@@ -1,5 +1,6 @@
 "use client";
 
+import AppSelect from '@/components/AppSelect';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Clock3, ExternalLink, LoaderCircle, Play, Radio, RefreshCw, Server, Square, Terminal } from "lucide-react";
 
@@ -193,7 +194,7 @@ export default function AdminMqttServer({ accessToken = "" }) {
               <div className="flex items-center gap-2"><Clock3 size={16} className="text-accent" /><h3 className="text-sm font-black text-text">Schedule a one-time start</h3></div>
               <p className="mt-1 text-xs leading-5 text-text-muted">Choose the laptop, date, and local time. The defaults are set to the current date and time.</p>
               <label className="mt-4 block text-[10px] font-black uppercase tracking-wider text-text-muted" htmlFor="mqtt-schedule-owner">Laptop to start</label>
-              <select id="mqtt-schedule-owner" value={scheduleOwner} onChange={(event) => setScheduleOwner(event.target.value)} className="mt-1.5 min-h-10 w-full rounded-xl border border-border bg-background px-3 text-xs font-bold text-text outline-none focus:border-accent"><option value="hemanth">Hemanth’s laptop</option><option value="lrv">LRV’s laptop</option></select>
+              <AppSelect id="mqtt-schedule-owner" value={scheduleOwner} onChange={(event) => setScheduleOwner(event.target.value)} className="mt-1.5 min-h-10 w-full rounded-xl border border-border bg-background px-3 text-xs font-bold text-text outline-none focus:border-accent"><option value="hemanth">Hemanth’s laptop</option><option value="lrv">LRV’s laptop</option></AppSelect>
               <div className="mt-3 grid grid-cols-2 gap-3">
                 <div><label className="block text-[10px] font-black uppercase tracking-wider text-text-muted" htmlFor="mqtt-schedule-date">Date</label><input id="mqtt-schedule-date" type="date" value={scheduleDate} onChange={(event) => setScheduleDate(event.target.value)} required className="mt-1.5 min-h-10 w-full rounded-xl border border-border bg-background px-3 text-xs font-bold text-text outline-none focus:border-accent" /></div>
                 <div><label className="block text-[10px] font-black uppercase tracking-wider text-text-muted" htmlFor="mqtt-schedule-time">Time</label><input id="mqtt-schedule-time" type="time" value={scheduleTime} onChange={(event) => setScheduleTime(event.target.value)} required className="mt-1.5 min-h-10 w-full rounded-xl border border-border bg-background px-3 text-xs font-bold text-text outline-none focus:border-accent" /></div>

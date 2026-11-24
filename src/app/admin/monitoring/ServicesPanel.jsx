@@ -1,5 +1,6 @@
 "use client";
 
+import AppSelect from '@/components/AppSelect';
 import { useMemo, useState } from "react";
 import {
   Activity,
@@ -61,7 +62,7 @@ function FunctionsSection({ project, range, token, managementConfigured }) {
     <div className="mt-4 space-y-3 rounded-xl border border-border bg-card-alt/30 p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[10px] font-black uppercase tracking-wide text-text-muted">Function selection</span>
-        <select
+        <AppSelect
           value={feed.functionId}
           onChange={(event) => feed.setFunctionId(event.target.value)}
           className="min-h-9 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-[11px] font-bold text-text outline-none focus:border-accent"
@@ -71,7 +72,7 @@ function FunctionsSection({ project, range, token, managementConfigured }) {
           {feed.functions.map((item) => (
             <option key={item.id} value={item.id}>{item.name || item.slug} ({item.status})</option>
           ))}
-        </select>
+        </AppSelect>
       </div>
       {feed.loading ? <LoadingBlock label="Loading Edge Function statistics" rows={2} /> : null}
       {feed.error ? <InlineNotice tone="warn" title="Function discovery issue">{feed.error.message}</InlineNotice> : null}

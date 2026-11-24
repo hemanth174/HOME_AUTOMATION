@@ -1,4 +1,5 @@
 "use client";
+import AppSelect from '@/components/AppSelect';
 import { DAY_FULL, DAY_NAMES, formatDays, formatScheduleDate, formatTime, toDateInputValue } from "./scheduleUtils";
 import { DevicePicker, TimePicker12h } from "./SchedulePickers";
 
@@ -191,7 +192,7 @@ export default function ScheduleFormModal({ state }) {
             <label className="text-xs font-extrabold tracking-wide text-text-muted">
               Action
             </label>
-            <select
+            <AppSelect
               value={scheduleAction}
               onChange={(event) =>
                 setScheduleAction?.(event.target.value === "true")
@@ -200,7 +201,7 @@ export default function ScheduleFormModal({ state }) {
             >
               <option value="true">Turn ON</option>
               <option value="false">Turn OFF</option>
-            </select>
+            </AppSelect>
           </div>
 
           <div className="mt-4 flex flex-wrap justify-end gap-2.5">

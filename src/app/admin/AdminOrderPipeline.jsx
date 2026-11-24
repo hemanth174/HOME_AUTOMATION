@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronDown, Inbox, Layers, Search, Sparkles, X } from "lucide-react";
+import AppSelect from '@/components/AppSelect';
+import { Inbox, Layers, Search, Sparkles, X } from "lucide-react";
 
 function StatusPill({ status, stageColors }) {
   const colorClass = stageColors[status] || stageColors.Received;
@@ -93,7 +94,7 @@ export default function AdminOrderPipeline({
 
             {/* Stage Selector */}
             <div className="relative min-w-0 sm:w-48">
-              <select
+              <AppSelect
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 className="min-h-11 w-full appearance-none rounded-xl border border-border bg-background py-2.5 pl-3.5 pr-9 text-xs font-black text-text outline-none transition focus:border-accent"
@@ -104,11 +105,7 @@ export default function AdminOrderPipeline({
                     {stage}
                   </option>
                 ))}
-              </select>
-              <ChevronDown
-                size={14}
-                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-muted"
-              />
+              </AppSelect>
             </div>
           </div>
         </div>

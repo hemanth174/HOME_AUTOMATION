@@ -1,3 +1,4 @@
+import AppSelect from '@/components/AppSelect';
 import { useMemo, useState } from "react";
 import { Check, Cpu } from "lucide-react";
 import { daysInMonth, groupByBoard, MONTH_NAMES } from "./alarmUtils";
@@ -11,14 +12,14 @@ export function DateTimePicker12h({ parts, onChange, error, confirmed }) {
   const change = (key, value, resetDay = false) => onChange({ ...parts, [key]: value, ...(resetDay ? { day: "" } : {}) });
   return <div className="flex flex-col gap-3">
     <div><p className="text-[10px] font-extrabold uppercase tracking-widest text-text-muted mb-1.5">Date</p><div className="grid grid-cols-3 gap-2">
-      <select value={day} onChange={(e) => change("day", e.target.value)} className={select}><option value="">Day</option>{Array.from({ length: maxDay }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{String(n).padStart(2, "0")}</option>)}</select>
-      <select value={month} onChange={(e) => change("month", e.target.value, true)} className={select}><option value="">Month</option>{MONTH_NAMES.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}</select>
-      <select value={year} onChange={(e) => change("year", e.target.value, true)} className={select}><option value="">Year</option>{Array.from({ length: 10 }, (_, i) => currentYear + i).map((n) => <option key={n} value={n}>{n}</option>)}</select>
+      <AppSelect value={day} onChange={(e) => change("day", e.target.value)} className={select}><option value="">Day</option>{Array.from({ length: maxDay }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{String(n).padStart(2, "0")}</option>)}</AppSelect>
+      <AppSelect value={month} onChange={(e) => change("month", e.target.value, true)} className={select}><option value="">Month</option>{MONTH_NAMES.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}</AppSelect>
+      <AppSelect value={year} onChange={(e) => change("year", e.target.value, true)} className={select}><option value="">Year</option>{Array.from({ length: 10 }, (_, i) => currentYear + i).map((n) => <option key={n} value={n}>{n}</option>)}</AppSelect>
     </div></div>
     <div><p className="text-[10px] font-extrabold uppercase tracking-widest text-text-muted mb-1.5">Time</p><div className="flex items-center gap-2">
-      <select value={hour} onChange={(e) => change("hour", e.target.value)} className={`flex-1 ${select}`}>{Array.from({ length: 12 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{String(n).padStart(2, "0")}</option>)}</select><span className="text-text-muted font-extrabold text-lg">:</span>
-      <select value={minute} onChange={(e) => change("minute", e.target.value)} className={`flex-1 ${select}`}>{Array.from({ length: 60 }, (_, i) => i).map((n) => <option key={n} value={n}>{String(n).padStart(2, "0")}</option>)}</select>
-      <select value={ampm} onChange={(e) => change("ampm", e.target.value)} className={select}><option>AM</option><option>PM</option></select>
+      <AppSelect value={hour} onChange={(e) => change("hour", e.target.value)} className={`flex-1 ${select}`}>{Array.from({ length: 12 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{String(n).padStart(2, "0")}</option>)}</AppSelect><span className="text-text-muted font-extrabold text-lg">:</span>
+      <AppSelect value={minute} onChange={(e) => change("minute", e.target.value)} className={`flex-1 ${select}`}>{Array.from({ length: 60 }, (_, i) => i).map((n) => <option key={n} value={n}>{String(n).padStart(2, "0")}</option>)}</AppSelect>
+      <AppSelect value={ampm} onChange={(e) => change("ampm", e.target.value)} className={select}><option>AM</option><option>PM</option></AppSelect>
     </div></div>
   </div>;
 }

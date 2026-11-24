@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { ADMIN_EMAILS, isAdminEmail } from "@/lib/admin";
+import { ADMIN_EMAILS, INITIAL_SUB_ADMIN_EMAILS } from "@/lib/admin";
 import { CATEGORY_LABELS, STAGES } from "@/lib/orderCategories";
 import {
   Activity,
@@ -13,6 +13,8 @@ import {
   Inbox,
   LayoutDashboard,
   Mail,
+  Headset,
+  Users,
   RefreshCw,
   Radio,
   ShieldAlert,
@@ -28,6 +30,9 @@ import AdminOrderDrawer from "./AdminOrderDrawer";
 import AdminVoiceSubscription from "./AdminVoiceSubscription";
 import AdminMonitoring from "./monitoring/AdminMonitoring";
 import AdminMqttServer from "./AdminMqttServer";
+import AdminStaff from "./AdminStaff";
+import AdminOrderSummary from "./AdminOrderSummary";
+import SupportDesk from "@/components/SupportDesk";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const stageColors = {
@@ -40,7 +45,7 @@ const stageColors = {
 };
 
 const ADMIN_TAB_COOKIE = "vikatech_admin_tab";
-const ADMIN_TABS = ["orders", "users", "hardware", "subscriptions", "monitoring", "mqtt-server"];
+const ADMIN_TABS = ["orders", "support", "staff", "users", "hardware", "subscriptions", "monitoring", "mqtt-server"];
 
 function readAdminTabCookie() {
   if (typeof document === "undefined") return "orders";
@@ -91,6 +96,7 @@ function AdminLoading() {
 
 export default function AdminPage() {
   const [user, setUser] = useState(null);
+  const [adminRole, setAdminRole] = useState(null);
   const [accessToken, setAccessToken] = useState("");
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
@@ -116,7 +122,18 @@ export default function AdminPage() {
       const { data: { session } } = await supabase.auth.getSession();
       setUser(session?.user || null);
       setAccessToken(session?.access_token || "");
-      if (!session || !isAdminEmail(session.user.email)) return;
+      if (!session) return;
+
+      const roleResponse = await fetch('/api/admin/role', {
+        headers: { Authorization: `Bearer ${session.access_token}` }, cache: 'no-store',
+      });
+      const roleData = await roleResponse.json();
+      if (!roleResponse.ok) {
+        setAdminRole(null);
+        setNotice(roleData.error || 'Admin access required');
+        return;
+      }
+      setAdminRole(roleData.role);
 
       const res = await fetch("/api/admin/orders", {
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -147,15 +164,20 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
+    if (adminRole === 'sub_admin' && !['orders', 'support'].includes(tab)) setTab('support');
+  }, [adminRole, tab]);
+
+  useEffect(() => {
     if (!tabHydrated) return;
     document.cookie = `${ADMIN_TAB_COOKIE}=${encodeURIComponent(tab)}; Max-Age=31536000; Path=/; SameSite=Lax`;
   }, [tab, tabHydrated]);
 
   useEffect(() => {
-    if (!user || !isAdminEmail(user.email)) return;
+    if (!user || adminRole !== 'main_admin') return;
     const channel = supabase
       .channel("admin-account-approval-queue")
       .on("postgres_changes", { event: "*", schema: "public", table: "account_approval_requests" }, (payload) => {
+        if (INITIAL_SUB_ADMIN_EMAILS.includes((payload.new?.email || payload.old?.email || '').toLowerCase())) return;
         if (payload.eventType === "DELETE") {
           setApprovals((current) => current.filter((item) => item.user_id !== payload.old.user_id));
         } else if (payload.eventType === "INSERT") {
@@ -169,7 +191,7 @@ export default function AdminPage() {
       .subscribe();
 
     return () => supabase.removeChannel(channel);
-  }, [user]);
+  }, [user, adminRole]);
 
   const filtered = useMemo(
     () =>
@@ -209,6 +231,7 @@ export default function AdminPage() {
   );
 
   const updateStage = async (orderId, status) => {
+    if (adminRole !== 'main_admin') return;
     const previous = selected;
     setSelected((prev) => (prev?.order_id === orderId ? { ...prev, status } : prev));
     setOrders((prev) => prev.map((o) => (o.order_id === orderId ? { ...o, status } : o)));
@@ -247,6 +270,7 @@ export default function AdminPage() {
   };
 
   const reviewAccount = async (userId, action, rejectionReason = "") => {
+    if (adminRole !== 'main_admin') return false;
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       setNotice("Your session expired. Please sign in again.");
@@ -288,7 +312,7 @@ export default function AdminPage() {
 
   if (loading) return <AdminLoading />;
 
-  if (!user || !isAdminEmail(user.email)) {
+  if (!user || !adminRole) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4 py-16 text-center text-text sm:px-6">
         <div className="w-full max-w-md rounded-2xl border border-red-500/20 bg-card p-6 shadow-2xl sm:p-8">
@@ -319,6 +343,7 @@ export default function AdminPage() {
   };
 
   const pendingCount = approvals.filter((item) => item.account_status === "pending").length;
+  const isMainAdmin = adminRole === 'main_admin';
 
   return (
     <main className="min-h-screen bg-background text-text selection:bg-accent/20">
@@ -332,7 +357,7 @@ export default function AdminPage() {
                 <span className="text-[10px] font-black uppercase tracking-[.22em] text-accent">
                   Operations Console
                 </span>
-                <span className="hidden text-[10px] font-bold text-text-muted sm:inline">· 2 Admins Active</span>
+                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black ${isMainAdmin ? 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300' : 'border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-300'}`}>{isMainAdmin ? 'Main admin' : 'Sub admin'}</span>
               </div>
               <h1 className="mt-0.5 truncate text-xl font-black tracking-tight sm:text-2xl lg:text-3xl">
                 Admin Command Center
@@ -399,7 +424,7 @@ export default function AdminPage() {
               }`}
             >
               <Inbox size={15} className={tab === "orders" ? "text-amber-500" : "text-text-muted"} />
-              <span>Order Pipeline</span>
+              <span>{isMainAdmin ? 'Order Pipeline' : 'Order summaries'}</span>
               <span
                 className={`ml-1 rounded-full px-2 py-0.5 text-[10px] font-black ${
                   tab === "orders"
@@ -410,6 +435,8 @@ export default function AdminPage() {
                 {orders.length}
               </span>
             </button>
+
+            {isMainAdmin && <>
 
             <button
               type="button"
@@ -429,6 +456,15 @@ export default function AdminPage() {
               )}
             </button>
 
+            </>}
+
+            <button type="button" onClick={() => setTab('support')} aria-current={tab === 'support' ? 'page' : undefined}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs transition-colors ${tab === 'support' ? 'border border-sky-500/30 bg-sky-500/10 font-black text-sky-700 shadow-sm dark:text-sky-300' : 'font-bold text-text-muted hover:bg-sky-500/10 hover:text-text'}`}>
+              <Headset size={15} /> Support tickets
+            </button>
+
+            {isMainAdmin && <>
+
             <button
               type="button"
               onClick={() => setTab("hardware")}
@@ -444,15 +480,16 @@ export default function AdminPage() {
 
             <button
               type="button"
-              onClick={() => setTab("subscriptions")}
+              onClick={() => setTab("mqtt-server")}
+              aria-current={tab === "mqtt-server" ? "page" : undefined}
               className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs transition-all ${
-                tab === "subscriptions"
+                tab === "mqtt-server"
                   ? "bg-card text-text border border-border shadow-sm font-black"
                   : "text-text-muted hover:text-text hover:bg-card/40 font-bold"
               }`}
             >
-              <Sparkles size={15} className={tab === "subscriptions" ? "text-amber-500" : "text-text-muted"} />
-              <span>Voice Plans</span>
+              <Radio size={15} className={tab === "mqtt-server" ? "text-emerald-500" : "text-text-muted"} />
+              <span>MQTT Server</span>
             </button>
 
             <button
@@ -470,30 +507,41 @@ export default function AdminPage() {
 
             <button
               type="button"
-              onClick={() => setTab("mqtt-server")}
-              aria-current={tab === "mqtt-server" ? "page" : undefined}
+              onClick={() => setTab("subscriptions")}
               className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs transition-all ${
-                tab === "mqtt-server"
+                tab === "subscriptions"
                   ? "bg-card text-text border border-border shadow-sm font-black"
                   : "text-text-muted hover:text-text hover:bg-card/40 font-bold"
               }`}
             >
-              <Radio size={15} className={tab === "mqtt-server" ? "text-emerald-500" : "text-text-muted"} />
-              <span>MQTT Server</span>
+              <Sparkles size={15} className={tab === "subscriptions" ? "text-amber-500" : "text-text-muted"} />
+              <span>Voice Plans</span>
             </button>
+
+            <button type="button" onClick={() => setTab('staff')} aria-current={tab === 'staff' ? 'page' : undefined}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs transition-colors ${tab === 'staff' ? 'border border-amber-500/30 bg-amber-500/10 font-black text-amber-700 shadow-sm dark:text-amber-300' : 'font-bold text-text-muted hover:bg-amber-500/10 hover:text-text'}`}>
+              <Users size={15} /> Admin team
+            </button>
+            </>}
           </nav>
         </div>
       </header>
 
       {/* Main Content Area */}
       <div className="mx-auto max-w-[1440px] px-3 py-5 sm:px-6 sm:py-6 lg:px-10">
-        {tab === "mqtt-server" ? (
+        {tab === 'support' ? (
+          <SupportDesk staffMode mainAdmin={isMainAdmin} />
+        ) : tab === 'staff' && isMainAdmin ? (
+          <AdminStaff accessToken={accessToken} />
+        ) : tab === 'orders' && !isMainAdmin ? (
+          <AdminOrderSummary orders={orders} />
+        ) : tab === "mqtt-server" && isMainAdmin ? (
           <AdminMqttServer accessToken={accessToken} />
-        ) : tab === "monitoring" ? (
+        ) : tab === "monitoring" && isMainAdmin ? (
           <AdminMonitoring accessToken={accessToken} />
-        ) : tab === "hardware" ? (
+        ) : tab === "hardware" && isMainAdmin ? (
           <DeviceFleet />
-        ) : tab === "users" ? (
+        ) : tab === "users" && isMainAdmin ? (
           <AdminApprovalQueue
             approvals={approvals}
             visibleApprovals={visibleApprovals}
@@ -506,8 +554,10 @@ export default function AdminPage() {
             setDenyReason={setDenyReason}
             approvalState={approvalState}
           />
-        ) : tab === "subscriptions" ? (
+        ) : tab === "subscriptions" && isMainAdmin ? (
           <AdminVoiceSubscription accessToken={accessToken} onNotice={setNotice} />
+        ) : !isMainAdmin ? (
+          <SupportDesk staffMode />
         ) : (
           <AdminOrderPipeline
             filtered={filtered}
@@ -524,7 +574,7 @@ export default function AdminPage() {
         )}
 
         {/* Operational Telemetry Cards */}
-        {tab !== "hardware" && tab !== "subscriptions" && tab !== "monitoring" && tab !== "mqtt-server" && (
+        {isMainAdmin && !['hardware', 'subscriptions', 'monitoring', 'mqtt-server', 'support', 'staff'].includes(tab) && (
           <section className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex items-start gap-3 rounded-2xl border border-border bg-card/60 p-4 backdrop-blur-sm sm:p-5">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-accent/20 bg-accent/10 text-accent">
@@ -554,7 +604,7 @@ export default function AdminPage() {
       </div>
 
       {/* Denial / Revoke Reason Modal Sheet */}
-      {denyTarget && (
+      {isMainAdmin && denyTarget && (
         <div
           role="dialog"
           aria-modal="true"
@@ -655,7 +705,7 @@ export default function AdminPage() {
       )}
 
       {/* Selected Order Slide-Over Drawer */}
-      {selected && (
+      {isMainAdmin && selected && (
         <AdminOrderDrawer
           order={selected}
           stages={STAGES}

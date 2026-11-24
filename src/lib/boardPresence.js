@@ -11,3 +11,13 @@ export function isBoardOnline(value, now = Date.now()) {
   const ageMs = now - lastSeenMs;
   return Number.isFinite(lastSeenMs) && ageMs >= -10_000 && ageMs < BOARD_ONLINE_GRACE_MS;
 }
+
+export const BOARD_ONLINE_WINDOW_MS = 2 * 60 * 1000;
+
+export function isBoardRecentlyOnline(board, now = Date.now(), windowMs = BOARD_ONLINE_WINDOW_MS) {
+  if (!board?.id || !board.last_seen || board.deleted_at) return false;
+  const lastSeen = new Date(board.last_seen).getTime();
+  const current = now instanceof Date ? now.getTime() : Number(now);
+  const age = current - lastSeen;
+  return Number.isFinite(age) && age >= 0 && age < windowMs;
+}

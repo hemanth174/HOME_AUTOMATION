@@ -1,4 +1,5 @@
 "use client";
+import AppSelect from '@/components/AppSelect';
 import { useMemo, useState } from "react";
 import { Check, Cpu } from "lucide-react";
 import { groupByBoard } from "./scheduleUtils";
@@ -18,7 +19,7 @@ export function TimePicker12h({ value, onChange }) {
 
   return (
     <div className="flex items-center gap-2">
-      <select
+      <AppSelect
         value={h12}
         onChange={(event) => emit(event.target.value, mm, ampm)}
         className={selectClass}
@@ -28,9 +29,9 @@ export function TimePicker12h({ value, onChange }) {
             {String(hour).padStart(2, "0")}
           </option>
         ))}
-      </select>
+      </AppSelect>
       <span className="select-none text-lg font-extrabold text-text-muted">:</span>
-      <select
+      <AppSelect
         value={rawM}
         onChange={(event) => emit(h12, event.target.value, ampm)}
         className={selectClass}
@@ -40,15 +41,15 @@ export function TimePicker12h({ value, onChange }) {
             {String(minute).padStart(2, "0")}
           </option>
         ))}
-      </select>
-      <select
+      </AppSelect>
+      <AppSelect
         value={ampm}
         onChange={(event) => emit(h12, mm, event.target.value)}
         className="cursor-pointer rounded-lg border-[1.5px] border-border bg-input px-3 py-2.5 text-sm font-extrabold text-text outline-none transition-all focus:border-accent focus:shadow-[0_0_0_3px_var(--accent-bg)]"
       >
         <option>AM</option>
         <option>PM</option>
-      </select>
+      </AppSelect>
     </div>
   );
 }

@@ -1,7 +1,8 @@
 "use client";
 
+import AppSelect from '@/components/AppSelect';
 import { useEffect, useState } from "react";
-import { Bell, LayoutGrid, Mic, SlidersHorizontal, Zap } from "lucide-react";
+import { Bell, LayoutGrid, Mail, Mic, SlidersHorizontal, Zap } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import {
   ensurePushSubscription,
@@ -77,6 +78,7 @@ export default function SettingsPage() {
   const [energyThreshold, setEnergyThreshold] = useState("3");
   const [notifyGhost, setNotifyGhost] = useState(true);
   const [ghostSummaryHour, setGhostSummaryHour] = useState("20");
+  const [reportFrequency, setReportFrequency] = useState("off");
   const [dashboardViewSwitcherEnabled, setDashboardViewSwitcherEnabled] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [notificationPermission, setNotificationPermission] = useState("default");
@@ -85,12 +87,14 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [savingNotifications, setSavingNotifications] = useState(false);
   const [savingDashboard, setSavingDashboard] = useState(false);
+  const [savingReports, setSavingReports] = useState(false);
   const [toast, setToast] = useState("");
   const [savedEnergySettings, setSavedEnergySettings] = useState(DEFAULT_ENERGY_SETTINGS);
   const [savedNotificationSettings, setSavedNotificationSettings] = useState(DEFAULT_NOTIFICATION_SETTINGS);
   const [savedDashboardSettings, setSavedDashboardSettings] = useState({
     dashboardViewSwitcherEnabled: false,
   });
+  const [savedReportFrequency, setSavedReportFrequency] = useState("off");
 
   useEffect(() => {
     let active = true;
@@ -148,6 +152,8 @@ export default function SettingsPage() {
       setEnergyThreshold(nextNotificationSettings.energyThreshold);
       setNotifyGhost(nextNotificationSettings.notifyGhost);
       setGhostSummaryHour(nextNotificationSettings.ghostSummaryHour);
+      setReportFrequency(data?.analytics_report_frequency || "off");
+      setSavedReportFrequency(data?.analytics_report_frequency || "off");
       setDashboardViewSwitcherEnabled(nextDashboardSettings.dashboardViewSwitcherEnabled);
       setSavedEnergySettings(nextEnergySettings);
       setSavedNotificationSettings(nextNotificationSettings);
@@ -182,6 +188,22 @@ export default function SettingsPage() {
 
   const dashboardSettingsChanged =
     dashboardViewSwitcherEnabled !== savedDashboardSettings.dashboardViewSwitcherEnabled;
+
+  const reportSettingsChanged = reportFrequency !== savedReportFrequency;
+
+  const saveReportSettings = async (event) => {
+    event.preventDefault();
+    if (!user || savingReports || !reportSettingsChanged) return;
+    setSavingReports(true);
+    const { error } = await supabase.from("user_settings").upsert({
+      user_id: user.id,
+      analytics_report_frequency: reportFrequency,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+    setSavingReports(false);
+    if (!error) setSavedReportFrequency(reportFrequency);
+    setToast(error ? `Could not save email reports: ${error.message}` : "Email report preference saved.");
+  };
 
   const saveEnergySettings = async (event) => {
     event.preventDefault();
@@ -358,6 +380,7 @@ export default function SettingsPage() {
             { id: "dashboard", label: "Dashboard", icon: LayoutGrid },
             { id: "energy", label: "Energy", icon: Zap },
             { id: "notifications", label: "Notifications", icon: Bell },
+            { id: "reports", label: "Email reports", icon: Mail },
             { id: "voice", label: "Voice", icon: Mic },
           ].map(({ id, label, icon: Icon }) => (
             <button
@@ -461,7 +484,7 @@ export default function SettingsPage() {
             </div>
             <label className="flex flex-col gap-1.5 text-xs font-extrabold text-text-muted">
               Currency Symbol
-              <select
+              <AppSelect
                 value={currency}
                 onChange={(e) => setCurrency(e.target.value)}
                 className="w-full px-3 py-2.5 rounded-xl border-[1.5px] border-border bg-input text-text text-xs sm:text-sm outline-none focus:border-accent cursor-pointer"
@@ -470,7 +493,7 @@ export default function SettingsPage() {
                 <option value="USD">$ USD — US Dollar</option>
                 <option value="EUR">€ EUR — Euro</option>
                 <option value="GBP">£ GBP — British Pound</option>
-              </select>
+              </AppSelect>
             </label>
             <button
               type="submit"
@@ -575,7 +598,7 @@ export default function SettingsPage() {
               </label>
               <label className="flex flex-col gap-1.5 text-xs font-extrabold text-text-muted">
                 Idle summary time
-                <select
+                <AppSelect
                   value={ghostSummaryHour}
                   onChange={(event) => setGhostSummaryHour(event.target.value)}
                   disabled={!notificationsEnabled || !notifyGhost}
@@ -586,7 +609,7 @@ export default function SettingsPage() {
                       {`${hour % 12 || 12}:00 ${hour >= 12 ? "PM" : "AM"}`}
                     </option>
                   ))}
-                </select>
+                </AppSelect>
                 <span className="text-[10px] font-semibold">local time ({timezone})</span>
               </label>
             </div>
@@ -629,6 +652,35 @@ export default function SettingsPage() {
             </button>
           </form>
         </section>
+        )}
+
+        {activeTab === "reports" && (
+          <section className="rounded-2xl border border-border bg-card p-4 shadow-lg sm:p-8">
+            <div className="mb-5 flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-accent/20 bg-accent-bg text-accent"><Mail size={18} strokeWidth={2.5} /></div>
+              <div>
+                <h2 className="text-sm font-extrabold tracking-tight sm:text-base">Analytics by email</h2>
+                <p className="mt-1 text-xs leading-relaxed text-text-muted">Receive a PDF report at {user?.email}. Reports use recorded activity and estimated energy, not power meter readings.</p>
+              </div>
+            </div>
+            <form onSubmit={saveReportSettings} className="max-w-xl space-y-4">
+              <fieldset className="grid gap-2 sm:grid-cols-3">
+                <legend className="mb-2 text-xs font-extrabold">Report frequency</legend>
+                {[
+                  { value: 'off', title: 'Off', detail: 'No report emails' },
+                  { value: 'weekly', title: 'Weekly', detail: 'Previous Monday–Sunday' },
+                  { value: 'monthly', title: 'Monthly', detail: 'Previous calendar month' },
+                ].map((option) => (
+                  <label key={option.value} className={`flex cursor-pointer items-start gap-2 rounded-xl border p-3 transition-colors ${reportFrequency === option.value ? 'border-accent bg-accent-bg' : 'border-border bg-input hover:border-accent/50'}`}>
+                    <input type="radio" name="report-frequency" value={option.value} checked={reportFrequency === option.value} onChange={() => setReportFrequency(option.value)} className="mt-0.5 accent-[var(--accent)]" />
+                    <span><span className="block text-xs font-extrabold">{option.title}</span><span className="mt-1 block text-[11px] leading-snug text-text-muted">{option.detail}</span></span>
+                  </label>
+                ))}
+              </fieldset>
+              <p className="text-[11px] leading-relaxed text-text-muted">Reports are sent after a completed week or month in your saved time zone ({timezone}). Your account email is the recipient.</p>
+              <button type="submit" disabled={savingReports || !reportSettingsChanged} className="min-h-11 rounded-xl bg-accent px-6 text-xs font-extrabold text-[var(--btn-text)] disabled:opacity-50">{savingReports ? 'Saving…' : 'Save email preference'}</button>
+            </form>
+          </section>
         )}
 
         {activeTab === "voice" && (

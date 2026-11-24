@@ -1,5 +1,6 @@
 "use client";
 
+import AppSelect from '@/components/AppSelect';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -181,9 +182,9 @@ export default function AdminMonitoring({ accessToken = "", standalone = false }
             </button>
             <label className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-2.5 py-2 text-[10px] font-black text-text-muted">
               <Clock size={12} />
-              <select value={range} onChange={(event) => setRange(event.target.value)} className="bg-transparent text-[10px] font-black text-text outline-none" aria-label="Time range">
+              <AppSelect value={range} onChange={(event) => setRange(event.target.value)} className="bg-transparent text-[10px] font-black text-text outline-none" aria-label="Time range">
                 {RANGE_CHOICES.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
-              </select>
+              </AppSelect>
             </label>
             <button type="button" onClick={() => setAutoRefresh((value) => !value)} disabled={!monitoringEnabled} className={`inline-flex min-h-9 items-center gap-1.5 rounded-xl border px-2.5 text-[10px] font-black disabled:opacity-50 ${autoRefresh ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' : 'border-border bg-card text-text-muted'}`} aria-pressed={monitoringEnabled && autoRefresh}>
               <Activity size={12} /> Auto {autoRefresh ? 'on' : 'off'}

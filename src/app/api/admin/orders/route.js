@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer';
 import { requireAdmin } from '@/lib/adminServer';
 import { STAGES, CATEGORY_LABELS } from '@/lib/orderCategories';
 import { APPROVAL_ADMINS } from '@/lib/approval';
+import { orderStageEmail } from '@/lib/emailTemplates';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,26 +19,33 @@ async function sendStageEmail(order, stage) {
     secure: process.env.SMTP_SECURE === 'true',
     auth: { user, pass },
   });
-    const trackingUrl = `${process.env.NEXT_PUBLIC_SITE_URL || 'https://home-automation-mauve-one.vercel.app'}/track/${order.order_id}`;
+  const template = orderStageEmail(order, stage, CATEGORY_LABELS[order.category]);
   await transporter.sendMail({
     from: process.env.SMTP_FROM || `VikaTech <${user}>`,
     to: order.email,
     bcc: adminEmails.join(','),
-    subject: `${order.order_id} is now ${stage}`,
-    text: `Hi ${order.full_name || 'there'}, your ${CATEGORY_LABELS[order.category] || 'project'} is now at the ${stage} stage. Track it here: ${trackingUrl}`,
-    html: `<div style="font-family:Arial,sans-serif;max-width:560px;padding:28px;color:#e2e2e8;background:#111317"><p style="color:#00ff41;font-weight:bold;letter-spacing:2px">VIKATECH SYSTEM UPDATE</p><h2>Your project is now ${stage}</h2><p>Hi ${order.full_name || 'there'}, your ${CATEGORY_LABELS[order.category] || 'project'} has moved forward.</p><p style="color:#00e5ff;font-weight:bold">Order ${order.order_id}</p><a href="${trackingUrl}" style="display:inline-block;background:#00ff41;color:#003907;padding:12px 18px;text-decoration:none;font-weight:bold">Track project →</a></div>`,
+    ...template,
   });
   return { sent: true };
 }
 
 export async function GET(request) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { allowSubAdmin: true });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  if (auth.role === 'sub_admin') {
+    const { data, error } = await auth.admin.from('order_trackings')
+      .select('id, order_id, full_name, email, category, status, created_at')
+      .order('created_at', { ascending: false }).limit(200);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ orders: data || [], users: [], approvals: [] },
+      { headers: { 'Cache-Control': 'no-store' } });
+  }
   const { data: orders, error } = await auth.admin.from('order_trackings').select('*').order('created_at', { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const { data: usersData } = await auth.admin.auth.admin.listUsers({ perPage: 1000 });
   const { data: approvals } = await auth.admin.from('account_approval_requests').select('*').order('created_at', { ascending: false });
-  const adminSet = new Set(APPROVAL_ADMINS);
+  const { data: staffRows } = await auth.admin.from('admin_staff').select('email');
+  const adminSet = new Set([...APPROVAL_ADMINS, ...(staffRows || []).map((item) => item.email)]);
   // Migrate legacy customer records so the approval action is available in
   // the console even when the SQL migration was run before this rule changed.
   for (const item of approvals || []) {

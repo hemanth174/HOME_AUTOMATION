@@ -1,5 +1,10 @@
+"use client";
+
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
+  Ellipsis,
   FileText,
   HelpCircle,
   PanelLeftClose,
@@ -7,12 +12,18 @@ import {
   PinOff,
 } from "lucide-react";
 
+const supportLinks = [
+  { href: "/faq", label: "FAQ's", icon: HelpCircle },
+  { href: "/terms", label: "Terms & Conditions", icon: FileText },
+];
+
 function SidebarLink({
   link,
   pathname,
   isClientOnline,
   handleOfflineLinkClick,
   sidebarExpanded,
+  onNavigate,
 }) {
   const active = pathname === link.href;
   const Icon = link.icon;
@@ -24,8 +35,12 @@ function SidebarLink({
       href={link.href}
       target={link.href === "/admin" ? "_blank" : undefined}
       rel={link.href === "/admin" ? "noopener noreferrer" : undefined}
-      onClick={(event) => handleOfflineLinkClick(event, link)}
+      onClick={(event) => {
+        handleOfflineLinkClick(event, link);
+        if (!event.defaultPrevented) onNavigate?.();
+      }}
       aria-current={active ? "page" : undefined}
+      data-sidebar-item=""
       title={!sidebarExpanded ? link.label : undefined}
       className={`rounded-full py-2.5 text-sm font-bold transition-colors duration-200 ease-out flex items-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--pg-brand) ${sidebarExpanded ? "px-3 justify-between" : "px-0 justify-center"} ${isCloudDisabled ? "opacity-40 cursor-not-allowed text-(--pg-muted) bg-transparent hover:bg-transparent" : active ? "bg-(--pg-brand-faint) text-(--pg-brand) hover:bg-(--pg-brand-soft)" : "text-(--pg-navtext) bg-transparent hover:bg-(--pg-brand-faint) hover:text-(--pg-brand)"}`}
     >
@@ -80,14 +95,110 @@ export default function NavbarSidebar({
   email,
 }) {
   const sidebarExpanded = sidebarPinned || sidebarLocalHover;
+  const navSlotRef = useRef(null);
+  const navProbeRef = useRef(null);
+  const probeMoreRef = useRef(null);
+  const moreButtonRef = useRef(null);
+  const morePanelRef = useRef(null);
+  const [visibleCount, setVisibleCount] = useState(links.length + manageLinks.length + supportLinks.length);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [morePosition, setMorePosition] = useState({ top: 8, left: 72 });
+  const totalLinks = links.length + manageLinks.length + supportLinks.length;
+  const shownCount = Math.min(visibleCount, totalLinks);
+  const visibleMain = links.slice(0, shownCount);
+  const visibleManage = manageLinks.slice(0, Math.max(0, shownCount - links.length));
+  const visibleSupport = supportLinks.slice(0, Math.max(0, shownCount - links.length - manageLinks.length));
+  const hiddenMain = links.slice(shownCount);
+  const hiddenManage = manageLinks.slice(Math.max(0, shownCount - links.length));
+  const hiddenSupport = supportLinks.slice(Math.max(0, shownCount - links.length - manageLinks.length));
+  const hiddenLinks = [...hiddenMain, ...hiddenManage, ...hiddenSupport];
+
+  useLayoutEffect(() => {
+    const slot = navSlotRef.current;
+    const probe = navProbeRef.current;
+    if (!slot || !probe) return undefined;
+    let active = true;
+
+    const measure = () => {
+      if (!active) return;
+      const items = [...probe.querySelectorAll('[data-sidebar-item]')];
+      const probeTop = probe.getBoundingClientRect().top;
+      const moreHeight = probeMoreRef.current?.offsetHeight || 40;
+      const available = slot.clientHeight - 2;
+      for (let count = items.length; count >= 0; count -= 1) {
+        const lastItemBottom = count ? items[count - 1].getBoundingClientRect().bottom - probeTop : 0;
+        const required = count === items.length
+          ? lastItemBottom
+          : lastItemBottom + (count ? 16 : 0) + moreHeight;
+        if (required <= available || count === 0) {
+          setVisibleCount((current) => current === count ? current : count);
+          break;
+        }
+      }
+    };
+
+    measure();
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    observer?.observe(slot);
+    observer?.observe(probe);
+    window.addEventListener('resize', measure);
+    document.fonts?.ready.then(measure);
+    return () => {
+      active = false;
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [sidebarExpanded, links.length, manageLinks.length]);
+
+  useLayoutEffect(() => {
+    if (!moreOpen || !hiddenLinks.length) return undefined;
+    const updatePosition = () => {
+      const rect = moreButtonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const panelHeight = Math.min(420, window.innerHeight - 16);
+      setMorePosition({
+        top: Math.max(8, Math.min(rect.top, window.innerHeight - panelHeight - 8)),
+        left: Math.max(8, Math.min(rect.right + 8, window.innerWidth - 248)),
+      });
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    return () => window.removeEventListener('resize', updatePosition);
+  }, [moreOpen, shownCount, sidebarExpanded, hiddenLinks.length]);
+
+  useEffect(() => {
+    if (!moreOpen) return undefined;
+    const onPointerDown = (event) => {
+      if (!moreButtonRef.current?.contains(event.target) && !morePanelRef.current?.contains(event.target)) {
+        setMoreOpen(false);
+      }
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setMoreOpen(false);
+        moreButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [moreOpen]);
+
+  useEffect(() => {
+    if (!hiddenLinks.length) setMoreOpen(false);
+  }, [hiddenLinks.length]);
+
+  useEffect(() => setMoreOpen(false), [pathname]);
 
   return (
     <div
-      className={`flex flex-col h-full justify-between py-5 select-none ${sidebarExpanded ? "px-2" : "px-2"}`}
+      className="flex h-full min-h-0 flex-col overflow-hidden px-2 py-3 select-none"
     >
-      <div className="flex flex-col gap-4">
         <div
-          className={`flex items-center ${sidebarExpanded ? "justify-between px-2" : "justify-center"}`}
+          className={`flex shrink-0 items-center ${sidebarExpanded ? "justify-between px-2" : "justify-center"}`}
         >
           <Link
             href="/"
@@ -133,59 +244,74 @@ export default function NavbarSidebar({
           )}
         </div>
 
-        <SidebarSection
-          label="MAIN MENU"
-          links={links}
-          pathname={pathname}
-          isClientOnline={isClientOnline}
-          handleOfflineLinkClick={handleOfflineLinkClick}
-          sidebarExpanded={sidebarExpanded}
-        />
-
-        <SidebarSection
-          label="MANAGE"
-          links={manageLinks}
-          pathname={pathname}
-          isClientOnline={isClientOnline}
-          handleOfflineLinkClick={handleOfflineLinkClick}
-          sidebarExpanded={sidebarExpanded}
-        />
-
-        <div className="flex flex-col gap-1.5 mt-2">
-          {sidebarExpanded && (
-            <span className="text-[9px] font-extrabold uppercase tracking-widest text-(--pg-muted) px-2 mb-1">
-              SUPPORT &amp; LEGAL
-            </span>
-          )}
-          <Link
-            href="/faq"
-            aria-current={pathname === "/faq" ? "page" : undefined}
-            className={`rounded-xl py-2.5 text-sm font-bold transition-colors duration-200 flex items-center ${pathname === "/faq" ? "bg-(--pg-brand-faint) text-(--pg-brand)" : "text-(--pg-navtext) hover:bg-(--pg-brand-faint) hover:text-(--pg-brand)"} ${sidebarExpanded ? "px-3 gap-3" : "px-0 justify-center"}`}
+      <div ref={navSlotRef} className="relative mt-3 min-h-0 flex-1 overflow-hidden">
+        <div className="space-y-4">
+          {visibleMain.length > 0 && <SidebarSection
+            label="MAIN MENU" links={visibleMain} pathname={pathname}
+            isClientOnline={isClientOnline} handleOfflineLinkClick={handleOfflineLinkClick}
+            sidebarExpanded={sidebarExpanded}
+          />}
+          {visibleManage.length > 0 && <SidebarSection
+            label="MANAGE" links={visibleManage} pathname={pathname}
+            isClientOnline={isClientOnline} handleOfflineLinkClick={handleOfflineLinkClick}
+            sidebarExpanded={sidebarExpanded}
+          />}
+          {visibleSupport.length > 0 && <SidebarSection
+            label="SUPPORT & LEGAL" links={visibleSupport} pathname={pathname}
+            isClientOnline={isClientOnline} handleOfflineLinkClick={handleOfflineLinkClick}
+            sidebarExpanded={sidebarExpanded}
+          />}
+          {hiddenLinks.length > 0 && <button
+            ref={moreButtonRef}
+            type="button"
+            onClick={() => setMoreOpen((open) => !open)}
+            aria-expanded={moreOpen}
+            aria-controls="desktop-sidebar-more"
+            className={`flex min-h-10 w-full items-center rounded-full py-2.5 text-sm font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--pg-brand) ${sidebarExpanded ? "gap-3 px-3" : "justify-center"} ${moreOpen || hiddenLinks.some((link) => link.href === pathname) ? "bg-(--pg-brand-faint) text-(--pg-brand)" : "text-(--pg-navtext) hover:bg-(--pg-brand-faint) hover:text-(--pg-brand)"}`}
+            title={!sidebarExpanded ? `More pages (${hiddenLinks.length})` : undefined}
           >
-            <HelpCircle size={16} className="stroke-[2.5px]" />
-            <span
-              className={`overflow-hidden whitespace-nowrap transition-all duration-200 ${sidebarExpanded ? "max-w-40 opacity-100" : "max-w-0 opacity-0"}`}
-            >
-              FAQ&apos;s
-            </span>
-          </Link>
-          <Link
-            href="/terms"
-            aria-current={pathname === "/terms" ? "page" : undefined}
-            className={`rounded-xl py-2.5 text-sm font-bold transition-colors duration-200 flex items-center ${pathname === "/terms" ? "bg-(--pg-brand-faint) text-(--pg-brand)" : "text-(--pg-navtext) hover:bg-(--pg-brand-faint) hover:text-(--pg-brand)"} ${sidebarExpanded ? "px-3 gap-3" : "px-0 justify-center"}`}
-          >
-            <FileText size={16} className="stroke-[2.5px]" />
-            <span
-              className={`overflow-hidden whitespace-nowrap transition-all duration-200 ${sidebarExpanded ? "max-w-40 opacity-100" : "max-w-0 opacity-0"}`}
-            >
-              Terms &amp; Conditions
-            </span>
-          </Link>
+            <Ellipsis size={18} className="shrink-0 stroke-[2.5px]" />
+            {sidebarExpanded && <span>More <span className="text-xs text-(--pg-muted)">({hiddenLinks.length})</span></span>}
+          </button>}
+        </div>
+
+        <div ref={navProbeRef} inert aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-10 space-y-4 opacity-0">
+          <SidebarSection label="MAIN MENU" links={links} pathname={pathname}
+            isClientOnline={isClientOnline} handleOfflineLinkClick={handleOfflineLinkClick}
+            sidebarExpanded={sidebarExpanded} />
+          <SidebarSection label="MANAGE" links={manageLinks} pathname={pathname}
+            isClientOnline={isClientOnline} handleOfflineLinkClick={handleOfflineLinkClick}
+            sidebarExpanded={sidebarExpanded} />
+          <SidebarSection label="SUPPORT & LEGAL" links={supportLinks} pathname={pathname}
+            isClientOnline={isClientOnline} handleOfflineLinkClick={handleOfflineLinkClick}
+            sidebarExpanded={sidebarExpanded} />
+          <button ref={probeMoreRef} type="button" tabIndex={-1} className="min-h-10 w-full rounded-full py-2.5 text-sm font-bold">More</button>
         </div>
       </div>
 
+      {moreOpen && hiddenLinks.length > 0 && typeof document !== 'undefined' && createPortal(
+        <nav
+          id="desktop-sidebar-more" ref={morePanelRef} aria-label="More pages"
+          className="fixed z-60 w-60 overflow-y-auto rounded-2xl border border-(--pg-line) bg-(--pg-side) p-2 shadow-2xl"
+          style={{ top: morePosition.top, left: morePosition.left, maxHeight: 'calc(100dvh - 16px)' }}
+        >
+          <div className="space-y-3">
+            {hiddenMain.length > 0 && <SidebarSection label="MAIN MENU" links={hiddenMain} pathname={pathname}
+              isClientOnline={isClientOnline} handleOfflineLinkClick={handleOfflineLinkClick}
+              sidebarExpanded onNavigate={() => setMoreOpen(false)} />}
+            {hiddenManage.length > 0 && <SidebarSection label="MANAGE" links={hiddenManage} pathname={pathname}
+              isClientOnline={isClientOnline} handleOfflineLinkClick={handleOfflineLinkClick}
+              sidebarExpanded onNavigate={() => setMoreOpen(false)} />}
+            {hiddenSupport.length > 0 && <SidebarSection label="SUPPORT & LEGAL" links={hiddenSupport} pathname={pathname}
+              isClientOnline={isClientOnline} handleOfflineLinkClick={handleOfflineLinkClick}
+              sidebarExpanded onNavigate={() => setMoreOpen(false)} />}
+          </div>
+        </nav>,
+        document.body,
+      )}
+
       <div
-        className={`flex flex-col gap-4 border-t border-(--pg-line) pt-4 ${sidebarExpanded ? "" : "items-center"}`}
+        className={`flex shrink-0 flex-col gap-3 border-t border-(--pg-line) pt-3 ${sidebarExpanded ? "" : "items-center"}`}
       >
         <div
           className={`flex flex-col gap-0.5 px-2 ${sidebarExpanded ? "" : "hidden"}`}

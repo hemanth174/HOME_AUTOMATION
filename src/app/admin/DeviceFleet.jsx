@@ -1,5 +1,6 @@
 "use client";
 
+import AppSelect from '@/components/AppSelect';
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -511,7 +512,7 @@ export default function DeviceFleet() {
               <span>Back to VikaTech site</span>
             </Link>
 
-            <select
+            <AppSelect
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               className="min-h-11 min-w-0 appearance-none rounded-xl border border-border bg-background px-3.5 py-2.5 text-xs font-black text-text outline-none transition focus:border-accent"
@@ -520,7 +521,7 @@ export default function DeviceFleet() {
               <option value="online">Online Only</option>
               <option value="offline">Offline Only</option>
               <option value="unprovisioned">Needs Enrollment</option>
-            </select>
+            </AppSelect>
 
             <button
               type="button"

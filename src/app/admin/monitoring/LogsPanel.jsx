@@ -1,5 +1,6 @@
 "use client";
 
+import AppSelect from '@/components/AppSelect';
 import { useMemo, useState } from "react";
 import {
   Download,
@@ -98,15 +99,15 @@ export default function LogsPanel({ project, token, range, rangeLabel, autoRefre
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-6">
           <label className="block">
             <span className="mb-1 block text-[9px] font-black uppercase tracking-wide text-text-muted">Source</span>
-            <select value={source} onChange={(event) => setSource(event.target.value)} className="min-h-9 w-full rounded-lg border border-border bg-background px-2 text-[11px] font-bold text-text outline-none focus:border-accent">
+            <AppSelect value={source} onChange={(event) => setSource(event.target.value)} className="min-h-9 w-full rounded-lg border border-border bg-background px-2 text-[11px] font-bold text-text outline-none focus:border-accent">
               {LOG_SOURCE_CHOICES.map((item) => <option key={item} value={item}>{serviceLabel(item)}</option>)}
-            </select>
+            </AppSelect>
           </label>
           <label className="block">
             <span className="mb-1 block text-[9px] font-black uppercase tracking-wide text-text-muted">Severity</span>
-            <select value={severity} onChange={(event) => setSeverity(event.target.value)} className="min-h-9 w-full rounded-lg border border-border bg-background px-2 text-[11px] font-bold text-text outline-none focus:border-accent">
+            <AppSelect value={severity} onChange={(event) => setSeverity(event.target.value)} className="min-h-9 w-full rounded-lg border border-border bg-background px-2 text-[11px] font-bold text-text outline-none focus:border-accent">
               {SEVERITY_CHOICES.map((item) => <option key={item || 'all'} value={item}>{item || 'All severities'}</option>)}
-            </select>
+            </AppSelect>
           </label>
           <label className="block">
             <span className="mb-1 block text-[9px] font-black uppercase tracking-wide text-text-muted">HTTP status</span>
@@ -122,12 +123,12 @@ export default function LogsPanel({ project, token, range, rangeLabel, autoRefre
           <label className="block">
             <span className="mb-1 block text-[9px] font-black uppercase tracking-wide text-text-muted">Sort / limit</span>
             <div className="flex gap-1.5">
-              <select value={sort} onChange={(event) => setSort(event.target.value)} className="min-h-9 min-w-0 flex-1 rounded-lg border border-border bg-background px-1.5 text-[10px] font-bold text-text outline-none focus:border-accent">
+              <AppSelect value={sort} onChange={(event) => setSort(event.target.value)} className="min-h-9 min-w-0 flex-1 rounded-lg border border-border bg-background px-1.5 text-[10px] font-bold text-text outline-none focus:border-accent">
                 <option value="desc">Newest</option><option value="asc">Oldest</option>
-              </select>
-              <select value={limit} onChange={(event) => setLimit(event.target.value)} className="min-h-9 w-16 rounded-lg border border-border bg-background px-1.5 text-[10px] font-bold text-text outline-none focus:border-accent">
+              </AppSelect>
+              <AppSelect value={limit} onChange={(event) => setLimit(event.target.value)} className="min-h-9 w-16 rounded-lg border border-border bg-background px-1.5 text-[10px] font-bold text-text outline-none focus:border-accent">
                 {['25', '50', '100', '200'].map((item) => <option key={item} value={item}>{item}</option>)}
-              </select>
+              </AppSelect>
             </div>
           </label>
         </div>

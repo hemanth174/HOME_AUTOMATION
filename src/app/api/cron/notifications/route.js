@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAdminSupabase } from '@/lib/adminServer';
+import { isBoardRecentlyOnline } from '@/lib/boardPresence';
 import {
   DEFAULT_NOTIFICATION_SETTINGS,
   DEVICE_OFFLINE_AFTER_MS,
@@ -48,8 +49,8 @@ function groupByUser(rows) {
 
 async function notifyFiredAlarms(admin, getSettings, now, stats) {
   const { data: alarms, error } = await admin.from('alarms')
-    .is('deleted_at', null)
     .select('id,user_id,device_id,action,trigger_at,devices(name)')
+    .is('deleted_at', null)
     .eq('fired', true)
     .gte('trigger_at', new Date(now.getTime() - 5 * 60 * 1000).toISOString())
     .lte('trigger_at', now.toISOString());
@@ -80,8 +81,8 @@ async function notifyFiredAlarms(admin, getSettings, now, stats) {
 async function runSchedules(admin, getSettings, now, stats) {
   const { data: schedules, error } = await admin
     .from('schedules')
-    .is('deleted_at', null)
     .select('id, user_id, time, days, action, device_id, enabled, run_date, devices(name)')
+    .is('deleted_at', null)
     .eq('enabled', true);
 
   if (error) {
@@ -130,12 +131,14 @@ async function runSchedules(admin, getSettings, now, stats) {
   }
 }
 
-async function runDailyChecks(admin, getSettings, devices, now, stats) {
+async function runDailyChecks(admin, getSettings, devices, boards, now, stats) {
   if (!devices?.length) return;
+
+  const liveBoards = new Set((boards || []).filter((board) => isBoardRecentlyOnline(board, now, DEVICE_OFFLINE_AFTER_MS)).map((board) => board.id));
 
   const energyDue =
     Math.floor(now.getTime() / 60000) % ENERGY_INTERVAL_MINUTES === 0;
-  const devicesByUser = groupByUser(devices);
+  const devicesByUser = groupByUser(devices.filter((device) => liveBoards.has(device.board_id)));
 
   for (const [userId, userDevices] of devicesByUser.entries()) {
     try {
@@ -395,16 +398,20 @@ export async function GET(request) {
 
   const { data: devices, error: devicesError } = await admin
     .from('devices')
-    .is('deleted_at', null)
-    .select('id, user_id, name, is_on, last_changed');
+    .select('id, user_id, board_id, name, is_on, last_changed')
+    .is('deleted_at', null);
 
   if (devicesError) {
     stats.errors.push(`devices: ${devicesError.message}`);
   }
 
+  const { data: boards, error: boardsError } = await admin.from('boards')
+    .select('id,user_id,last_seen,deleted_at').is('deleted_at', null);
+  if (boardsError) stats.errors.push(`boards: ${boardsError.message}`);
+
   await notifyFiredAlarms(admin, getSettings, now, stats);
   await runSchedules(admin, getSettings, now, stats);
-  await runDailyChecks(admin, getSettings, devices || [], now, stats);
+  if (!boardsError) await runDailyChecks(admin, getSettings, devices || [], boards || [], now, stats);
   await runDeviceOfflineChecks(admin, getSettings, now, stats);
 
   return NextResponse.json({

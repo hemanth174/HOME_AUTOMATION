@@ -1,3 +1,4 @@
+import AppSelect from '@/components/AppSelect';
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { DevicePicker, DateTimePicker12h } from "./AlarmPickers";
 
@@ -45,10 +46,10 @@ export function AlarmModal({ manager }) {
 
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-extrabold tracking-wide text-text-muted">Action</label>
-            <select className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm" value={alarmAction} onChange={(event) => setAlarmAction(event.target.value === "true")}>
+            <AppSelect className="w-full px-4 py-2.5 rounded-lg border-[1.5px] border-border bg-input text-text text-sm" value={alarmAction} onChange={(event) => setAlarmAction(event.target.value === "true")}>
               <option value="true">Turn ON</option>
               <option value="false">Turn OFF</option>
-            </select>
+            </AppSelect>
           </div>
 
           <div className="mt-4 flex justify-end gap-2.5">

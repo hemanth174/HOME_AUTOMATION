@@ -13,6 +13,7 @@ function ReviewCard({ label, approved, email, rejected }) {
 
 export default function PendingPage() {
   const [approval, setApproval] = useState(null);
+  const [staffAccess, setStaffAccess] = useState(false);
   const [realtimeState, setRealtimeState] = useState('connecting');
   const sessionRef = useRef(null);
   const requestInFlight = useRef(false);
@@ -45,6 +46,7 @@ export default function PendingPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Could not load account status');
       setApproval(data.approval);
+      setStaffAccess(data.staff_access === true);
     } finally {
       requestInFlight.current = false;
     }
@@ -151,12 +153,16 @@ export default function PendingPage() {
     };
   }, [loadStatus]);
   useEffect(() => {
+    if (staffAccess) {
+      window.location.href = '/admin';
+      return;
+    }
     if (approval?.account_status === 'rejected' || approval?.account_status === 'revoked') {
       window.location.href = '/denied';
     } else if (approval?.account_status === 'approved' && approval.admin_one_approved_at && approval.admin_two_approved_at) {
       window.location.href = '/';
     }
-  }, [approval]);
+  }, [approval, staffAccess]);
   const rejected = approval?.account_status === 'rejected' || approval?.account_status === 'revoked'; const firstApproved = Boolean(approval?.admin_one_approved_at); const secondApproved = Boolean(approval?.admin_two_approved_at); const bothApproved = firstApproved && secondApproved;
   const title = rejected ? 'Request not approved' : bothApproved ? 'Access approved' : firstApproved ? 'Waiting for second approval' : 'Approval is in progress';
   const subtitle = rejected ? approval?.rejection_reason || 'Please contact support for more information.' : bothApproved ? 'Both administrators have approved your account. Redirecting you now…' : firstApproved ? 'Approved by one administrator — waiting for the second approval.' : 'Your account and order access are waiting for administrator approval.';

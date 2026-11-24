@@ -1,5 +1,6 @@
 'use client';
 
+import AppSelect from '@/components/AppSelect';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import InfoPageShell from '@/components/InfoPageShell';
@@ -56,6 +57,10 @@ export default function ContactSalesPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    if (fields.some((field) => field.type === 'select' && !details[field.key])) {
+      setError('Please choose an option for every project detail.');
+      return;
+    }
     setStatus('sending');
 
     const { data: { session } } = await supabase.auth.getSession();
@@ -176,7 +181,7 @@ export default function ContactSalesPage() {
                       <div key={field.key} className={`flex flex-col gap-1.5 ${field.key === 'projectName' || field.key === 'cities' ? 'md:col-span-2' : ''}`}>
                         <label className="text-xs font-label-caps text-lp-on-surface-variant uppercase tracking-wider">{field.label}</label>
                         {field.type === 'select' ? (
-                          <select
+                          <AppSelect
                             value={details[field.key] || ''}
                             onChange={(e) => handleDetailChange(field.key, e.target.value)}
                             required
@@ -186,7 +191,7 @@ export default function ContactSalesPage() {
                             {field.options.map((opt) => (
                               <option key={opt} value={opt}>{opt}</option>
                             ))}
-                          </select>
+                          </AppSelect>
                         ) : (
                           <input
                             type={field.type}

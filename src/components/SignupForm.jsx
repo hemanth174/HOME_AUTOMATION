@@ -1,5 +1,6 @@
 'use client';
 
+import AppSelect from '@/components/AppSelect';
 import React from 'react';
 
 export default function SignupForm({
@@ -69,14 +70,14 @@ export default function SignupForm({
       </div>
       <div className="flex flex-col gap-1.5 min-w-0">
         <label htmlFor="signup-q1" className="text-xs font-extrabold tracking-wide text-text-muted">Security Question 1</label>
-        <select
+        <AppSelect
           id="signup-q1"
           className="w-full px-4 min-h-[48px] rounded-xl border-[1.5px] border-border bg-input text-text text-base outline-none transition-all focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/40"
           value={q1}
           onChange={(e) => setQ1(e.target.value)}
         >
           {securityQuestions.map((q) => <option key={q} value={q}>{q}</option>)}
-        </select>
+        </AppSelect>
       </div>
       <div className="flex flex-col gap-1.5 min-w-0">
         <label htmlFor="signup-a1" className="text-xs font-extrabold tracking-wide text-text-muted">Answer 1</label>
@@ -93,14 +94,14 @@ export default function SignupForm({
       </div>
       <div className="flex flex-col gap-1.5 min-w-0">
         <label htmlFor="signup-q2" className="text-xs font-extrabold tracking-wide text-text-muted">Security Question 2</label>
-        <select
+        <AppSelect
           id="signup-q2"
           className="w-full px-4 min-h-[48px] rounded-xl border-[1.5px] border-border bg-input text-text text-base outline-none transition-all focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/40"
           value={q2}
           onChange={(e) => setQ2(e.target.value)}
         >
           {securityQuestions.map((q) => <option key={q} value={q}>{q}</option>)}
-        </select>
+        </AppSelect>
       </div>
       <div className="flex flex-col gap-1.5 min-w-0">
         <label htmlFor="signup-a2" className="text-xs font-extrabold tracking-wide text-text-muted">Answer 2</label>

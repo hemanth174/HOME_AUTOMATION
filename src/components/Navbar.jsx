@@ -14,6 +14,7 @@ import {
   ChevronDown,
   TrendingUp,
   History,
+  Headset,
   ShieldCheck,
   Moon,
   Sun,
@@ -28,7 +29,7 @@ import {
 } from "lucide-react";
 import useLocalConnection from "@/hooks/useLocalConnection";
 import { checkInternet } from "@/lib/netCheck";
-import { isAdminEmail } from "@/lib/admin";
+import { hasAdminNavigation } from "@/lib/admin";
 import {
   playNotificationTone,
   requestBrowserNotificationPermission,
@@ -559,6 +560,7 @@ export default function Navbar() {
     "/analytics",
     "/logs",
     "/trash",
+    "/support",
     "/profile",
     "/settings",
     "/faq",
@@ -594,8 +596,9 @@ export default function Navbar() {
   ];
   const manageLinks = [
     { href: "/settings", label: "Settings", icon: Settings },
+    { href: "/support", label: "Support", icon: Headset },
     { href: "/trash", label: "Trash", icon: Trash2 },
-    ...(isAdminEmail(user?.email)
+    ...(hasAdminNavigation(user?.email)
       ? [{ href: "/admin", label: "Admin Settings", icon: ShieldCheck }]
       : []),
   ];
@@ -620,6 +623,7 @@ export default function Navbar() {
       "/analytics": "Energy - Overview",
       "/logs": "Activity Logs - Overview",
       "/trash": "Trash - Restore deleted items",
+      "/support": "Support - Tickets",
       "/profile": "Profile - Account",
       "/settings": "Settings",
       "/admin": "Admin Settings",
@@ -677,8 +681,9 @@ export default function Navbar() {
     { href: "/settings", label: "Settings", icon: Settings },
     { href: "/analytics", label: "Analytics", icon: TrendingUp },
     { href: "/logs", label: "Logs", icon: History },
+    { href: "/support", label: "Support", icon: Headset },
     { href: "/trash", label: "Trash", icon: Trash2 },
-    ...(isAdminEmail(user?.email)
+    ...(hasAdminNavigation(user?.email)
       ? [{ href: "/admin", label: "Admin Console", icon: ShieldCheck }]
       : []),
   ];

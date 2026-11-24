@@ -31,7 +31,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
   const pathname = usePathname();
   const router = useRouter();
   const cleanPath = (pathname || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '') || '/';
-  const VALID_ROUTES = ['/', '/local', '/login', '/pending', '/denied', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/trash', '/profile', '/settings', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/admin'];
+  const VALID_ROUTES = ['/', '/local', '/login', '/pending', '/denied', '/presets', '/boards', '/schedules', '/alarms', '/analytics', '/logs', '/trash', '/support', '/profile', '/settings', '/faq', '/terms', '/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales', '/admin'];
   const PUBLIC_ROUTES = ['/privacy-policy', '/terms-of-service', '/partner-program', '/contact-sales'];
   const isTrackPage = cleanPath.startsWith('/track/');
   const isAdminDeviceRoute = cleanPath.startsWith('/admin/devices/') && cleanPath.endsWith('/update') && cleanPath.split('/').length === 5;
@@ -326,7 +326,7 @@ export default function MainLayoutWrapper({ children, className = "" }) {
           Boolean(approval.admin_one_approved_at) &&
           Boolean(approval.admin_two_approved_at);
 
-        if (approved) {
+        if (approved || payload.staff_access === true) {
           setAccess('approved');
         } else if (rejected) {
           setAccess('denied');

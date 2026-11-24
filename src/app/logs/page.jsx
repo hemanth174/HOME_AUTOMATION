@@ -1,5 +1,6 @@
 'use client';
 
+import AppSelect from '@/components/AppSelect';
 import { useState, useEffect, useMemo } from 'react';
 import { RotateCcw, ScrollText, Search, SlidersHorizontal, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -461,7 +462,7 @@ export default function LogsPage() {
               <div className="grid gap-3">
                 <label className="grid gap-1.5">
                   <span className="text-[10px] font-black uppercase tracking-wider text-text-muted">Board</span>
-                  <select
+                  <AppSelect
                     value={boardFilter}
                     onChange={(e) => setBoardFilter(e.target.value)}
                     className="min-h-11 w-full rounded-xl border border-border bg-input px-3 py-2 text-base font-bold text-text outline-0 focus:border-accent sm:text-sm"
@@ -475,12 +476,12 @@ export default function LogsPage() {
                         </option>
                       );
                     })}
-                  </select>
+                  </AppSelect>
                 </label>
 
                 <label className="grid gap-1.5">
                   <span className="text-[10px] font-black uppercase tracking-wider text-text-muted">Device</span>
-                  <select
+                  <AppSelect
                     value={deviceFilter}
                     onChange={(e) => setDeviceFilter(e.target.value)}
                     className="min-h-11 w-full rounded-xl border border-border bg-input px-3 py-2 text-base font-bold text-text outline-0 focus:border-accent sm:text-sm"
@@ -494,12 +495,12 @@ export default function LogsPage() {
                         </option>
                       );
                     })}
-                  </select>
+                  </AppSelect>
                 </label>
 
                 <label className="grid gap-1.5">
                   <span className="text-[10px] font-black uppercase tracking-wider text-text-muted">Trigger source</span>
-                  <select
+                  <AppSelect
                     value={sourceFilter}
                     onChange={(e) => setSourceFilter(e.target.value)}
                     className="min-h-11 w-full rounded-xl border border-border bg-input px-3 py-2 text-base font-bold text-text outline-0 focus:border-accent sm:text-sm"
@@ -508,13 +509,13 @@ export default function LogsPage() {
                     {filterOptions.sources.map((source) => (
                       <option key={source} value={source}>{source}</option>
                     ))}
-                  </select>
+                  </AppSelect>
                 </label>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label className="grid gap-1.5">
                     <span className="text-[10px] font-black uppercase tracking-wider text-text-muted">State</span>
-                    <select
+                    <AppSelect
                       value={stateFilter}
                       onChange={(e) => setStateFilter(e.target.value)}
                       className="min-h-11 w-full rounded-xl border border-border bg-input px-3 py-2 text-base font-bold text-text outline-0 focus:border-accent sm:text-sm"
@@ -522,12 +523,12 @@ export default function LogsPage() {
                       <option value="all">All states</option>
                       <option value="on">ON only</option>
                       <option value="off">OFF only</option>
-                    </select>
+                    </AppSelect>
                   </label>
 
                   <label className="grid gap-1.5">
                     <span className="text-[10px] font-black uppercase tracking-wider text-text-muted">Date range</span>
-                    <select
+                    <AppSelect
                       value={dateFilter}
                       onChange={(e) => setDateFilter(e.target.value)}
                       className="min-h-11 w-full rounded-xl border border-border bg-input px-3 py-2 text-base font-bold text-text outline-0 focus:border-accent sm:text-sm"
@@ -536,7 +537,7 @@ export default function LogsPage() {
                       <option value="today">Today</option>
                       <option value="7">Last 7 days</option>
                       <option value="30">Last 30 days</option>
-                    </select>
+                    </AppSelect>
                   </label>
                 </div>
               </div>

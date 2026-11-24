@@ -8,7 +8,9 @@ export async function GET(request) {
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const { data, error } = await auth.admin.from('account_approval_requests').select('*').order('created_at', { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ approvals: data || [] });
+  const { data: staff } = await auth.admin.from('admin_staff').select('email');
+  const staffEmails = new Set((staff || []).map((item) => item.email));
+  return NextResponse.json({ approvals: (data || []).filter((item) => !staffEmails.has((item.email || '').toLowerCase())) });
 }
 
 export async function PATCH(request) {
@@ -20,6 +22,8 @@ export async function PATCH(request) {
   const { data: rows, error: readError } = await auth.admin.from('account_approval_requests').select('*').eq('user_id', userId).limit(1);
   const current = rows?.[0];
   if (readError || !current) return NextResponse.json({ error: readError?.message || 'Approval request not found' }, { status: 404 });
+  const { data: staffRecord } = await auth.admin.from('admin_staff').select('email').eq('email', (current.email || '').toLowerCase()).maybeSingle();
+  if (staffRecord) return NextResponse.json({ error: 'Manage staff access in the Admin team tab' }, { status: 409 });
   const actor = auth.user.email.toLowerCase();
   if (action === 'approve' && (current.account_status === 'rejected' || current.account_status === 'revoked')) {
     return NextResponse.json({ error: 'Denied or revoked accounts cannot be approved from the current request.' }, { status: 409 });

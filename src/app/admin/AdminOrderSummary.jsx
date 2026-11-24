@@ -1,0 +1,8 @@
+'use client';
+
+import { Inbox } from 'lucide-react';
+import { CATEGORY_LABELS } from '@/lib/orderCategories';
+
+export default function AdminOrderSummary({ orders }) {
+  return <section className="space-y-4"><div><p className="text-[10px] font-black uppercase tracking-[.2em] text-sky-600 dark:text-sky-300">Read-only access</p><h2 className="mt-1 text-xl font-black sm:text-2xl">Order summaries</h2><p className="mt-1 text-xs text-text-muted">Use these details when responding to support tickets. Stage changes are handled by main admins.</p></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{orders.map((order) => <article key={order.id} className="min-w-0 rounded-2xl border border-border bg-card p-4"><div className="flex flex-wrap items-center justify-between gap-2"><span className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1 font-mono text-[11px] font-black text-sky-700 dark:text-sky-300">{order.order_id}</span><span className="text-[10px] font-black uppercase text-text-muted">{order.status}</span></div><h3 className="mt-3 truncate text-sm font-black">{order.full_name || 'Customer'}</h3><p className="mt-1 truncate text-xs text-text-muted">{order.email}</p><div className="mt-4 flex justify-between border-t border-border pt-3 text-[11px] text-text-muted"><span>{CATEGORY_LABELS[order.category] || order.category || 'General'}</span><span>{order.created_at ? new Date(order.created_at).toLocaleDateString() : '—'}</span></div></article>)}{orders.length === 0 && <div className="col-span-full rounded-2xl border border-border bg-card p-10 text-center"><Inbox className="mx-auto text-text-muted" /><p className="mt-3 text-sm font-bold">No orders to show</p></div>}</div></section>;
+}

@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer';
 import { getAdminSupabase } from '@/lib/adminServer';
 import { ORDER_APPROVAL_STATUSES } from '@/lib/approval';
 import { STAGES, CATEGORY_LABELS, generateOrderId } from '@/lib/orderCategories';
+import { orderReceivedEmail } from '@/lib/emailTemplates';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,14 +12,12 @@ async function sendOrderEmail(order) {
   const pass = process.env.SMTP_PASS;
   if (!user || !pass) return { skipped: true };
   const transporter = nodemailer.createTransport({ host: process.env.SMTP_HOST || 'smtp.gmail.com', port: parseInt(process.env.SMTP_PORT || '587', 10), secure: process.env.SMTP_SECURE === 'true', auth: { user, pass } });
-    const url = `${process.env.NEXT_PUBLIC_SITE_URL || 'https://home-automation-mauve-one.vercel.app'}/track/${order.order_id}`;
+  const template = orderReceivedEmail(order, CATEGORY_LABELS[order.category]);
   await transporter.sendMail({
     from: process.env.SMTP_FROM || `VikaTech <${user}>`,
     to: order.email,
     bcc: 'lrvkausthubh@gmail.com,ramasaiahemanth@gmail.com',
-    subject: `VikaTech order ${order.order_id} received`,
-    text: `Your VikaTech request was received. Track it here: ${url}`,
-    html: `<div style="font-family:Arial,sans-serif;padding:28px;color:#17202a"><h2>VikaTech request received</h2><p>Your request is waiting for administrator approval.</p><p><b>Order ${order.order_id}</b></p><a href="${url}">View request status →</a></div>`,
+    ...template,
   });
   return { sent: true };
 }

@@ -23,6 +23,10 @@ export default function DeniedPage() {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       const data = await response.json();
+      if (active && response.ok && data.staff_access === true) {
+        window.location.href = '/admin';
+        return;
+      }
       if (active && response.ok) setReason(data.approval?.rejection_reason || 'Your account access was not approved.');
       if (active) setLoading(false);
     };
