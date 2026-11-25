@@ -1,5 +1,5 @@
 // Versioned so deployed clients delete stale page shells and app assets.
-const CACHE_NAME = 'smart-home-offline-v8';
+const CACHE_NAME = 'smart-home-offline-v9';
 
 // These are app routes, not ESP32 endpoints. Cache their app shells while the
 // device has internet so the installed VikaTech PWA can boot without it later.
@@ -18,8 +18,9 @@ const OFFLINE_ROUTES = [
 
 const STATIC_ASSETS = [
   '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png',
+  '/favicon-rounded.png',
+  '/icon-rounded-192.png',
+  '/icon-rounded-512.png',
   '/smart_home_ui.png',
   '/images/vikatech-local-network.png',
 ];
@@ -120,8 +121,8 @@ self.addEventListener('push', (event) => {
   const title = payload.title || 'VikaTech';
   const options = {
     body: payload.body || '',
-    icon: '/icon-192.png',
-    badge: '/favicon.png',
+    icon: '/icon-rounded-192.png',
+    badge: '/favicon-rounded.png',
     tag: payload.tag || `vikatech-${Date.now()}`,
     renotify: Boolean(payload.tag),
     data: {

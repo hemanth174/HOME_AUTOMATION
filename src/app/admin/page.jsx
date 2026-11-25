@@ -8,7 +8,6 @@ import { CATEGORY_LABELS, STAGES } from "@/lib/orderCategories";
 import {
   Activity,
   ArrowLeft,
-  CheckCircle2,
   Cpu,
   Inbox,
   LayoutDashboard,
@@ -34,6 +33,8 @@ import AdminStaff from "./AdminStaff";
 import AdminOrderSummary from "./AdminOrderSummary";
 import SupportDesk from "@/components/SupportDesk";
 import ThemeToggle from "@/components/ThemeToggle";
+import { showAdminToast } from '@/lib/adminToast';
+import { hasAdminPermission } from '@/lib/adminPermissions';
 
 const stageColors = {
   Received: "text-slate-300 border-slate-500/40 bg-slate-500/10",
@@ -97,6 +98,7 @@ function AdminLoading() {
 export default function AdminPage() {
   const [user, setUser] = useState(null);
   const [adminRole, setAdminRole] = useState(null);
+  const [adminPermissions, setAdminPermissions] = useState(null);
   const [accessToken, setAccessToken] = useState("");
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
@@ -108,7 +110,9 @@ export default function AdminPage() {
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [notice, setNotice] = useState("");
+  const setNotice = useCallback((message) => {
+    if (message) showAdminToast(message, /failed|could not|expired|required|denied|error/i.test(message) ? 'error' : 'success');
+  }, []);
   const [approvalFilter, setApprovalFilter] = useState("all");
   const [approvalAction, setApprovalAction] = useState(null);
   const [denyTarget, setDenyTarget] = useState(null);
@@ -134,7 +138,12 @@ export default function AdminPage() {
         return;
       }
       setAdminRole(roleData.role);
+      setAdminPermissions(roleData.permissions || null);
 
+      if (roleData.role !== 'main_admin' && !hasAdminPermission(roleData.role, roleData.permissions, 'orders_view') && !hasAdminPermission(roleData.role, roleData.permissions, 'approvals')) {
+        setOrders([]); setUsers([]); setApprovals([]);
+        return;
+      }
       const res = await fetch("/api/admin/orders", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
@@ -152,7 +161,7 @@ export default function AdminPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [setNotice]);
 
   useEffect(() => {
     load();
@@ -164,8 +173,10 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
-    if (adminRole === 'sub_admin' && !['orders', 'support'].includes(tab)) setTab('support');
-  }, [adminRole, tab]);
+    if (!adminRole) return;
+    const feature = { orders: 'orders_view', support: 'support', users: 'approvals', hardware: 'hardware', subscriptions: 'voice_plans', monitoring: 'monitoring', 'mqtt-server': 'mqtt' }[tab];
+    if (feature && !hasAdminPermission(adminRole, adminPermissions, feature)) setTab('staff');
+  }, [adminRole, adminPermissions, tab]);
 
   useEffect(() => {
     if (!tabHydrated) return;
@@ -231,7 +242,7 @@ export default function AdminPage() {
   );
 
   const updateStage = async (orderId, status) => {
-    if (adminRole !== 'main_admin') return;
+    if (!hasAdminPermission(adminRole, adminPermissions, 'orders_manage')) return;
     const previous = selected;
     setSelected((prev) => (prev?.order_id === orderId ? { ...prev, status } : prev));
     setOrders((prev) => prev.map((o) => (o.order_id === orderId ? { ...o, status } : o)));
@@ -270,7 +281,7 @@ export default function AdminPage() {
   };
 
   const reviewAccount = async (userId, action, rejectionReason = "") => {
-    if (adminRole !== 'main_admin') return false;
+    if (!hasAdminPermission(adminRole, adminPermissions, 'approvals')) return false;
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       setNotice("Your session expired. Please sign in again.");
@@ -344,6 +355,7 @@ export default function AdminPage() {
 
   const pendingCount = approvals.filter((item) => item.account_status === "pending").length;
   const isMainAdmin = adminRole === 'main_admin';
+  const can = (feature) => hasAdminPermission(adminRole, adminPermissions, feature);
 
   return (
     <main className="min-h-screen bg-background text-text selection:bg-accent/20">
@@ -414,7 +426,7 @@ export default function AdminPage() {
             aria-label="Admin Navigation Tabs"
             className="inline-flex w-fit max-w-full items-center gap-1 overflow-x-auto rounded-2xl border border-border bg-card-alt p-1.5 backdrop-blur-md scrollbar-none"
           >
-            <button
+            {can('orders_view') && <button
               type="button"
               onClick={() => setTab("orders")}
               className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs transition-all ${
@@ -434,11 +446,9 @@ export default function AdminPage() {
               >
                 {orders.length}
               </span>
-            </button>
+            </button>}
 
-            {isMainAdmin && <>
-
-            <button
+            {can('approvals') && <button
               type="button"
               onClick={() => setTab("users")}
               className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs transition-all ${
@@ -454,18 +464,14 @@ export default function AdminPage() {
                   {pendingCount}
                 </span>
               )}
-            </button>
+            </button>}
 
-            </>}
-
-            <button type="button" onClick={() => setTab('support')} aria-current={tab === 'support' ? 'page' : undefined}
+            {can('support') && <button type="button" onClick={() => setTab('support')} aria-current={tab === 'support' ? 'page' : undefined}
               className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs transition-colors ${tab === 'support' ? 'border border-sky-500/30 bg-sky-500/10 font-black text-sky-700 shadow-sm dark:text-sky-300' : 'font-bold text-text-muted hover:bg-sky-500/10 hover:text-text'}`}>
               <Headset size={15} /> Support tickets
-            </button>
+            </button>}
 
-            {isMainAdmin && <>
-
-            <button
+            {can('hardware') && <button
               type="button"
               onClick={() => setTab("hardware")}
               className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs transition-all ${
@@ -476,9 +482,9 @@ export default function AdminPage() {
             >
               <Cpu size={15} className={tab === "hardware" ? "text-amber-500" : "text-text-muted"} />
               <span>Hardware Fleet</span>
-            </button>
+            </button>}
 
-            <button
+            {can('mqtt') && <button
               type="button"
               onClick={() => setTab("mqtt-server")}
               aria-current={tab === "mqtt-server" ? "page" : undefined}
@@ -490,9 +496,9 @@ export default function AdminPage() {
             >
               <Radio size={15} className={tab === "mqtt-server" ? "text-emerald-500" : "text-text-muted"} />
               <span>MQTT Server</span>
-            </button>
+            </button>}
 
-            <button
+            {can('monitoring') && <button
               type="button"
               onClick={() => setTab("monitoring")}
               className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs transition-all ${
@@ -503,9 +509,9 @@ export default function AdminPage() {
             >
               <Activity size={15} className={tab === "monitoring" ? "text-amber-500" : "text-text-muted"} />
               <span>Monitoring</span>
-            </button>
+            </button>}
 
-            <button
+            {can('voice_plans') && <button
               type="button"
               onClick={() => setTab("subscriptions")}
               className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs transition-all ${
@@ -516,32 +522,31 @@ export default function AdminPage() {
             >
               <Sparkles size={15} className={tab === "subscriptions" ? "text-amber-500" : "text-text-muted"} />
               <span>Voice Plans</span>
-            </button>
+            </button>}
 
             <button type="button" onClick={() => setTab('staff')} aria-current={tab === 'staff' ? 'page' : undefined}
               className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs transition-colors ${tab === 'staff' ? 'border border-amber-500/30 bg-amber-500/10 font-black text-amber-700 shadow-sm dark:text-amber-300' : 'font-bold text-text-muted hover:bg-amber-500/10 hover:text-text'}`}>
               <Users size={15} /> Admin team
             </button>
-            </>}
           </nav>
         </div>
       </header>
 
       {/* Main Content Area */}
       <div className="mx-auto max-w-[1440px] px-3 py-5 sm:px-6 sm:py-6 lg:px-10">
-        {tab === 'support' ? (
-          <SupportDesk staffMode mainAdmin={isMainAdmin} />
-        ) : tab === 'staff' && isMainAdmin ? (
-          <AdminStaff accessToken={accessToken} />
-        ) : tab === 'orders' && !isMainAdmin ? (
+        {tab === 'support' && can('support') ? (
+          <SupportDesk staffMode mainAdmin={isMainAdmin} canCreate={can('support_create')} canDelete={can('support_delete')} />
+        ) : tab === 'staff' ? (
+          <AdminStaff accessToken={accessToken} role={adminRole} onRefreshAccess={() => load(true)} />
+        ) : tab === 'orders' && can('orders_view') && !can('orders_manage') ? (
           <AdminOrderSummary orders={orders} />
-        ) : tab === "mqtt-server" && isMainAdmin ? (
+        ) : tab === "mqtt-server" && can('mqtt') ? (
           <AdminMqttServer accessToken={accessToken} />
-        ) : tab === "monitoring" && isMainAdmin ? (
+        ) : tab === "monitoring" && can('monitoring') ? (
           <AdminMonitoring accessToken={accessToken} />
-        ) : tab === "hardware" && isMainAdmin ? (
+        ) : tab === "hardware" && can('hardware') ? (
           <DeviceFleet />
-        ) : tab === "users" && isMainAdmin ? (
+        ) : tab === "users" && can('approvals') ? (
           <AdminApprovalQueue
             approvals={approvals}
             visibleApprovals={visibleApprovals}
@@ -554,11 +559,9 @@ export default function AdminPage() {
             setDenyReason={setDenyReason}
             approvalState={approvalState}
           />
-        ) : tab === "subscriptions" && isMainAdmin ? (
+        ) : tab === "subscriptions" && can('voice_plans') ? (
           <AdminVoiceSubscription accessToken={accessToken} onNotice={setNotice} />
-        ) : !isMainAdmin ? (
-          <SupportDesk staffMode />
-        ) : (
+        ) : tab === 'orders' && can('orders_manage') ? (
           <AdminOrderPipeline
             filtered={filtered}
             orders={orders}
@@ -571,10 +574,10 @@ export default function AdminPage() {
             categoryLabels={CATEGORY_LABELS}
             stageColors={stageColors}
           />
-        )}
+        ) : <AdminStaff accessToken={accessToken} role={adminRole} onRefreshAccess={() => load(true)} />}
 
         {/* Operational Telemetry Cards */}
-        {isMainAdmin && !['hardware', 'subscriptions', 'monitoring', 'mqtt-server', 'support', 'staff'].includes(tab) && (
+        {can('orders_manage') && !['hardware', 'subscriptions', 'monitoring', 'mqtt-server', 'support', 'staff'].includes(tab) && (
           <section className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex items-start gap-3 rounded-2xl border border-border bg-card/60 p-4 backdrop-blur-sm sm:p-5">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-accent/20 bg-accent/10 text-accent">
@@ -604,7 +607,7 @@ export default function AdminPage() {
       </div>
 
       {/* Denial / Revoke Reason Modal Sheet */}
-      {isMainAdmin && denyTarget && (
+      {can('approvals') && denyTarget && (
         <div
           role="dialog"
           aria-modal="true"
@@ -683,29 +686,8 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* Floating System Notice Toast */}
-      {notice && (
-        <div
-          role="status"
-          className="fixed bottom-5 right-5 z-50 flex max-w-md items-center gap-3 rounded-2xl border border-accent/40 bg-card p-4 text-xs font-bold text-accent shadow-2xl backdrop-blur-md animate-fade-in"
-        >
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/20">
-            <CheckCircle2 size={16} />
-          </div>
-          <span className="min-w-0 flex-1 break-words">{notice}</span>
-          <button
-            type="button"
-            onClick={() => setNotice("")}
-            aria-label="Dismiss message"
-            className="shrink-0 rounded-lg p-1 text-text-muted hover:text-text"
-          >
-            <X size={15} />
-          </button>
-        </div>
-      )}
-
       {/* Selected Order Slide-Over Drawer */}
-      {isMainAdmin && selected && (
+      {can('orders_manage') && selected && (
         <AdminOrderDrawer
           order={selected}
           stages={STAGES}

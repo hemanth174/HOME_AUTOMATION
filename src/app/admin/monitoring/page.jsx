@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ShieldAlert, ShieldCheck } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { isAdminEmail } from "@/lib/admin";
+import { hasAdminPageAccess } from '@/lib/adminClientAccess';
 import AdminMonitoring from "./AdminMonitoring";
 
 export default function MonitoringPage() {
@@ -13,9 +13,9 @@ export default function MonitoringPage() {
 
   useEffect(() => {
     let active = true;
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!active) return;
-      if (session?.user && isAdminEmail(session.user.email)) {
+      if (await hasAdminPageAccess(session, 'monitoring')) {
         setAccessToken(session.access_token);
         setStatus('authorized');
       } else {

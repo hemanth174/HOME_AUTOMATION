@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { isAdminEmail } from './adminEmails';
+import { hasAdminPermission, normalizeAdminPermissions } from './adminPermissions';
 
 export function getAdminSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -19,20 +20,24 @@ export async function authenticateUser(request) {
 }
 
 export async function getStaffRole(admin, user) {
-  if (isAdminEmail(user?.email)) return 'main_admin';
-  if (!user?.email || !user.email_confirmed_at) return null;
-  const { data, error } = await admin.from('admin_staff').select('role, active')
-    .eq('email', user.email.trim().toLowerCase()).maybeSingle();
-  if (error || !data?.active) return null;
-  return data.role === 'sub_admin' ? 'sub_admin' : null;
+  return (await getStaffAccess(admin, user)).role;
 }
 
-export async function requireAdmin(request, { allowSubAdmin = false } = {}) {
+export async function getStaffAccess(admin, user) {
+  if (isAdminEmail(user?.email)) return { role: 'main_admin', permissions: null };
+  if (!user?.email || !user.email_confirmed_at) return { role: null, permissions: null };
+  const { data, error } = await admin.from('admin_staff').select('role, active, permissions')
+    .eq('email', user.email.trim().toLowerCase()).maybeSingle();
+  if (error || !data?.active || data.role !== 'sub_admin') return { role: null, permissions: null };
+  return { role: 'sub_admin', permissions: normalizeAdminPermissions(data.permissions) };
+}
+
+export async function requireAdmin(request, { allowSubAdmin = false, permission = null } = {}) {
   const auth = await authenticateUser(request);
   if (auth.error) return auth;
-  const role = await getStaffRole(auth.admin, auth.user);
-  if (role !== 'main_admin' && !(allowSubAdmin && role === 'sub_admin')) {
+  const { role, permissions } = await getStaffAccess(auth.admin, auth.user);
+  if (role !== 'main_admin' && !(role === 'sub_admin' && (permission ? hasAdminPermission(role, permissions, permission) : allowSubAdmin))) {
     return { error: 'Admin access required', status: 403 };
   }
-  return { ...auth, role };
+  return { ...auth, role, permissions };
 }

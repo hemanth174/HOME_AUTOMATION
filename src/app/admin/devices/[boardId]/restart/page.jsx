@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { isAdminEmail } from "@/lib/admin";
+import { hasAdminPageAccess } from '@/lib/adminClientAccess';
 import {
   ArrowLeft, Check, CheckCircle2, Clock3, Cpu, ExternalLink,
   LoaderCircle, Power, RefreshCw, RotateCcw, ShieldAlert, Wifi, WifiOff, XCircle,
@@ -60,7 +60,7 @@ export default function DeviceRestartTrackerPage() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!active) return;
-        if (!session || !isAdminEmail(session.user.email)) {
+        if (!await hasAdminPageAccess(session, 'hardware')) {
           router.replace("/admin");
           return;
         }

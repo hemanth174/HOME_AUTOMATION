@@ -58,8 +58,8 @@ export const metadata = {
   },
   manifest: "/manifest.json",
   icons: {
-    icon: "/favicon.png",
-    apple: "/icon-192.png",
+    icon: "/favicon-rounded.png",
+    apple: "/icon-rounded-192.png",
   },
 };
 
@@ -82,7 +82,7 @@ export default function RootLayout({ children }) {
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet" />
         <link rel="manifest" href="/manifest.json" />
-        <link rel="icon" href="/favicon.png" />
+        <link rel="icon" href="/favicon-rounded.png" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta

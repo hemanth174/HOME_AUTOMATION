@@ -49,7 +49,7 @@ async function expireConfigurationIfNeeded(admin, config) {
 }
 
 export async function GET(request, { params }) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'hardware' });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const { boardId } = await params;
   if (!UUID_RE.test(boardId || '')) return NextResponse.json({ error: 'Invalid board ID' }, { status: 400 });
@@ -94,7 +94,7 @@ export async function GET(request, { params }) {
 }
 
 export async function POST(request, { params }) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'hardware' });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const { boardId } = await params;
   if (!UUID_RE.test(boardId || '')) return NextResponse.json({ error: 'Invalid board ID' }, { status: 400 });

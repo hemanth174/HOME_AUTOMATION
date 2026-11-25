@@ -4,6 +4,7 @@ import AppSelect from '@/components/AppSelect';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Headset, LockKeyhole, LockKeyholeOpen, MessageSquare, Plus, RefreshCw, RotateCcw, Search, Send, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { showAdminToast } from '@/lib/adminToast';
 
 const STATUS = {
   open: ['Open', 'border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-300'],
@@ -17,7 +18,7 @@ function StatusPill({ value }) {
   return <span className={`inline-flex shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black ${tone}`}>{label}</span>;
 }
 
-export default function SupportDesk({ staffMode = false, mainAdmin = false }) {
+export default function SupportDesk({ staffMode = false, mainAdmin = false, canCreate = mainAdmin, canDelete = mainAdmin }) {
   const [tickets, setTickets] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [lockedId, setLockedId] = useState(null);
@@ -36,6 +37,8 @@ export default function SupportDesk({ staffMode = false, mainAdmin = false }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  useEffect(() => { if (staffMode && error) showAdminToast(error, 'error'); }, [staffMode, error]);
+  useEffect(() => { if (staffMode && notice) showAdminToast(notice, 'success'); }, [staffMode, notice]);
   const [composing, setComposing] = useState(false);
   const [subject, setSubject] = useState('');
   const [category, setCategory] = useState('general');
@@ -57,7 +60,7 @@ export default function SupportDesk({ staffMode = false, mainAdmin = false }) {
       try { saved = JSON.parse(window.localStorage.getItem(key) || '{}') || {}; } catch {}
       const pinned = typeof saved.lockedId === 'string' ? saved.lockedId : null;
       try { window.sessionStorage.removeItem(`${key}:open`); } catch {}
-      const deletedView = mainAdmin && saved.showDeleted === true;
+      const deletedView = canDelete && saved.showDeleted === true;
       setViewerId(session.user.id);
       setLockedId(pinned);
       setLockedDeleted(saved.lockedDeleted === true);
@@ -71,7 +74,7 @@ export default function SupportDesk({ staffMode = false, mainAdmin = false }) {
     };
     void restoreView();
     return () => { active = false; };
-  }, [staffMode, mainAdmin]);
+  }, [staffMode, mainAdmin, canDelete]);
 
   useEffect(() => {
     if (!viewReady || !storageKey) return;
@@ -99,12 +102,12 @@ export default function SupportDesk({ staffMode = false, mainAdmin = false }) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       setSelfEmail(session?.user?.email || '');
-      const result = await api(`/api/support/tickets${showDeleted && mainAdmin ? '?scope=deleted' : staffMode ? '?scope=staff' : ''}`);
+      const result = await api(`/api/support/tickets${showDeleted && canDelete ? '?scope=deleted' : staffMode ? '?scope=staff' : ''}`);
       setTickets(result.tickets || []);
       setError('');
     } catch (failure) { setError(failure.message); }
     finally { if (!silent) setLoading(false); }
-  }, [api, staffMode, mainAdmin, showDeleted, viewReady]);
+  }, [api, staffMode, canDelete, showDeleted, viewReady]);
 
   const loadDetail = useCallback(async (id) => {
     if (!id) return;
@@ -184,7 +187,7 @@ export default function SupportDesk({ staffMode = false, mainAdmin = false }) {
     if (busy) return;
     setBusy(true);
     try {
-      const result = await api('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject, category, message }) });
+      const result = await api(staffMode ? '/api/support/tickets?scope=staff' : '/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject, category, message }) });
       setComposing(false); setSubject(''); setMessage(''); setCategory('general');
       setSelectedId(result.ticket.id); setNotice('Ticket created. Support can now reply.'); setError('');
       await loadTickets();
@@ -218,7 +221,7 @@ export default function SupportDesk({ staffMode = false, mainAdmin = false }) {
   };
 
   const deleteTicket = async () => {
-    if (!mainAdmin || !selectedId || busy) return;
+    if (!canDelete || !selectedId || busy) return;
     setBusy(true);
     try {
       await api(`/api/support/tickets/${selectedId}`, { method: 'DELETE' });
@@ -231,7 +234,7 @@ export default function SupportDesk({ staffMode = false, mainAdmin = false }) {
   };
 
   const restoreTicket = async () => {
-    if (!mainAdmin || !selectedId || busy) return;
+    if (!canDelete || !selectedId || busy) return;
     setBusy(true);
     try {
       await api(`/api/support/tickets/${selectedId}`, { method: 'PATCH', body: JSON.stringify({ restore: true }) });
@@ -284,12 +287,12 @@ export default function SupportDesk({ staffMode = false, mainAdmin = false }) {
       </div>
       <div className="flex gap-2">
         <button type="button" onClick={() => loadTickets()} disabled={loading} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border bg-card px-3 text-xs font-bold hover:border-accent/50 disabled:opacity-50"><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh</button>
-        {mainAdmin && <button type="button" onClick={() => { setShowDeleted((value) => !value); setSelectedId(null); setDetail(null); setConfirmDelete(false); }} aria-pressed={showDeleted} className={`inline-flex min-h-10 items-center gap-2 rounded-xl border px-3 text-xs font-bold ${showDeleted ? 'border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-300' : 'border-border bg-card text-text hover:border-red-500/40'}`}><Trash2 size={14} /> {showDeleted ? 'Active tickets' : 'Deleted tickets'}</button>}
-        {(!staffMode || mainAdmin) && <button type="button" onClick={() => { setShowDeleted(false); setComposing(true); setSelectedId(null); setDetail(null); }} className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-accent px-3 text-xs font-black text-[var(--btn-text)]"><Plus size={15} /> New ticket</button>}
+        {canDelete && <button type="button" onClick={() => { setShowDeleted((value) => !value); setSelectedId(null); setDetail(null); setConfirmDelete(false); }} aria-pressed={showDeleted} className={`inline-flex min-h-10 items-center gap-2 rounded-xl border px-3 text-xs font-bold ${showDeleted ? 'border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-300' : 'border-border bg-card text-text hover:border-red-500/40'}`}><Trash2 size={14} /> {showDeleted ? 'Active tickets' : 'Deleted tickets'}</button>}
+        {(!staffMode || canCreate) && <button type="button" onClick={() => { setShowDeleted(false); setComposing(true); setSelectedId(null); setDetail(null); }} className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-accent px-3 text-xs font-black text-[var(--btn-text)]"><Plus size={15} /> New ticket</button>}
       </div>
     </div>
-    {error && <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs font-semibold text-red-600 dark:text-red-300">{error}</div>}
-    {notice && <div role="status" className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs font-semibold text-emerald-700 dark:text-emerald-300">{notice}</div>}
+    {!staffMode && error && <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs font-semibold text-red-600 dark:text-red-300">{error}</div>}
+    {!staffMode && notice && <div role="status" className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs font-semibold text-emerald-700 dark:text-emerald-300">{notice}</div>}
 
     <div className="grid min-h-[480px] gap-4 md:grid-cols-[minmax(240px,320px)_minmax(0,1fr)]">
       <div className={`${selectedId || composing ? 'hidden md:block' : ''} min-w-0 overflow-hidden rounded-2xl border border-border bg-card`}>
@@ -323,7 +326,7 @@ export default function SupportDesk({ staffMode = false, mainAdmin = false }) {
           <button type="submit" disabled={busy} className="min-h-11 rounded-xl bg-accent px-5 text-xs font-black text-[var(--btn-text)] disabled:opacity-50">{busy ? 'Sending…' : 'Send ticket'}</button>
         </form> : selected ? <>
           <div className="border-b border-border p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h3 className="break-words text-lg font-black">{selected.subject}</h3><p className="mt-1 text-xs text-text-muted">{selected.customer_email} · {selected.category} · Opened {new Date(selected.created_at).toLocaleString()}</p></div><div className="flex shrink-0 items-center gap-2">{showDeleted ? <span className="text-xs font-black text-red-600 dark:text-red-300">Deleted</span> : <StatusPill value={selected.status} />}<button type="button" onClick={() => toggleLock(selected)} aria-label={lockedId === selected.id && lockedDeleted === showDeleted ? `Unlock ${selected.subject}` : `Lock ${selected.subject} open after sign-in`} aria-pressed={lockedId === selected.id && lockedDeleted === showDeleted} title={lockedId === selected.id && lockedDeleted === showDeleted ? 'Unlock conversation' : 'Keep this conversation open'} className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${lockedId === selected.id && lockedDeleted === showDeleted ? 'text-accent' : 'text-text-muted hover:text-accent'}`}>{lockedId === selected.id && lockedDeleted === showDeleted ? <LockKeyhole size={20} strokeWidth={2.8} /> : <LockKeyholeOpen size={20} strokeWidth={2.8} />}</button></div></div>
-            {showDeleted ? <div className="mt-4 flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-text-muted">Deleted {new Date(selected.deleted_at).toLocaleString()} · Restorable for 30 days</p><button type="button" onClick={restoreTicket} disabled={busy} className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-emerald-500/40 px-3 text-xs font-bold text-emerald-700 hover:bg-emerald-500/10 disabled:opacity-50 dark:text-emerald-300"><RotateCcw size={14} /> Restore ticket</button></div> : staffMode && <div className="mt-4 flex flex-wrap items-center gap-2"><button type="button" disabled={busy || Boolean(selected.assigned_to && selected.assigned_to !== selfEmail && !mainAdmin)} onClick={() => updateTicket({ claim: selected.assigned_to !== selfEmail })} className="min-h-9 rounded-lg border border-border px-3 text-xs font-bold hover:border-accent/50 disabled:opacity-50">{selected.assigned_to === selfEmail ? 'Release ticket' : selected.assigned_to ? mainAdmin ? `Take over from ${selected.assigned_to}` : `Assigned: ${selected.assigned_to}` : 'Claim ticket'}</button><AppSelect aria-label="Ticket status" value={selected.status} disabled={busy} onChange={(event) => updateTicket({ status: event.target.value })} className="min-h-9 rounded-lg border border-border bg-background px-3 text-xs font-bold"><option value="open">Open</option><option value="in_progress">In progress</option><option value="waiting_customer">Waiting for customer</option><option value="resolved">Resolved</option></AppSelect>{mainAdmin && <button type="button" onClick={() => setConfirmDelete(true)} disabled={busy} className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-red-500/30 px-3 text-xs font-bold text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-300"><Trash2 size={14} /> Delete ticket</button>}</div>}
+            {showDeleted ? <div className="mt-4 flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-text-muted">Deleted {new Date(selected.deleted_at).toLocaleString()} · Restorable for 30 days</p><button type="button" onClick={restoreTicket} disabled={busy} className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-emerald-500/40 px-3 text-xs font-bold text-emerald-700 hover:bg-emerald-500/10 disabled:opacity-50 dark:text-emerald-300"><RotateCcw size={14} /> Restore ticket</button></div> : staffMode && <div className="mt-4 flex flex-wrap items-center gap-2"><button type="button" disabled={busy || Boolean(selected.assigned_to && selected.assigned_to !== selfEmail && !mainAdmin)} onClick={() => updateTicket({ claim: selected.assigned_to !== selfEmail })} className="min-h-9 rounded-lg border border-border px-3 text-xs font-bold hover:border-accent/50 disabled:opacity-50">{selected.assigned_to === selfEmail ? 'Release ticket' : selected.assigned_to ? mainAdmin ? `Take over from ${selected.assigned_to}` : `Assigned: ${selected.assigned_to}` : 'Claim ticket'}</button><AppSelect aria-label="Ticket status" value={selected.status} disabled={busy} onChange={(event) => updateTicket({ status: event.target.value })} className="min-h-9 rounded-lg border border-border bg-background px-3 text-xs font-bold"><option value="open">Open</option><option value="in_progress">In progress</option><option value="waiting_customer">Waiting for customer</option><option value="resolved">Resolved</option></AppSelect>{canDelete && <button type="button" onClick={() => setConfirmDelete(true)} disabled={busy} className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-red-500/30 px-3 text-xs font-bold text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-300"><Trash2 size={14} /> Delete ticket</button>}</div>}
           </div>
           <div className="flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">{detail?.ticket?.id !== selectedId ? <p className="text-xs text-text-muted">Loading conversation…</p> : detail.messages.length === 0 ? <p className="text-xs text-text-muted">No messages yet.</p> : detail.messages.map((entry) => <div key={entry.id} className={`max-w-[90%] rounded-2xl border p-3 ${entry.sender_role === 'staff' ? 'ml-auto border-accent/25 bg-accent-bg' : 'border-border bg-card-alt'}`}><p className="text-[10px] font-black text-text-muted">{entry.sender_name} · {new Date(entry.created_at).toLocaleString()}</p><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6">{entry.body}</p></div>)}
             {!showDeleted && typingLabel && <div role="status" className="flex items-center gap-2 text-xs font-semibold text-text-muted"><span>{typingLabel}</span><span className="flex gap-1" aria-hidden="true">{[0, 1, 2].map((dot) => <span key={dot} className="h-1.5 w-1.5 rounded-full bg-accent motion-safe:animate-pulse" style={{ animationDelay: `${dot * 140}ms` }} />)}</span></div>}

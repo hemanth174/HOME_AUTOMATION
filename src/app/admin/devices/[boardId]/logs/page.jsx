@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { isAdminEmail } from "@/lib/admin";
+import { hasAdminPageAccess } from '@/lib/adminClientAccess';
 import {
   Activity, ArrowLeft, CheckCircle2, CircleAlert, Clock3, Cpu, ExternalLink,
   FileClock, LoaderCircle, RadioTower, RefreshCw, Settings2, ShieldAlert, Wifi,
@@ -79,9 +79,9 @@ export default function DeviceLogsPage() {
 
   useEffect(() => {
     let active = true;
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!active) return;
-      if (!session || !isAdminEmail(session.user.email)) {
+      if (!await hasAdminPageAccess(session, 'hardware')) {
         router.replace("/admin");
         setAuthReady(true);
         setLoading(false);

@@ -11,7 +11,7 @@ const WIFI_SSID_RE = /^[\x20-\x7e]{1,32}$/;
 const WIFI_PASSWORD_RE = /^[\x20-\x7e]{8,63}$/;
 
 export async function POST(request, { params }) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'hardware' });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const { boardId } = await params;
   if (!UUID_RE.test(boardId || '')) return NextResponse.json({ error: 'Invalid board ID' }, { status: 400 });

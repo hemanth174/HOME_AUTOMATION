@@ -7,7 +7,6 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import {
   Activity,
-  AlertCircle,
   Check,
   CheckCircle2,
   CircleAlert,
@@ -26,8 +25,8 @@ import {
   ShieldAlert,
   Wifi,
   WifiOff,
-  X,
 } from "lucide-react";
+import { showAdminToast } from '@/lib/adminToast';
 import AdminConfirmDrawer from "./AdminConfirmDrawer";
 import DeviceWifiDrawer from "./DeviceWifiDrawer";
 
@@ -76,6 +75,9 @@ export default function DeviceFleet() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (notice) showAdminToast(notice, /could not|failed|expired|required|before|needs|cannot/i.test(notice) ? 'error' : 'success');
+  }, [notice]);
   const [busy, setBusy] = useState({});
   const [restartByBoard, setRestartByBoard] = useState({});
   const [wifiEditor, setWifiEditor] = useState(null);
@@ -534,25 +536,6 @@ export default function DeviceFleet() {
             </button>
           </div>
         </div>
-
-        {/* System Notice Box */}
-        {notice && (
-          <div
-            role="status"
-            className="m-4 flex items-start gap-2.5 rounded-xl border border-accent/40 bg-accent/10 p-3.5 text-xs font-semibold text-accent"
-          >
-            <AlertCircle size={16} className="mt-0.5 shrink-0" />
-            <span className="min-w-0 flex-1 break-words">{notice}</span>
-            <button
-              type="button"
-              onClick={() => setNotice("")}
-              aria-label="Dismiss notice"
-              className="shrink-0 text-text-muted hover:text-text"
-            >
-              <X size={15} />
-            </button>
-          </div>
-        )}
 
         {/* Empty State */}
         {filteredDevices.length === 0 ? (

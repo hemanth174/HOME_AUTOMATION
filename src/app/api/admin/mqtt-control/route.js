@@ -5,7 +5,7 @@ import { getMqttControlClient, getMqttControlConfigError } from '@/lib/mqttContr
 export const dynamic = 'force-dynamic';
 
 export async function GET(request) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'mqtt' });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const configurationError = getMqttControlConfigError();
   const mqtt = getMqttControlClient();
@@ -23,7 +23,7 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'mqtt' });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const mqtt = getMqttControlClient();
   if (!mqtt) return NextResponse.json({ error: getMqttControlConfigError() }, { status: 503 });

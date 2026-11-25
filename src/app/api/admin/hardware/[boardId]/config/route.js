@@ -5,7 +5,7 @@ import { encryptProvisioningValue } from '@/lib/provisioningServer';
 export const dynamic = 'force-dynamic';
 
 export async function PATCH(request, { params }) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'hardware' });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const boardId = (await params).boardId;
   const body = await request.json().catch(() => ({}));

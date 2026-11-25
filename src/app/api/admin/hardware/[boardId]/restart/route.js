@@ -4,7 +4,7 @@ import { requireAdmin } from '@/lib/adminServer';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request, { params }) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'hardware' });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const boardId = (await params).boardId;
   if (!/^[0-9a-f-]{36}$/i.test(boardId || '')) return NextResponse.json({ error: 'Invalid board identifier' }, { status: 400 });

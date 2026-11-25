@@ -4,12 +4,12 @@ import { useState, useEffect } from 'react';
 import Toast from './Toast';
 
 export default function GlobalToast() {
-  const [toastMessage, setToastMessage] = useState('');
+  const [toast, setToast] = useState({ message: '', id: 0 });
 
   useEffect(() => {
     const handleGlobalToast = (e) => {
       if (e.detail && typeof e.detail === 'string') {
-        setToastMessage(e.detail);
+        setToast((current) => ({ message: e.detail, id: current.id + 1 }));
       }
     };
 
@@ -17,5 +17,5 @@ export default function GlobalToast() {
     return () => window.removeEventListener('show-global-toast', handleGlobalToast);
   }, []);
 
-  return <Toast message={toastMessage} onClose={() => setToastMessage('')} />;
+  return <Toast key={toast.id} message={toast.message} onClose={() => setToast((current) => ({ ...current, message: '' }))} />;
 }

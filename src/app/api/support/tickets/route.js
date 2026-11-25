@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { authenticateUser, getStaffRole } from '@/lib/adminServer';
+import { authenticateUser, getStaffAccess } from '@/lib/adminServer';
+import { hasAdminPermission } from '@/lib/adminPermissions';
 
 export const dynamic = 'force-dynamic';
 const noStore = { 'Cache-Control': 'no-store, private' };
@@ -11,11 +12,11 @@ export async function GET(request) {
   const scope = new URL(request.url).searchParams.get('scope');
   const staff = scope === 'staff';
   const deleted = scope === 'deleted';
-  const role = staff || deleted ? await getStaffRole(auth.admin, auth.user) : null;
-  if (deleted && role !== 'main_admin') {
-    return NextResponse.json({ error: 'Main admin access required' }, { status: 403 });
+  const access = staff || deleted ? await getStaffAccess(auth.admin, auth.user) : { role: null };
+  if (deleted && !hasAdminPermission(access.role, access.permissions, 'support_delete')) {
+    return NextResponse.json({ error: 'Ticket deletion access required' }, { status: 403 });
   }
-  if (staff && !role) {
+  if (staff && !hasAdminPermission(access.role, access.permissions, 'support')) {
     return NextResponse.json({ error: 'Staff access required' }, { status: 403 });
   }
   let query = auth.admin.from('support_tickets')
@@ -33,6 +34,10 @@ export async function GET(request) {
 export async function POST(request) {
   const auth = await authenticateUser(request);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  if (new URL(request.url).searchParams.get('scope') === 'staff') {
+    const access = await getStaffAccess(auth.admin, auth.user);
+    if (!hasAdminPermission(access.role, access.permissions, 'support_create')) return NextResponse.json({ error: 'Support issue creation access required' }, { status: 403 });
+  }
   let body;
   try { body = await request.json(); } catch { return NextResponse.json({ error: 'Invalid request' }, { status: 400 }); }
   const subject = typeof body.subject === 'string' ? body.subject.trim() : '';

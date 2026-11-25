@@ -5,7 +5,7 @@ import { getMqttControlClient, getMqttControlConfigError } from '@/lib/mqttContr
 export const dynamic = 'force-dynamic';
 
 export async function GET(request) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'mqtt' });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const sharedSecret = process.env.MQTT_CONTROL_SHARED_SECRET;
   if (!sharedSecret) return NextResponse.json({ error: 'MQTT_CONTROL_SHARED_SECRET is not configured on the VikaTech server.' }, { status: 503 });

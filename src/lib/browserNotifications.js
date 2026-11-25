@@ -186,8 +186,8 @@ export async function showBrowserNotification({
     body,
     tag,
     data: { url },
-    icon: '/icon-192.png',
-    badge: '/favicon.png',
+    icon: '/icon-rounded-192.png',
+    badge: '/favicon-rounded.png',
     silent,
   };
 

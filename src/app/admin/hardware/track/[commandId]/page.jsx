@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { isAdminEmail } from "@/lib/admin";
+import { hasAdminPageAccess } from '@/lib/adminClientAccess';
 import {
   ArrowLeft, Check, CheckCircle2, Clock3, Cpu, ExternalLink, LoaderCircle,
   RadioTower, RotateCcw, ShieldAlert, Wifi, XCircle,
@@ -40,7 +40,7 @@ export default function Esp32CommandTrackerPage() {
   useEffect(() => {
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session || !isAdminEmail(session.user.email)) {
+      if (!await hasAdminPageAccess(session, 'hardware')) {
         router.replace("/admin");
         return;
       }

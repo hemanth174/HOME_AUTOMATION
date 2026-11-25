@@ -4,7 +4,7 @@ import { requireAdmin } from '@/lib/adminServer';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'approvals' });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const { data, error } = await auth.admin.from('account_approval_requests').select('*').order('created_at', { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -14,7 +14,7 @@ export async function GET(request) {
 }
 
 export async function PATCH(request) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'approvals' });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const { userId, action, rejectionReason = '' } = await request.json();
   if (!userId || !['approve', 'reject', 'revoke'].includes(action)) return NextResponse.json({ error: 'Valid user and approval action are required' }, { status: 400 });

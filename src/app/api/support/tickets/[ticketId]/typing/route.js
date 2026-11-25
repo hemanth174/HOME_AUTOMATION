@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { authenticateUser, getStaffRole } from '@/lib/adminServer';
+import { authenticateUser, getStaffAccess } from '@/lib/adminServer';
+import { hasAdminPermission } from '@/lib/adminPermissions';
 
 export const dynamic = 'force-dynamic';
 const noStore = { 'Cache-Control': 'no-store, private' };
@@ -10,7 +11,8 @@ async function ticketContext(request, params) {
   if (auth.error) return { response: NextResponse.json({ error: auth.error }, { status: auth.status }) };
   const { ticketId } = await params;
   if (!UUID.test(ticketId)) return { response: NextResponse.json({ error: 'Invalid ticket' }, { status: 400 }) };
-  const role = await getStaffRole(auth.admin, auth.user);
+  const access = await getStaffAccess(auth.admin, auth.user);
+  const role = hasAdminPermission(access.role, access.permissions, 'support') ? access.role : null;
   const { data: ticket, error } = await auth.admin.from('support_tickets')
     .select('id, user_id').eq('id', ticketId).is('deleted_at', null).maybeSingle();
   if (error) return { response: NextResponse.json({ error: error.message }, { status: 500 }) };

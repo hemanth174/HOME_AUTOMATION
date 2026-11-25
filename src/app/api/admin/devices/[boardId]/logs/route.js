@@ -11,7 +11,7 @@ function eventTime(value) {
 }
 
 export async function GET(request, { params }) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'hardware' });
   if (auth.error) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }

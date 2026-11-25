@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { authenticateUser, getStaffRole } from '@/lib/adminServer';
+import { authenticateUser, getStaffAccess } from '@/lib/adminServer';
+import { hasAdminPermission } from '@/lib/adminPermissions';
 
 export const dynamic = 'force-dynamic';
 const noStore = { 'Cache-Control': 'no-store, private' };
@@ -11,16 +12,17 @@ async function context(request, params, { includeDeleted = false } = {}) {
   if (auth.error) return { response: NextResponse.json({ error: auth.error }, { status: auth.status }) };
   const { ticketId } = await params;
   if (!UUID.test(ticketId)) return { response: NextResponse.json({ error: 'Invalid ticket' }, { status: 400 }) };
-  const role = await getStaffRole(auth.admin, auth.user);
+  const access = await getStaffAccess(auth.admin, auth.user);
+  const role = hasAdminPermission(access.role, access.permissions, 'support') ? access.role : null;
   const { data: ticket, error } = await auth.admin.from('support_tickets').select('*').eq('id', ticketId).maybeSingle();
   if (error) return { response: NextResponse.json({ error: error.message }, { status: 500 }) };
   if (!ticket || (!role && ticket.user_id !== auth.user.id)) {
     return { response: NextResponse.json({ error: 'Ticket not found' }, { status: 404 }) };
   }
-  if (ticket.deleted_at && (!includeDeleted || role !== 'main_admin')) {
+  if (ticket.deleted_at && (!includeDeleted || !hasAdminPermission(access.role, access.permissions, 'support_delete'))) {
     return { response: NextResponse.json({ error: 'Ticket not found' }, { status: 404 }) };
   }
-  return { ...auth, role, ticket };
+  return { ...auth, role, permissions: access.permissions, ticket };
 }
 
 export async function GET(request, { params }) {
@@ -65,8 +67,8 @@ export async function PATCH(request, { params }) {
   try { body = await request.json(); } catch { return NextResponse.json({ error: 'Invalid request' }, { status: 400 }); }
   if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   if (body.restore === true) {
-    if (ctx.role !== 'main_admin' || !ctx.ticket.deleted_at) {
-      return NextResponse.json({ error: 'Main admin access required to restore this ticket' }, { status: 403 });
+    if (!hasAdminPermission(ctx.role, ctx.permissions, 'support_delete') || !ctx.ticket.deleted_at) {
+      return NextResponse.json({ error: 'Ticket restore access required' }, { status: 403 });
     }
     if (new Date(ctx.ticket.deleted_at).getTime() < Date.now() - 30 * 24 * 60 * 60 * 1000) {
       return NextResponse.json({ error: 'The 30-day restore period has ended' }, { status: 410 });
@@ -105,8 +107,8 @@ export async function PATCH(request, { params }) {
 export async function DELETE(request, { params }) {
   const ctx = await context(request, params);
   if (ctx.response) return ctx.response;
-  if (ctx.role !== 'main_admin') {
-    return NextResponse.json({ error: 'Main admin access required' }, { status: 403 });
+  if (!hasAdminPermission(ctx.role, ctx.permissions, 'support_delete')) {
+    return NextResponse.json({ error: 'Ticket deletion access required' }, { status: 403 });
   }
   const { data, error } = await ctx.admin.from('support_tickets')
     .update({ deleted_at: new Date().toISOString(), deleted_by: ctx.user.id, updated_at: new Date().toISOString() })

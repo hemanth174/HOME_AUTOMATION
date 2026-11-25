@@ -6,7 +6,7 @@ import { updateInMemorySettings, getCachedSettings } from "@/app/api/voice-subsc
 export const dynamic = "force-dynamic";
 
 export async function GET(request) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'voice_plans' });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   try {
@@ -26,7 +26,7 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'voice_plans' });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   try {

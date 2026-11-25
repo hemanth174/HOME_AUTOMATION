@@ -4,7 +4,7 @@ import { resolveProject } from './projects';
 import { MonitoringError, errorPayload } from './management';
 
 export async function authorize(request) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'monitoring' });
   if (auth.error) return { response: NextResponse.json({ ok: false, error: { code: 'admin_required', message: auth.error, availability: 'permission_denied' } }, { status: auth.status }) };
   return { auth };
 }

@@ -4,6 +4,7 @@ import { requireAdmin } from '@/lib/adminServer';
 import { STAGES, CATEGORY_LABELS } from '@/lib/orderCategories';
 import { APPROVAL_ADMINS } from '@/lib/approval';
 import { orderStageEmail } from '@/lib/emailTemplates';
+import { hasAdminPermission } from '@/lib/adminPermissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,12 +33,20 @@ async function sendStageEmail(order, stage) {
 export async function GET(request) {
   const auth = await requireAdmin(request, { allowSubAdmin: true });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  if (!hasAdminPermission(auth.role, auth.permissions, 'orders_view') && !hasAdminPermission(auth.role, auth.permissions, 'approvals')) return NextResponse.json({ error: 'Order or approval access required' }, { status: 403 });
   if (auth.role === 'sub_admin') {
-    const { data, error } = await auth.admin.from('order_trackings')
-      .select('id, order_id, full_name, email, category, status, created_at')
-      .order('created_at', { ascending: false }).limit(200);
+    const canManageOrders = hasAdminPermission(auth.role, auth.permissions, 'orders_manage');
+    const canViewOrders = hasAdminPermission(auth.role, auth.permissions, 'orders_view');
+    const canApprove = hasAdminPermission(auth.role, auth.permissions, 'approvals');
+    const { data, error } = canViewOrders ? await auth.admin.from('order_trackings')
+      .select(canManageOrders ? '*' : 'id, order_id, full_name, email, category, status, created_at')
+      .order('created_at', { ascending: false }).limit(200) : { data: [], error: null };
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ orders: data || [], users: [], approvals: [] },
+    const { data: approvalRows } = canApprove ? await auth.admin.from('account_approval_requests').select('*').order('created_at', { ascending: false }) : { data: [] };
+    const { data: userRows } = canApprove ? await auth.admin.auth.admin.listUsers({ perPage: 1000 }) : { data: { users: [] } };
+    const { data: staffRows } = canApprove ? await auth.admin.from('admin_staff').select('email') : { data: [] };
+    const adminSet = new Set([...APPROVAL_ADMINS, ...(staffRows || []).map((item) => item.email)]);
+    return NextResponse.json({ orders: data || [], users: (userRows?.users || []).filter((item) => !adminSet.has((item.email || '').toLowerCase())), approvals: (approvalRows || []).filter((item) => !adminSet.has((item.email || '').toLowerCase())) },
       { headers: { 'Cache-Control': 'no-store' } });
   }
   const { data: orders, error } = await auth.admin.from('order_trackings').select('*').order('created_at', { ascending: false });
@@ -65,7 +74,7 @@ export async function GET(request) {
 }
 
 export async function PATCH(request) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'orders_manage' });
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const { orderId, recordId, status } = await request.json();
   if (!orderId || !STAGES.includes(status)) return NextResponse.json({ error: 'A valid order and stage are required' }, { status: 400 });

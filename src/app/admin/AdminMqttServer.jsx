@@ -3,6 +3,7 @@
 import AppSelect from '@/components/AppSelect';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Clock3, ExternalLink, LoaderCircle, Play, Radio, RefreshCw, Server, Square, Terminal } from "lucide-react";
+import { showAdminToast } from '@/lib/adminToast';
 
 function localTime(value) {
   if (!value) return "—";
@@ -18,8 +19,6 @@ export default function AdminMqttServer({ accessToken = "" }) {
   const [scheduleDate, setScheduleDate] = useState(() => new Date().toLocaleDateString("en-CA"));
   const [scheduleTime, setScheduleTime] = useState(() => { const now = new Date(); return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`; });
   const [logsError, setLogsError] = useState("");
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
@@ -32,9 +31,8 @@ export default function AdminMqttServer({ accessToken = "" }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not read the MQTT lease.");
       setSnapshot(data);
-      setError("");
     } catch (loadError) {
-      setError(loadError.message || "Could not read the MQTT lease.");
+      if (!quiet) showAdminToast(loadError.message || "Could not read the MQTT lease.", 'error');
     } finally {
       if (!quiet) setRefreshing(false);
     }
@@ -53,7 +51,7 @@ export default function AdminMqttServer({ accessToken = "" }) {
     }
   }, [accessToken, headers]);
 
-  const loadSchedules = useCallback(async () => {
+  const loadSchedules = useCallback(async (quiet = false) => {
     if (!accessToken) return;
     try {
       const response = await fetch("/api/admin/mqtt-schedules", { headers, cache: "no-store" });
@@ -61,7 +59,7 @@ export default function AdminMqttServer({ accessToken = "" }) {
       if (!response.ok) throw new Error(data.error || "Could not load scheduled starts.");
       setSchedules(data.schedules || []);
     } catch (loadError) {
-      setError(loadError.message || "Could not load scheduled starts.");
+      if (!quiet) showAdminToast(loadError.message || "Could not load scheduled starts.", 'error');
     }
   }, [accessToken, headers]);
 
@@ -71,15 +69,13 @@ export default function AdminMqttServer({ accessToken = "" }) {
     void loadSchedules();
     const stateTimer = window.setInterval(() => void loadState(true), 5000);
     const logTimer = window.setInterval(() => void loadLogs(), 10000);
-    const scheduleTimer = window.setInterval(() => void loadSchedules(), 30000);
+    const scheduleTimer = window.setInterval(() => void loadSchedules(true), 30000);
     return () => { window.clearInterval(stateTimer); window.clearInterval(logTimer); window.clearInterval(scheduleTimer); };
   }, [loadState, loadLogs, loadSchedules]);
 
   const act = async (action, owner) => {
     const key = owner ? `${action}-${owner}` : action;
     setBusy(key);
-    setNotice("");
-    setError("");
     try {
       const response = await fetch("/api/admin/mqtt-control", {
         method: "POST",
@@ -88,10 +84,10 @@ export default function AdminMqttServer({ accessToken = "" }) {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "The MQTT request failed.");
-      setNotice(data.message || "Request accepted.");
+      showAdminToast(data.message || "Request accepted.", 'success');
       await loadState(true);
     } catch (actionError) {
-      setError(actionError.message || "The MQTT request failed.");
+      showAdminToast(actionError.message || "The MQTT request failed.", 'error');
       await loadState(true);
     } finally {
       setBusy("");
@@ -100,27 +96,27 @@ export default function AdminMqttServer({ accessToken = "" }) {
 
   const scheduleStart = async (event) => {
     event.preventDefault();
-    setBusy("schedule"); setError(""); setNotice("");
+    setBusy("schedule");
     try {
       const scheduledAt = new Date(`${scheduleDate}T${scheduleTime}`);
       if (Number.isNaN(scheduledAt.getTime())) throw new Error("Enter a valid date and time.");
       const response = await fetch("/api/admin/mqtt-schedules", { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ owner: scheduleOwner, scheduledAt: scheduledAt.toISOString() }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not schedule the MQTT start.");
-      setNotice(`${data.message} It runs only if ${scheduleOwner}’s laptop controller is online at that time.`);
+      showAdminToast(`${data.message} It runs only if ${scheduleOwner}’s laptop controller is online at that time.`, 'success');
       await loadSchedules();
-    } catch (scheduleError) { setError(scheduleError.message || "Could not schedule the MQTT start."); }
+    } catch (scheduleError) { showAdminToast(scheduleError.message || "Could not schedule the MQTT start.", 'error'); }
     finally { setBusy(""); }
   };
 
   const cancelSchedule = async (id) => {
-    setBusy(`cancel-${id}`); setError("");
+    setBusy(`cancel-${id}`);
     try {
       const response = await fetch("/api/admin/mqtt-schedules", { method: "DELETE", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not cancel the scheduled start.");
-      setNotice(data.message); await loadSchedules();
-    } catch (cancelError) { setError(cancelError.message || "Could not cancel the scheduled start."); }
+      showAdminToast(data.message, 'success'); await loadSchedules();
+    } catch (cancelError) { showAdminToast(cancelError.message || "Could not cancel the scheduled start.", 'error'); }
     finally { setBusy(""); }
   };
 
@@ -140,8 +136,6 @@ export default function AdminMqttServer({ accessToken = "" }) {
         </button>
       </div>
 
-      {error && <div role="alert" className="rounded-xl border border-red-400/40 bg-red-400/10 px-4 py-3 text-xs font-semibold leading-5 text-red-600 dark:text-red-300">{error}</div>}
-      {notice && <div role="status" className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs font-semibold leading-5 text-emerald-700 dark:text-emerald-300">{notice}</div>}
 
       {!snapshot?.configured ? (
         <div className="rounded-2xl border border-border bg-card p-5 text-sm font-semibold text-text-muted">Configure the MQTT discovery project credentials on the VikaTech server, then reload this page.</div>
