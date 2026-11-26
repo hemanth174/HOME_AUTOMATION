@@ -3,7 +3,25 @@ import { supabase } from '@/lib/supabase';
 let audioContext = null;
 
 const SHOWN_PREFIX = 'vikatech_notification_shown:';
+const PUSH_ENABLED_PREFIX = 'vikatech_push_enabled:';
 const SHOWN_TTL_MS = 10 * 60 * 1000;
+
+export function isPushEnabledForUser(userId) {
+  if (!userId || typeof window === 'undefined') return true;
+  try {
+    return localStorage.getItem(`${PUSH_ENABLED_PREFIX}${userId}`) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+export function setPushEnabledForUser(userId, enabled) {
+  if (!userId || typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(`${PUSH_ENABLED_PREFIX}${userId}`, String(enabled));
+  } catch {}
+  window.dispatchEvent(new CustomEvent('vikatech-push-preference-change', { detail: { userId, enabled } }));
+}
 
 export function isNotificationSupported() {
   return (
@@ -68,6 +86,12 @@ export async function ensurePushSubscription() {
     return { ok: false, reason: Notification.permission };
   }
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, reason: 'signed-out' };
+  if (!isPushEnabledForUser(user.id)) return { ok: false, reason: 'disabled-on-device' };
+
   const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   if (!publicKey) {
     return { ok: false, reason: 'vapid-public-key-missing' };
@@ -87,11 +111,6 @@ export async function ensurePushSubscription() {
       applicationServerKey: urlBase64ToUint8Array(publicKey),
     });
   }
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, reason: 'signed-out' };
 
   const json = subscription.toJSON();
   const { error } = await supabase.from('push_subscriptions').upsert(

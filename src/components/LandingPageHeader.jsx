@@ -32,10 +32,18 @@ export default function LandingPageHeader({
 
   return (
     <>
-      <header className="fixed top-0 w-full z-50 flex justify-between items-center px-3 md:px-6 py-3 md:py-4 bg-lp-bg/85 lp-glass-blur border-b border-lp-outline-variant">
-        <div className="flex items-center gap-2 min-w-0">
+      <header className="fixed top-0 z-50 flex min-h-16 w-full items-center justify-between gap-3 border-b border-lp-outline-variant bg-lp-bg/85 px-3 py-2 sm:px-5 md:min-h-0 md:px-6 md:py-4 lp-glass-blur">
+        <div className="flex min-w-0 shrink-0 items-center gap-2">
+          <div className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden select-none sm:hidden">
+            <img
+              src="/vvikatech_logo_house.png"
+              alt="VikaTech"
+              draggable="false"
+              className="h-auto w-24 max-w-none shrink-0"
+            />
+          </div>
           <div
-            className="flex h-9 w-20 items-center justify-center overflow-hidden rounded-full bg-white shadow-sm select-none shrink-0 sm:w-24 md:h-11 md:w-32"
+            className="hidden h-9 w-24 items-center justify-center overflow-hidden rounded-full bg-white shadow-sm select-none shrink-0 sm:flex md:h-11 md:w-32"
           >
             <img
               src="/vikatech_logo.png"
@@ -89,17 +97,17 @@ export default function LandingPageHeader({
             Our Journey
           </button>
         </nav>
-        <div className="flex gap-1 md:gap-4 items-center shrink-0">
-          <ThemeToggle />
+        <div className="flex shrink-0 items-center gap-2.5 sm:gap-3 md:gap-4">
+          <ThemeToggle size={14} className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border border-lp-outline-variant text-lp-on-surface-variant transition-colors hover:bg-lp-primary-container/10 hover:text-lp-primary disabled:cursor-wait disabled:opacity-70 sm:h-9 sm:w-9" />
           {!appInstalled && (
             <button
               type="button"
               onClick={onInstallClick}
               title="Install VikaTech app"
               aria-label="Install VikaTech app"
-              className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full border border-lp-primary-container/40 px-2.5 text-lp-primary transition-colors hover:bg-lp-primary-container/10 md:h-11 md:px-3"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center gap-1.5 rounded-full border border-lp-primary-container/40 text-lp-primary transition-colors hover:bg-lp-primary-container/10 sm:h-9 sm:w-9 md:h-11 md:w-auto md:px-3"
             >
-              <Download size={15} aria-hidden="true" />
+              <Download size={14} aria-hidden="true" />
               <span className="hidden text-[11px] font-bold md:inline">Install App</span>
             </button>
           )}
@@ -107,9 +115,9 @@ export default function LandingPageHeader({
             ref={cartRef}
             onClick={() => router.push("/contact-sales")}
             title="Pre-Order Cart"
-            className={`relative w-10 h-10 md:w-11 md:h-11 rounded-full border border-lp-primary-container/40 bg-lp-surface-lowest/60 flex items-center justify-center hover:bg-lp-primary-container/10 hover:shadow-[0_0_15px_rgba(0,255,65,0.25)] transition-all active:scale-90 cursor-pointer ${cartShake ? "lp-cart-shake" : ""}`}
+            className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-lp-primary-container/40 bg-lp-surface-lowest/60 transition-all hover:bg-lp-primary-container/10 hover:shadow-[0_0_15px_rgba(0,255,65,0.25)] active:scale-90 sm:h-9 sm:w-9 md:h-11 md:w-11 cursor-pointer ${cartShake ? "lp-cart-shake" : ""}`}
           >
-            <span className="material-symbols-outlined text-lp-primary-container text-lg">
+            <span className="material-symbols-outlined text-base text-lp-primary-container sm:text-lg">
               shopping_cart
             </span>
             {cartCount > 0 && (
@@ -123,7 +131,7 @@ export default function LandingPageHeader({
           </button>
           <button
             onClick={() => router.push("/login")}
-            className="px-3 py-1.5 md:px-4 md:py-2 border border-lp-primary-container/40 text-lp-primary font-label-caps text-[10px] md:text-[12px] hover:bg-lp-primary-container/10 transition-all active:scale-95 cursor-pointer rounded whitespace-nowrap"
+            className="inline-flex h-8 shrink-0 items-center rounded border border-lp-primary-container/40 px-2.5 font-label-caps text-[10px] text-lp-primary transition-all hover:bg-lp-primary-container/10 active:scale-95 sm:h-9 md:h-11 md:px-4 md:text-[12px] cursor-pointer whitespace-nowrap"
           >
             Login
           </button>

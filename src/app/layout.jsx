@@ -1,5 +1,7 @@
 // 'use client'
+import "driver.js/dist/driver.css";
 import "./globals.css";
+import "./styles/dashboard-guidance.css";
 import MainLayoutWrapper from "@/components/MainLayoutWrapper";
 import PGShellScope from "@/components/PGShellScope";
 import PGDrawerEnhancer from "@/components/PGDrawerEnhancer";

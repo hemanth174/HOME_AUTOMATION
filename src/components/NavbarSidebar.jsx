@@ -41,6 +41,7 @@ function SidebarLink({
       }}
       aria-current={active ? "page" : undefined}
       data-sidebar-item=""
+      data-tour-nav={link.href}
       title={!sidebarExpanded ? link.label : undefined}
       className={`rounded-full py-2.5 text-sm font-bold transition-colors duration-200 ease-out flex items-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--pg-brand) ${sidebarExpanded ? "px-3 justify-between" : "px-0 justify-center"} ${isCloudDisabled ? "opacity-40 cursor-not-allowed text-(--pg-muted) bg-transparent hover:bg-transparent" : active ? "bg-(--pg-brand-faint) text-(--pg-brand) hover:bg-(--pg-brand-soft)" : "text-(--pg-navtext) bg-transparent hover:bg-(--pg-brand-faint) hover:text-(--pg-brand)"}`}
     >
@@ -102,7 +103,7 @@ export default function NavbarSidebar({
   const morePanelRef = useRef(null);
   const [visibleCount, setVisibleCount] = useState(links.length + manageLinks.length + supportLinks.length);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [morePosition, setMorePosition] = useState({ top: 8, left: 72 });
+  const [morePosition, setMorePosition] = useState({ top: 8, left: 72, pointerTop: 20 });
   const totalLinks = links.length + manageLinks.length + supportLinks.length;
   const shownCount = Math.min(visibleCount, totalLinks);
   const visibleMain = links.slice(0, shownCount);
@@ -155,10 +156,13 @@ export default function NavbarSidebar({
     const updatePosition = () => {
       const rect = moreButtonRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const panelHeight = Math.min(420, window.innerHeight - 16);
+      const panelHeight = Math.min(morePanelRef.current?.offsetHeight || 420, window.innerHeight - 16);
+      const buttonMiddle = rect.top + rect.height / 2;
+      const top = Math.max(8, Math.min(buttonMiddle - panelHeight / 2, window.innerHeight - panelHeight - 8));
       setMorePosition({
-        top: Math.max(8, Math.min(rect.top, window.innerHeight - panelHeight - 8)),
-        left: Math.max(8, Math.min(rect.right + 8, window.innerWidth - 248)),
+        top,
+        left: Math.max(8, Math.min(rect.right + 12, window.innerWidth - 248)),
+        pointerTop: Math.max(14, Math.min(buttonMiddle - top, panelHeight - 14)),
       });
     };
     updatePosition();
@@ -290,12 +294,14 @@ export default function NavbarSidebar({
       </div>
 
       {moreOpen && hiddenLinks.length > 0 && typeof document !== 'undefined' && createPortal(
-        <nav
-          id="desktop-sidebar-more" ref={morePanelRef} aria-label="More pages"
-          className="fixed z-60 w-60 overflow-y-auto rounded-2xl border border-(--pg-line) bg-(--pg-side) p-2 shadow-2xl"
-          style={{ top: morePosition.top, left: morePosition.left, maxHeight: 'calc(100dvh - 16px)' }}
+        <div
+          ref={morePanelRef}
+          className="fixed z-[80] w-60"
+          style={{ top: morePosition.top, left: morePosition.left }}
         >
-          <div className="space-y-3">
+          <span aria-hidden="true" className="pointer-events-none absolute -left-[6px] z-10 h-3 w-3 rotate-45 border-b border-l border-(--pg-line) bg-(--pg-side)" style={{ top: morePosition.pointerTop - 6 }} />
+          <nav id="desktop-sidebar-more" aria-label="More pages" className="max-h-[calc(100dvh-16px)] overflow-y-auto rounded-2xl border border-(--pg-line) bg-(--pg-side) p-2 shadow-2xl">
+            <div className="space-y-3">
             {hiddenMain.length > 0 && <SidebarSection label="MAIN MENU" links={hiddenMain} pathname={pathname}
               isClientOnline={isClientOnline} handleOfflineLinkClick={handleOfflineLinkClick}
               sidebarExpanded onNavigate={() => setMoreOpen(false)} />}
@@ -305,8 +311,9 @@ export default function NavbarSidebar({
             {hiddenSupport.length > 0 && <SidebarSection label="SUPPORT & LEGAL" links={hiddenSupport} pathname={pathname}
               isClientOnline={isClientOnline} handleOfflineLinkClick={handleOfflineLinkClick}
               sidebarExpanded onNavigate={() => setMoreOpen(false)} />}
-          </div>
-        </nav>,
+            </div>
+          </nav>
+        </div>,
         document.body,
       )}
 

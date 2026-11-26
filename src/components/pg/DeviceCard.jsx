@@ -37,7 +37,7 @@ export default function DeviceCard({
       onDragOver={(event) => onDragOver?.(event, device.id)}
       onDrop={(event) => onDrop?.(event, device.id)}
       onDragEnd={onDragEnd}
-      className={`relative flex min-h-[104px] min-w-0 flex-col justify-between gap-1.5 rounded-2xl border bg-(--pg-card) p-3.5 transition-all duration-200 ${carousel ? "w-[320px] shrink-0 snap-start snap-always" : "w-full"} ${draggable ? (isDragging ? "cursor-grabbing opacity-60" : "cursor-grab active:cursor-grabbing") : ""} ${isDragOver ? "border-(--pg-brand) ring-2 ring-(--pg-brand)/20" : ""} max-sm:w-full max-sm:basis-full max-sm:shrink-0 max-sm:snap-start max-sm:snap-always max-sm:min-h-[132px] ${
+      className={`relative flex min-h-[104px] min-w-0 flex-col justify-between gap-1.5 rounded-2xl border bg-(--pg-card) p-3.5 transition-all duration-200 ${carousel ? "w-[320px] shrink-0 snap-start" : "w-full"} ${draggable ? (isDragging ? "cursor-grabbing opacity-60" : "cursor-grab active:cursor-grabbing") : ""} ${isDragOver ? "border-(--pg-brand) ring-2 ring-(--pg-brand)/20" : ""} max-sm:w-full max-sm:basis-full max-sm:shrink-0 max-sm:snap-start max-sm:min-h-[132px] ${
         isLightOn ? "border-(--pg-brand-line)" : "border-(--pg-line)"
       } ${pending ? "opacity-70" : ""}`}
     >

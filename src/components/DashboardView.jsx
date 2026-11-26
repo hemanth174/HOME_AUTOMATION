@@ -42,11 +42,20 @@ export default function DashboardView({ c }) {
   const scrollDeviceCarousel = (direction) => {
     const carousel = c.carouselRef.current;
     if (!carousel) return;
-    const firstCard = carousel.querySelector("article");
-    const distance = firstCard
-      ? firstCard.getBoundingClientRect().width + 12
-      : carousel.clientWidth;
-    carousel.scrollBy({ left: direction * distance, behavior: "smooth" });
+    const cards = [...carousel.querySelectorAll(":scope > article")];
+    if (!cards.length) return;
+    const left = carousel.getBoundingClientRect().left;
+    const positions = cards.map((card) => card.getBoundingClientRect().left - left + carousel.scrollLeft);
+    const nearest = positions.reduce(
+      (best, position, index) =>
+        Math.abs(position - carousel.scrollLeft) < Math.abs(positions[best] - carousel.scrollLeft)
+          ? index
+          : best,
+      0,
+    );
+    const next = Math.max(0, Math.min(cards.length - 1, nearest + direction));
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    carousel.scrollTo({ left: positions[next], behavior: reducedMotion ? "auto" : "smooth" });
   };
 
   const selectedBoard = c.selectedBoard;
@@ -144,7 +153,7 @@ export default function DashboardView({ c }) {
   };
 
   const handleCarouselPointerDown = (event) => {
-    if (c.deviceView !== "carousel" || event.button !== 0) return;
+    if (c.deviceView !== "carousel" || event.button !== 0 || event.pointerType === "touch") return;
     if (event.target.closest?.("button,a,input,select,textarea")) return;
 
     const carousel = c.carouselRef.current;
@@ -222,7 +231,7 @@ export default function DashboardView({ c }) {
         ) : (
           <>
             <div className="grid min-w-0 gap-4 lg:grid-cols-[280px_minmax(0,1fr)] items-start">
-                 <section className="boards-section-selector min-w-0 rounded-2xl border border-(--pg-line) bg-(--pg-card) p-3 sm:p-5 lg:order-2">
+                 <section data-tour="room-controls" className="boards-section-selector min-w-0 rounded-2xl border border-(--pg-line) bg-(--pg-card) p-3 sm:p-5 lg:order-2">
                 <div className="flex flex-wrap items-center justify-between gap-3 pb-1">
                   <div className="min-w-0 flex-1">
                     <h2
@@ -318,7 +327,7 @@ export default function DashboardView({ c }) {
                         ref={c.carouselRef}
                         className={`${
                           c.deviceView === "carousel"
-                            ? "flex w-full min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth overscroll-x-contain pb-1 touch-pan-y"
+                            ? `flex w-full min-w-0 gap-3 overflow-x-auto overscroll-x-contain pb-1 touch-auto ${isCarouselDragging ? "snap-none" : "snap-x snap-proximity"}`
                             : "grid w-full min-w-0 sm:grid-cols-2 gap-2.5"
                         } ${
                           c.deviceView === "carousel"

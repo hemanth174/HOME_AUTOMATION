@@ -2,12 +2,14 @@
 
 import AppSelect from '@/components/AppSelect';
 import { useEffect, useState } from "react";
-import { Bell, LayoutGrid, Mail, Mic, SlidersHorizontal, Zap } from "lucide-react";
+import { Bell, Keyboard, LayoutGrid, Mail, Mic, RotateCcw, SlidersHorizontal, Zap } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import {
   ensurePushSubscription,
   getNotificationPermission,
+  isPushEnabledForUser,
   requestBrowserNotificationPermission,
+  setPushEnabledForUser,
 } from "@/lib/browserNotifications";
 import {
   isVoiceAgentAvailable,
@@ -16,6 +18,7 @@ import {
 } from "@/lib/agentVisibility";
 import Loader from "@/components/Loader";
 import Toast from "@/components/Toast";
+import { DASHBOARD_SHORTCUTS, defaultShortcuts, readShortcuts, shortcutLabel, writeShortcuts } from "@/lib/dashboardShortcuts";
 
 function SettingSwitch({ label, description, checked, onChange, disabled = false }) {
   return (
@@ -81,7 +84,9 @@ export default function SettingsPage() {
   const [reportFrequency, setReportFrequency] = useState("off");
   const [dashboardViewSwitcherEnabled, setDashboardViewSwitcherEnabled] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [shortcuts, setShortcuts] = useState(defaultShortcuts);
   const [notificationPermission, setNotificationPermission] = useState("default");
+  const [browserPushEnabled, setBrowserPushEnabled] = useState(false);
   const [agentAvailable, setAgentAvailable] = useState(false);
   const [agentVisible, setAgentVisible] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -139,6 +144,7 @@ export default function SettingsPage() {
       };
 
       setUser(currentUser);
+      setShortcuts(readShortcuts(currentUser.id));
       setTariff(nextEnergySettings.tariff);
       setVoltage(nextEnergySettings.voltage);
       setCurrency(nextEnergySettings.currency);
@@ -159,6 +165,7 @@ export default function SettingsPage() {
       setSavedNotificationSettings(nextNotificationSettings);
       setSavedDashboardSettings(nextDashboardSettings);
       setNotificationPermission(getNotificationPermission());
+      setBrowserPushEnabled(getNotificationPermission() === "granted" && isPushEnabledForUser(currentUser.id));
        setAgentAvailable(isVoiceAgentAvailable());
        setAgentVisible(isVoiceAgentVisible());
       setLoading(false);
@@ -168,6 +175,15 @@ export default function SettingsPage() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    const syncPushPreference = (event) => {
+      if (event.detail?.userId === user.id) setBrowserPushEnabled(Boolean(event.detail.enabled));
+    };
+    window.addEventListener('vikatech-push-preference-change', syncPushPreference);
+    return () => window.removeEventListener('vikatech-push-preference-change', syncPushPreference);
+  }, [user]);
 
   const energySettingsChanged =
     tariff !== savedEnergySettings.tariff ||
@@ -190,6 +206,34 @@ export default function SettingsPage() {
     dashboardViewSwitcherEnabled !== savedDashboardSettings.dashboardViewSwitcherEnabled;
 
   const reportSettingsChanged = reportFrequency !== savedReportFrequency;
+
+  const changeShortcut = (actionId, nextKey) => {
+    if (!user) return;
+    const updated = { ...shortcuts };
+    const previousKey = updated[actionId];
+    const conflictingAction = DASHBOARD_SHORTCUTS.find(({ id }) => id !== actionId && updated[id] === nextKey);
+    if (conflictingAction && nextKey) updated[conflictingAction.id] = previousKey || '';
+    updated[actionId] = nextKey;
+    setShortcuts(updated);
+    try {
+      writeShortcuts(user.id, updated);
+      setToast(conflictingAction && nextKey ? 'Shortcuts swapped to keep every key unique.' : 'Shortcut saved on this device.');
+    } catch {
+      setToast('Could not save shortcuts in this browser.');
+    }
+  };
+
+  const resetShortcuts = () => {
+    if (!user) return;
+    const defaults = defaultShortcuts();
+    setShortcuts(defaults);
+    try {
+      writeShortcuts(user.id, defaults);
+      setToast('Default shortcuts restored.');
+    } catch {
+      setToast('Could not save shortcuts in this browser.');
+    }
+  };
 
   const saveReportSettings = async (event) => {
     event.preventDefault();
@@ -344,7 +388,10 @@ export default function SettingsPage() {
       return;
     }
 
+    setPushEnabledForUser(user.id, true);
     const result = await ensurePushSubscription();
+    setBrowserPushEnabled(result.ok);
+    if (!result.ok) setPushEnabledForUser(user.id, false);
     setToast(
       result.ok
         ? "Browser notifications and background push are enabled."
@@ -382,6 +429,7 @@ export default function SettingsPage() {
             { id: "notifications", label: "Notifications", icon: Bell },
             { id: "reports", label: "Email reports", icon: Mail },
             { id: "voice", label: "Voice", icon: Mic },
+            { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -431,6 +479,39 @@ export default function SettingsPage() {
                 {savingDashboard ? "Saving..." : "Save Dashboard Settings"}
               </button>
             </form>
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
+              <div>
+                <h3 className="text-sm font-extrabold">Dashboard walkthrough</h3>
+                <p className="mt-1 text-xs text-text-muted">Revisit the main controls whenever you want a quick guide.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!user?.id) return;
+                  try { sessionStorage.setItem('vikatech:replay-tour', user.id); } catch {}
+                  window.location.assign('/');
+                }}
+                className="inline-flex min-h-10 items-center rounded-xl border border-border px-4 text-xs font-extrabold transition-colors hover:border-accent hover:bg-accent-bg focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                Replay walkthrough
+              </button>
+            </div>
+          </section>
+        )}
+
+        {activeTab === "shortcuts" && (
+          <section className="rounded-2xl border border-border bg-card p-4 shadow-lg sm:p-8">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-accent/20 bg-accent-bg text-accent"><Keyboard size={18} strokeWidth={2.5} /></div>
+                <div><h2 className="text-base font-extrabold">Keyboard shortcuts</h2><p className="mt-1 max-w-xl text-xs leading-relaxed text-text-muted">Use Ctrl + Shift + a number to open a page. Choose a number or turn a shortcut off. Changes save in this browser for your account.</p></div>
+              </div>
+              <button type="button" onClick={resetShortcuts} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border px-3 text-xs font-bold hover:bg-card-alt focus-visible:outline-2 focus-visible:outline-accent"><RotateCcw size={14} /> Reset</button>
+            </div>
+            <div className="mt-5 divide-y divide-border overflow-hidden rounded-xl border border-border">
+              {DASHBOARD_SHORTCUTS.map((action) => <div key={action.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:px-4"><label htmlFor={`shortcut-${action.id}`} className="text-xs font-extrabold">{action.label}</label><AppSelect id={`shortcut-${action.id}`} aria-label={`${action.label} shortcut`} value={shortcuts[action.id]} onChange={(event) => changeShortcut(action.id, event.target.value)} className="min-h-10 min-w-[170px] rounded-lg border border-border bg-background px-3 text-xs font-bold text-text"><option value="">Off</option>{Array.from({ length: 9 }, (_, index) => String(index + 1)).map((key) => <option key={key} value={key}>{shortcutLabel(key)}</option>)}</AppSelect></div>)}
+            </div>
+            <p className="mt-3 text-[11px] leading-relaxed text-text-muted">Shortcuts pause while you type in a field. On the dashboard, right-click to open the VikaTech menu; hold Shift while right-clicking to use the browser menu.</p>
           </section>
         )}
 
@@ -622,7 +703,7 @@ export default function SettingsPage() {
                   </p>
                   <p className="mt-0.5 text-[11px] font-semibold text-text-muted">
                     {notificationPermission === "granted"
-                      ? "Enabled on this device."
+                      ? browserPushEnabled ? "Enabled on this device." : "Browser permission allowed; background alerts are off on this device."
                       : notificationPermission === "denied"
                         ? "Blocked. Allow notifications in your browser settings."
                         : notificationPermission === "unsupported"
@@ -634,10 +715,10 @@ export default function SettingsPage() {
                   <button
                     type="button"
                     onClick={enableBrowserNotifications}
-                    disabled={notificationPermission === "granted"}
+                    disabled={browserPushEnabled}
                     className="min-h-[38px] rounded-xl border border-accent/30 bg-accent-bg px-3.5 py-2 text-[11px] font-extrabold text-accent transition hover:border-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {notificationPermission === "granted" ? "Enabled" : "Enable"}
+                    {browserPushEnabled ? "Enabled" : "Enable"}
                   </button>
                 </div>
               </div>

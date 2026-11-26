@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from "react";
 import { Download, X } from "lucide-react";
 import CursorGlow from "./CursorGlow";
 import LandingPageHeader from "./LandingPageHeader";
+import DashboardTools from "./DashboardTools";
 import LandingHero from "./LandingHero";
 import LandingAudience from "./LandingAudience";
 import LandingHardware from "./LandingHardware";
@@ -200,6 +201,7 @@ export default function LandingPage() {
         onInstallClick={handleInstallClick}
         appInstalled={appInstalled}
       />
+      <DashboardTools contextOnly />
       {flyItem && (
         <span
           key={flyItem.id}

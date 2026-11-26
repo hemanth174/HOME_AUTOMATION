@@ -63,7 +63,7 @@ export default function EnergyPanel({ dailyRows }) {
   const hasData = data.some((d) => d.kwh > 0);
 
   return (
-    <section aria-label="Energy usage" className="h-full w-full min-w-0 max-w-full overflow-hidden rounded-2xl border border-(--pg-line) bg-(--pg-card) p-4 sm:p-5">
+    <section data-tour="energy" aria-label="Energy usage" className="h-full w-full min-w-0 max-w-full overflow-hidden rounded-2xl border border-(--pg-line) bg-(--pg-card) p-4 sm:p-5">
       <div className="mb-1 flex min-w-0 flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <h2 className="text-base font-extrabold tracking-tight text-(--pg-ink)">Energy Usage</h2>

@@ -28,7 +28,7 @@ export default function OverviewCards({
   }, []);
 
   return (
-    <section aria-label="Overview" className="mb-5 border-b border-(--pg-line) pb-5">
+    <section data-tour="overview" aria-label="Overview" className="mb-5 border-b border-(--pg-line) pb-5">
       <div className="flex min-w-0 flex-col gap-4 px-1 py-1 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
         <div className="min-w-0 lg:max-w-[42%]">
           <h1 className="truncate text-xl font-extrabold tracking-tight text-(--pg-ink) sm:text-2xl" title={`${greeting}, ${firstName}`}>

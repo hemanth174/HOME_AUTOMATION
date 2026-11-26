@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { Bell, CheckCheck, X } from "lucide-react";
+import { Bell, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import {
   ensurePushSubscription,
   getNotificationPermission,
+  isPushEnabledForUser,
   playNotificationTone,
+  setPushEnabledForUser,
+  unsubscribePushSubscription,
 } from "@/lib/browserNotifications";
 
 const ANNOUNCEMENT_READ_KEY = "vikatech_read_feature_announcements";
@@ -48,8 +51,11 @@ export default function FeatureNotificationBell({
   );
   const [readIds, setReadIds] = useState([]);
   const [pushNote, setPushNote] = useState("");
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [isPushBusy, setIsPushBusy] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const toastSeen = useRef(new Set());
+  const pushActionInProgress = useRef(false);
   const activeInstance = Boolean(mobile) === isMobileViewport;
 
   useEffect(() => {
@@ -71,6 +77,7 @@ export default function FeatureNotificationBell({
   useEffect(() => {
     if (!open) return;
     setReadIds(readAnnouncementIds());
+    setPermission(getNotificationPermission());
   }, [open]);
 
   useEffect(() => {
@@ -195,15 +202,36 @@ export default function FeatureNotificationBell({
   }, [activeInstance]);
 
   useEffect(() => {
-    if (!activeInstance || !user || permission !== "granted") return;
+    if (!activeInstance || !user) return undefined;
+    if (pushActionInProgress.current) return undefined;
+    if (permission !== "granted" || !isPushEnabledForUser(user.id)) {
+      setPushEnabled(false);
+      return undefined;
+    }
+    let active = true;
+    setIsPushBusy(true);
     ensurePushSubscription().then((result) => {
-      if (!result.ok && result.reason === "vapid-public-key-missing") {
-        setPushNote("Push service is not configured yet.");
-      } else if (!result.ok && result.reason === "push-unsupported") {
-        setPushNote("This browser does not support background push.");
-      }
+      if (!active) return;
+      setPushEnabled(result.ok);
+      setIsPushBusy(false);
+      if (!result.ok) setPushNote(`Background push unavailable: ${result.reason}.`);
+    }).catch(() => {
+      if (!active) return;
+      setPushEnabled(false);
+      setIsPushBusy(false);
+      setPushNote("Background push could not connect.");
     });
+    return () => { active = false; };
   }, [activeInstance, user, permission]);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    const syncPreference = (event) => {
+      if (event.detail?.userId === user.id) setPushEnabled(Boolean(event.detail.enabled && getNotificationPermission() === 'granted'));
+    };
+    window.addEventListener('vikatech-push-preference-change', syncPreference);
+    return () => window.removeEventListener('vikatech-push-preference-change', syncPreference);
+  }, [user]);
 
   useEffect(() => {
     if (
@@ -214,14 +242,14 @@ export default function FeatureNotificationBell({
       return undefined;
     }
     const handleMessage = (event) => {
-      if (event.data?.type === "vikatech-push-resubscribe") {
+      if (event.data?.type === "vikatech-push-resubscribe" && user && isPushEnabledForUser(user.id)) {
         ensurePushSubscription();
       }
     };
     navigator.serviceWorker.addEventListener("message", handleMessage);
     return () =>
       navigator.serviceWorker.removeEventListener("message", handleMessage);
-  }, [activeInstance]);
+  }, [activeInstance, user]);
 
   useEffect(() => {
     if (!activeInstance || !open || !user) return;
@@ -242,16 +270,38 @@ export default function FeatureNotificationBell({
       .then(() => {});
   }, [activeInstance, open, user, notifications]);
 
-  const handleEnable = async () => {
-    if (onEnableNotifications) await onEnableNotifications();
-    const next = getNotificationPermission();
-    setPermission(next);
-    if (next === "granted") {
-      playNotificationTone();
+  const handlePushToggle = async () => {
+    if (!user || isPushBusy) return;
+    pushActionInProgress.current = true;
+    setIsPushBusy(true);
+    try {
+      if (pushEnabled) {
+        setPushEnabledForUser(user.id, false);
+        await unsubscribePushSubscription();
+        setPushEnabled(false);
+        setPushNote("Background alerts are off on this device. Browser permission remains allowed.");
+        return;
+      }
+
+      if (onEnableNotifications) await onEnableNotifications();
+      const next = getNotificationPermission();
+      setPermission(next);
+      if (next !== "granted") {
+        setPushNote(next === "denied" ? "Allow notifications in your browser settings first." : "Browser notification permission was not granted.");
+        return;
+      }
+      setPushEnabledForUser(user.id, true);
       const result = await ensurePushSubscription();
-      setPushNote(
-        result.ok ? "" : `Background push unavailable: ${result.reason}.`,
-      );
+      setPushEnabled(result.ok);
+      setPushNote(result.ok ? "" : `Background push unavailable: ${result.reason}.`);
+      if (!result.ok) setPushEnabledForUser(user.id, false);
+    } catch {
+      setPushEnabled(false);
+      setPushEnabledForUser(user.id, false);
+      setPushNote("Background alerts could not be updated. Try again.");
+    } finally {
+      pushActionInProgress.current = false;
+      setIsPushBusy(false);
     }
   };
 
@@ -290,6 +340,7 @@ export default function FeatureNotificationBell({
         className={`header-icon-sweep relative flex items-center justify-center rounded-full border border-border bg-card text-text-muted transition-all hover:bg-accent-bg hover:text-accent hover:border-accent/30 ${mobile ? "h-9 w-9" : "h-9 w-9"}`}
         aria-label={`Notifications${combinedUnread ? `, ${combinedUnread} unread` : ""}`}
         aria-expanded={open}
+        data-tour="notifications"
       >
         <Bell size={15} className={combinedUnread > 0 ? "-translate-x-0.5 translate-y-0.5" : ""} />
         {combinedUnread > 0 && (
@@ -371,26 +422,15 @@ export default function FeatureNotificationBell({
                 {pushNote}
               </p>
             )}
-            {permission === "granted" ? (
-              <p className="flex items-center gap-1.5 px-2 text-[10px] font-semibold text-text-muted">
-                <CheckCheck size={12} className="text-(--pg-success)" />
-                Browser notifications are enabled on this device.
-              </p>
-            ) : permission === "denied" || permission === "unsupported" ? (
-              <p className="px-2 text-[10px] font-semibold leading-4 text-text-muted">
-                {permission === "unsupported"
-                  ? "Browser notifications are not supported here."
-                  : "Browser notifications are blocked. Allow them in your browser settings."}
-              </p>
-            ) : (
-              <button
-                type="button"
-                onClick={handleEnable}
-                className="w-full rounded-xl border border-accent/30 bg-accent-bg px-3 py-2.5 text-left text-[11px] font-extrabold text-accent transition hover:border-accent/60"
-              >
-                Enable browser notifications and background alerts
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-input px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="text-[11px] font-extrabold text-text">Background alerts on this device</p>
+                <p className="mt-0.5 text-[10px] leading-4 text-text-muted">{permission === "denied" ? "Blocked in browser settings" : permission === "unsupported" ? "Not supported in this browser" : pushEnabled ? "On, even when the app is closed" : "Off · turn on to receive browser alerts"}</p>
+              </div>
+              <button type="button" role="switch" aria-label="Background alerts on this device" aria-checked={pushEnabled} disabled={isPushBusy || !user || permission === "denied" || permission === "unsupported"} onClick={handlePushToggle} className={`relative h-8 w-14 shrink-0 rounded-full border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50 ${pushEnabled ? "border-(--pg-control-on) bg-(--pg-control-on)" : "border-toggle-track bg-toggle-track"}`}>
+                <span className={`absolute top-1/2 h-6 w-6 -translate-y-1/2 rounded-full bg-white shadow transition-all ${pushEnabled ? "left-[calc(100%-1.75rem)]" : "left-1"}`}>{isPushBusy && <span className="absolute inset-1 animate-spin rounded-full border-2 border-accent/25 border-t-accent" />}</span>
               </button>
-            )}
+            </div>
           </div>
         </div>
       )}

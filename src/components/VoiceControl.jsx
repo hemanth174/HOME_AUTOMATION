@@ -398,7 +398,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
   return (
     <>
       {/* Language Selector Pill */}
-      <div onPointerDown={startVoiceDrag} style={voiceFloatingStyle} className={`fixed bottom-[92px] right-7 max-md:bottom-[148px] max-md:right-6 bg-card/85 backdrop-blur-md px-2 py-1 rounded-full border border-border shadow-[0_4px_16px_rgba(0,0,0,0.3)] z-[200] flex gap-1 items-center select-none font-bold text-[10px] tracking-wider touch-none ${voiceDragging ? 'transition-none' : 'transition-all duration-300'}`}>
+      <div onPointerDown={startVoiceDrag} style={voiceFloatingStyle} className={`fixed bottom-[92px] right-40 max-md:bottom-[148px] bg-card/85 backdrop-blur-md px-2 py-1 rounded-full border border-border shadow-[0_4px_16px_rgba(0,0,0,0.3)] z-[200] flex gap-1 items-center select-none font-bold text-[10px] tracking-wider touch-none ${voiceDragging ? 'transition-none' : 'transition-all duration-300'}`}>
         <button
           onClick={() => setSelectedLang('en-US')}
           aria-label="Use English"
@@ -456,7 +456,7 @@ export default function VoiceControl({ devices: propDevices, boards: propBoards,
           toggleListening();
         }}
         style={voicePosition ? { left: `${voicePosition.left}px`, top: `${voicePosition.top}px`, right: 'auto', bottom: 'auto', touchAction: 'none' } : { touchAction: 'none' }}
-        className={`fixed bottom-7 right-7 max-md:bottom-[calc(4.75rem_+_env(safe-area-inset-bottom))] max-md:right-5 w-14 h-14 rounded-full border-none bg-gradient-to-tr from-accent to-[#e2cc89] text-[var(--btn-text)] cursor-grab active:cursor-grabbing z-[200] shadow-[0_6px_24px_var(--accent-glow)] shadow-gold-glow flex items-center justify-center select-none group ${listening ? 'text-[var(--btn-text)]' : 'voice-agent-idle'}`}
+        className={`fixed bottom-7 right-40 max-md:bottom-[calc(4.75rem_+_env(safe-area-inset-bottom))] w-14 h-14 rounded-full border-none bg-gradient-to-tr from-accent to-[#e2cc89] text-[var(--btn-text)] cursor-grab active:cursor-grabbing z-[200] shadow-[0_6px_24px_var(--accent-glow)] shadow-gold-glow flex items-center justify-center select-none group ${listening ? 'text-[var(--btn-text)]' : 'voice-agent-idle'}`}
         title="Voice Control"
       >
         {listening ? (

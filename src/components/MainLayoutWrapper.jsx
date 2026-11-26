@@ -9,6 +9,8 @@ import Loader from './Loader';
 import LocalModeBanner from './LocalModeBanner';
 import AccessForbidden from './AccessForbidden';
 import Navbar from './Navbar';
+import DashboardTools from './DashboardTools';
+import DashboardGuidance from './DashboardGuidance';
 import useLocalConnection from '@/hooks/useLocalConnection';
 import { checkInternet } from '@/lib/netCheck';
 import { isAdminEmail } from '@/lib/adminEmails';
@@ -434,6 +436,8 @@ export default function MainLayoutWrapper({ children, className = "" }) {
         />
       )}
       {children}
+      {!fullWidthPage && cleanPath !== '/local' && user && <DashboardTools userId={user.id} />}
+      {!fullWidthPage && cleanPath === '/' && user && <DashboardGuidance userId={user.id} pathname={cleanPath} />}
       {!fullWidthPage && <NotificationEngine user={user} />}
       <GlobalToast />
     </div>

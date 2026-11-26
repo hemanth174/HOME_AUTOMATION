@@ -30,7 +30,7 @@ export default function NavbarMobileMenu({
 }) {
   return (
     <>
-      <nav className="fixed bottom-0 left-0 right-0 h-16 border-t border-border bg-header/90 backdrop-blur-lg flex items-center justify-around px-2 z-40 md:hidden select-none">
+      <nav aria-label="Mobile navigation" className="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-center gap-1 border-t border-border bg-header/90 px-2 backdrop-blur-lg select-none md:hidden">
         {bottomBarLinks.map((link) => {
           const active = pathname === link.href && !mobileOpen;
           const Icon = link.icon;
@@ -47,24 +47,29 @@ export default function NavbarMobileMenu({
                 setMobileOpen(false);
               }}
               aria-current={active ? "page" : undefined}
-              className={`flex flex-col items-center justify-center gap-1 flex-1 rounded-xl py-1 transition-colors ${isCloudDisabled ? "opacity-40 cursor-not-allowed" : active ? "bg-accent-bg text-accent" : "text-text-muted hover:bg-accent-bg/60 hover:text-accent"}`}
+              data-tour-nav={link.href}
+              className={`flex min-h-[52px] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl transition-[background-color,color,transform] duration-150 active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent ${isCloudDisabled ? "cursor-not-allowed opacity-40" : active ? "bg-accent-bg text-accent" : "text-text-muted hover:bg-accent-bg/70 hover:text-accent active:bg-accent-bg active:text-accent"}`}
             >
-              <Icon size={18} className="stroke-[2.5px]" />
-              <span className="text-[9px] font-black tracking-tight truncate px-0.5">
+              <span className="flex h-6 w-6 items-center justify-center"><Icon size={20} strokeWidth={2.25} aria-hidden="true" /></span>
+              <span className="max-w-full truncate px-0.5 text-[10px] font-black leading-tight tracking-tight">
                 {link.href === "/" ? "Home" : link.label}
               </span>
             </Link>
           );
         })}
         <button
+          type="button"
+          aria-label={mobileOpen ? "Close menu" : "Open menu"}
+          aria-expanded={mobileOpen}
+          aria-controls="mobile-navigation-sheet"
           onClick={() => {
             setCurrentY(0);
             setMobileOpen(!mobileOpen);
           }}
-          className={`flex flex-col items-center justify-center gap-1 flex-1 py-1 transition-all cursor-pointer border-none bg-transparent ${mobileOpen ? "text-accent" : "text-text-muted"}`}
+          className={`flex min-h-[52px] min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-xl border-none transition-[background-color,color,transform] duration-150 active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent ${mobileOpen ? "bg-accent-bg text-accent" : "bg-transparent text-text-muted hover:bg-accent-bg/70 hover:text-accent active:bg-accent-bg active:text-accent"}`}
         >
-          <Menu size={18} className="stroke-[2.5px]" />
-          <span className="text-[9px] font-black tracking-tight">Menu</span>
+          <span className="flex h-6 w-6 items-center justify-center"><Menu size={20} strokeWidth={2.25} aria-hidden="true" /></span>
+          <span className="text-[10px] font-black leading-tight tracking-tight">Menu</span>
         </button>
       </nav>
 
@@ -76,6 +81,7 @@ export default function NavbarMobileMenu({
         className={`fixed inset-0 bg-black/70 backdrop-blur-xs z-40 md:hidden transition-opacity duration-300 ${mobileOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}
       />
       <div
+        id="mobile-navigation-sheet"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}
